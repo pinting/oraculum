@@ -1,103 +1,144 @@
+use std::{collections::HashMap, rc::Rc};
+use base64::{Engine, engine::general_purpose::STANDARD};
+
+pub struct Vocabulary {
+    token_to_id: HashMap<String, u32>,
+    id_to_token: HashMap<u32, String>,
+}
+
+impl Vocabulary {
+    pub fn new() -> Self {
+        Self {
+            token_to_id: HashMap::new(),
+            id_to_token: HashMap::new(),
+        }
+    }
+
+    pub fn load(&mut self, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        let text = std::str::from_utf8(data)?;
+
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            
+            if parts.len() != 2 {
+                continue;
+            }
+
+            let (raw_token, raw_id) = (parts[0], parts[1]);
+
+            let Ok(token_bytes) = STANDARD.decode(raw_token) else { continue };
+            let Ok(token) = String::from_utf8(token_bytes) else { continue };
+            let Ok(id) = raw_id.parse::<u32>() else { continue };
+            
+            self.token_to_id.insert(token.clone(), id);
+            self.id_to_token.insert(id, token);
+        }
+
+        Ok(())
+    }
+
+    pub fn get_token(&self, id: u32) -> Option<String> {
+        self.id_to_token.get(&id).cloned()
+    }
+
+    pub fn get_id(&self, token: &str) -> Option<u32> {
+        self.token_to_id.get(token).copied()
+    }
+}
+
+enum Route {
+    Dead,
+    Alive,
+    End
+}
+
+enum Head {
+    Constant(Constant),
+}
+
 trait Node {
-    fn render(&self);
+    fn routes(&self) -> Vec<u8>;
+    fn step(&self, token_id: u8) -> Option<Route>;
+    fn next(&self) -> Vec<Head>;
+}
+
+impl Node for Head {
+    fn routes(&self) -> Vec<u8> {
+        match self {
+            Head::Constant(n) => n.routes(),
+        }
+    }
+
+    fn step(&self, token_id: u8) -> Option<Route> {
+        match self {
+            Head::Constant(n) => n.step(token_id),
+        }
+    }
+
+    fn next(&self) -> Vec<Head> {
+        match self {
+            Head::Constant(n) => n.next(),
+        }
+    }
 }
 
 struct Constant {
-    value: String,
+    constant: String,
+    vocabulary: Rc<Vocabulary>,
 }
 
 impl Constant {
-    fn new(value: String) -> Self {
-        Constant { value }
+    fn new(vocabulary: Rc<Vocabulary>, constant: String) -> Self {
+        Constant { vocabulary, constant }
     }
 }
 
 impl Node for Constant {
-    fn render(&self) {
-        println!("Constant: {}", self.value);
+    fn routes(&self) -> Vec<u8> {
+        todo!()
     }
-}
 
-struct RegularExpression {
-    pattern: String,
-    case_sensitive: bool,
-}
-
-impl RegularExpression {
-    fn new(pattern: String, case_sensitive: bool) -> Self {
-        RegularExpression { pattern, case_sensitive }
+    fn step(&self, token_id: u8) -> Option<Route> {
+        todo!()
     }
-}
 
-impl Node for RegularExpression {
-    fn render(&self) {
-        println!("Regex: {} (case: {})", self.pattern, self.case_sensitive);
-    }
-}
-
-struct Space {
-    count: i32,
-}
-
-impl Space {
-    fn new(count: i32) -> Self {
-        Space { count }
-    }
-}
-
-impl Node for Space {
-    fn render(&self) {
-        println!("Space: {}", self.count);
-    }
-}
-
-enum NodeType {
-    Constant(Constant),
-    RegularExpression(RegularExpression),
-    Space(Space),
-}
-
-impl Node for NodeType {
-    fn render(&self) {
-        match self {
-            NodeType::Constant(n) => n.render(),
-            NodeType::RegularExpression(n) => n.render(),
-            NodeType::Space(n) => n.render(),
-        }
+    fn next(&self) -> Vec<Head> {
+        todo!()
     }
 }
 
 struct Thunk<F>
 where
-    F: FnOnce() -> Vec<NodeType>,
+    F: FnOnce(Rc<Vocabulary>) -> Vec<Head>,
 {
     generator: Option<F>,
 }
 
 impl<F> Thunk<F>
 where
-    F: FnOnce() -> Vec<NodeType>,
+    F: FnOnce(Rc<Vocabulary>) -> Vec<Head>,
 {
     fn new(generator: F) -> Self {
         Thunk { generator: Some(generator) }
     }
 
-    fn execute(&mut self) -> Vec<NodeType> {
-        self.generator.take().unwrap()()
+    fn execute(&mut self, vocabulary: Rc<Vocabulary>) -> Vec<Head> {
+        self.generator.take().unwrap()(vocabulary)
     }
 }
 
 fn main() {
-    let mut thunk = Thunk::new(|| {
+    let vocabulary = Rc::new(Vocabulary::new());
+
+    let mut thunk = Thunk::new(|vocabulary| {
         vec![
-            NodeType::Constant(Constant::new("hello".to_string())),
-            NodeType::RegularExpression(RegularExpression::new("[a-z]+".to_string(), true)),
-            NodeType::Space(Space::new(5)),
+            Head::Constant(Constant::new(vocabulary, "hello".to_string())),
         ]
     });
 
-    let nodes = thunk.execute();
+    let nodes = thunk.execute(vocabulary);
+
     for node in &nodes {
-        node.render();
+        continue
     }
 }
