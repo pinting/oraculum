@@ -121,7 +121,7 @@ fn main() {
 
         io::stdin().read_line(&mut buffer).unwrap();
 
-        let c = buffer.trim();
+        let c = buffer..trim_matches('\n');
         let token_id = vocabulary.token_to_id.get(c);
 
         if let Some(&id) = token_id {

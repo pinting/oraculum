@@ -1,3 +1,7 @@
+/*
+ * DRAFT of the Aho-Corasick algorithm for learning purposes
+ */
+
 package main
 
 import (

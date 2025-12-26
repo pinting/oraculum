@@ -165,7 +165,7 @@ fn main() {
 
         io::stdin().read_line(&mut buffer).unwrap();
 
-        let c = buffer.trim();
+        let c = buffer..trim_matches('\n');
 
         let next_state = rx.transition_bytes(state, c.as_bytes());
 

@@ -1,5 +1,5 @@
 use aho_corasick::AhoCorasick;
-use std::{collections::HashMap, io, rc::Rc, time::Instant};
+use std::{collections::HashMap, io::{self, Write}, rc::Rc, time::Instant};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::fs;
 
@@ -105,10 +105,10 @@ impl TokenLattice {
             }
 
             let mut i = latice.heads[u];
-            
+
             while i != u32::MAX {
                 let edge = &latice.edges[i as usize];
-                
+
                 path.push(edge.token_id);
                 dfs(latice, edge.target as usize, length, path, vocabulary);
                 path.pop();
@@ -118,6 +118,23 @@ impl TokenLattice {
         }
 
         dfs(self, 0, length, &mut current_path, vocabulary);
+    }
+
+    fn get_routes(&self, position: usize, vocabulary: &Vocabulary) -> Vec<(Rc<str>, u32, usize)> {
+        let mut routes = Vec::new();
+        let mut i = self.heads[position];
+
+        while i != u32::MAX {
+            let edge = &self.edges[i as usize];
+
+            if let Some(token) = vocabulary.id_to_token.get(&edge.token_id) {
+                routes.push((token.clone(), edge.token_id, edge.target));
+            }
+
+            i = edge.next_idx;
+        }
+
+        routes
     }
 }
 
@@ -143,15 +160,15 @@ fn main() {
     let tokens: Vec<&str> = vocabulary.tokens.iter().map(|v|v.as_ref()).collect();
     let tokens = &tokens;
 
-    println!("Read & loaded vocabulary in {:?}", start.elapsed());
+    println!("Loaded vocabulary in {:?}", start.elapsed());
 
     let start = Instant::now();
     let ac = AhoCorasick::builder()
         .build(tokens)
         .unwrap();
 
-    println!("Built Aho-Corasick graph in {:?}", start.elapsed());
-    println!("Enter input text: ");
+    println!("Built graph in {:?}", start.elapsed());
+    println!("Define constant: ");
 
     let mut input = String::new();
 
@@ -160,7 +177,7 @@ fn main() {
         .expect("Failed to read line");
 
     let start = Instant::now();
-    let input = input.trim();
+    let input = input.trim_matches('\n');
     let mut lattice = TokenLattice::new(input.len());
 
     for mat in ac.find_overlapping_iter(input) {
@@ -174,10 +191,57 @@ fn main() {
     }
 
     println!("Constructed the token lattice in {:?}", start.elapsed());
-    println!("Press any key to print the lattice");
 
-    std::io::stdin().read_line(&mut String::new()).unwrap();
+    let length = input.len();
+    let mut position = 0;
+    let mut selected = String::new();
 
-    lattice.print(&vocabulary, input.len());
+    loop {
+        println!("Current: `{}`", selected);
 
+        let routes = lattice.get_routes(position, &vocabulary);
+
+        println!("Number of possible transitions: {}", routes.len());
+
+        let tokens: Vec<&str> = routes.iter().map(|(t, _, _)| t.as_ref()).collect();
+
+        println!("Possible next tokens: {:?}", tokens);
+
+        if routes.is_empty() {
+            if position == length {
+                println!("Reached the end of the lattice!");
+            } else {
+                println!("No valid continuations, resetting");
+            }
+
+            position = 0;
+
+            selected.clear();
+
+            continue;
+        }
+
+        print!("Input: ");
+
+        io::stdout().flush().unwrap();
+
+        let mut buffer = String::new();
+
+        io::stdin().read_line(&mut buffer).unwrap();
+
+        let c = buffer.trim_matches('\n');
+        let found = routes.iter().find(|(token, _, _)| token.as_ref() == c);
+
+        if let Some((token, _, target)) = found {
+            selected.push_str(token.as_ref());
+
+            position = *target;
+        } else {
+            println!("Invalid token, resetting");
+
+            position = 0;
+
+            selected.clear();
+        }
+    }
 }
