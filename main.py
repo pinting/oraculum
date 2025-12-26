@@ -2,10 +2,11 @@ from typing import Any
 from llama_cpp import Llama, LogitsProcessorList
 
 from vocabulary import serialize_vocabulary
-from logits import OraculumLogitsProcessor
+from processor import LogitsProcessor
 
 def main() -> None:
     model_path: str = "./models/gemma-3-4b-it-Q8_0.gguf"
+    vocabulary_path: str = "./vocabulary.tiktoken"
 
     print(f"Loading model from {model_path}...")
 
@@ -19,10 +20,6 @@ def main() -> None:
 
     print("Model loaded successfully!")
 
-    vocabulary_path: str = "vocabulary.tiktoken"
-
-    print(f"Serializing vocabulary")
-
     raw_vocabulary: str = serialize_vocabulary(model)
 
     with open(vocabulary_path, 'w', encoding='utf-8') as f:
@@ -30,8 +27,8 @@ def main() -> None:
 
     print(f"Vocabulary exported successfully!")
 
-    custom_processor: OraculumLogitsProcessor = OraculumLogitsProcessor()
-    logits_processor: LogitsProcessorList = LogitsProcessorList([custom_processor])
+    processor: LogitsProcessor = LogitsProcessor()
+    logits_processor: LogitsProcessorList = LogitsProcessorList([processor])
 
     prompt: str = "Hello, how are you?"
 

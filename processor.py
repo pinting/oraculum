@@ -1,7 +1,7 @@
 from numpy.typing import NDArray
 import numpy as np
 
-class OraculumLogitsProcessor:
+class LogitsProcessor:
     def __call__(
         self,
         input_ids: NDArray[np.intc],
