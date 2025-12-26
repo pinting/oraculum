@@ -96,8 +96,34 @@ fn main() {
 
     println!("Built outlines vocabulary in {:?}", start.elapsed());
 
+    let default_pattern = "monday|tuesday|wednesday|thursday|friday";
+
+    print!("Enter regex pattern (press Enter for default weekdays): ");
+
+    io::stdout().flush().unwrap();
+
+    let mut pattern_input = String::new();
+
+    io::stdin().read_line(&mut pattern_input).unwrap();
+
+    let pattern = pattern_input.trim_matches('\n');
+    let pattern = if pattern.is_empty() { default_pattern } else { pattern };
+
     let start = Instant::now();
-    let index = Index::new("monday|tuesday|wednesday|thursday|friday", &v).unwrap();
+    let index_result = Index::new(pattern, &v);
+
+    let index = match index_result {
+        Ok(idx) => {
+            println!("Using pattern: {}", pattern);
+
+            idx
+        }
+        Err(e) => {
+            println!("Invalid regex: {:?}. Using default pattern: {}", e, default_pattern);
+
+            Index::new(default_pattern, &v).unwrap()
+        }
+    };
 
     println!("Built index in {:?}", start.elapsed());
 
