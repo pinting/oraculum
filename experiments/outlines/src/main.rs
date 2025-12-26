@@ -2,6 +2,7 @@ use outlines_core::*;
 use outlines_core::prelude::{Index};
 use std::io::{self, Write};
 use std::collections::HashMap;
+use std::time::Instant;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::rc::Rc;
 use std::fs;
@@ -65,6 +66,7 @@ fn get_routes(index: &Index, state: &u32, vocabulary: &Vocabulary) -> (Vec<Rc<st
 }
 
 fn main() {
+    let start = Instant::now();
     let result = fs::read("../../vocabulary.tiktoken");
 
     let Ok(data) = result else {
@@ -82,15 +84,22 @@ fn main() {
         return
     }
 
-    let eos_token_id = 26;
+    println!("Loaded vocabulary in {:?}", start.elapsed());
 
+    let start = Instant::now();
+    let eos_token_id = 26;
     let mut v = prelude::Vocabulary::new(eos_token_id);
 
     for (token, &id) in &vocabulary.token_to_id {
         v.try_insert(token.as_ref(), id).unwrap();
     }
 
+    println!("Built outlines vocabulary in {:?}", start.elapsed());
+
+    let start = Instant::now();
     let index = Index::new("monday|tuesday|wednesday|thursday|friday", &v).unwrap();
+
+    println!("Built index in {:?}", start.elapsed());
 
     let mut state = index.initial_state();
     let mut input = String::new();
@@ -121,7 +130,7 @@ fn main() {
 
         io::stdin().read_line(&mut buffer).unwrap();
 
-        let c = buffer..trim_matches('\n');
+        let c = buffer.trim_matches('\n');
         let token_id = vocabulary.token_to_id.get(c);
 
         if let Some(&id) = token_id {
