@@ -1,0 +1,8 @@
+[package]
+name = "experiment-toktrie"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+derivre = "0.3"
+toktrie = { git = "https://github.com/guidance-ai/llguidance.git", branch = "main" }
