@@ -1,7 +1,13 @@
 [package]
 name = "oraculum"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[lib]
+name = "oraculum"
+crate-type = ["cdylib"]
 
 [dependencies]
 base64 = "0.22.1"
+numpy = "0.22"
+pyo3 = { version = "0.22", features = ["extension-module"] }
