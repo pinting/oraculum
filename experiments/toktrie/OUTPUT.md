@@ -1,4 +1,4 @@
-# Output of the outlines experiment
+# Output of the toktrie experiment
 
 ```
 Loaded vocabulary in 1.016819421s

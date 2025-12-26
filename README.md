@@ -1,5 +1,7 @@
 # oraculum
 
+Text to SQL LLM enforcement research.
+
 **Warning:** This is a proof of concept and work in progress, currently at the experimenting stage!
 
 ## Setup
@@ -24,7 +26,7 @@ cd experiments/toktrie && cargo run
 
 ## Experiments
 
-Four constrained generation approaches were tested using Gemma 3 vocabulary:
+Four constrained generation approaches were tested using the Gemma 3 vocabulary:
 
 - **Aho-Corasick**: Token lattice approach for breaking up constants into a Directed Acyclic Graph. The initial (one-time) graph build time (against the fixed vocabulary) takes 2.23 s with extremely fast lattice construction (102 µs for 16 characters).
 - **derivre**: Pure regex-based matching with derivative automata. Slow because of the exhaustive token matching (against the complete vocabulary of 255k at each step).
