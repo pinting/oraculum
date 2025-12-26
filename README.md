@@ -28,10 +28,10 @@ cd experiments/toktrie && cargo run
 
 Four constrained generation approaches were tested using the Gemma 3 vocabulary:
 
-- **Aho-Corasick**: Token lattice approach for breaking up constants into a Directed Acyclic Graph. The initial (one-time) graph build time (against the fixed vocabulary) takes 2.23 s with extremely fast lattice construction (102 µs for 16 characters).
-- **derivre**: Pure regex-based matching with derivative automata. Slow because of the exhaustive token matching (against the complete vocabulary of 255k at each step).
-- **toktrie**: Hybrid approach combining derivre and toktrie. 261 µs build time and moderate efficiency through trie pruning (300-600 matches at each step). Its weakness is the still relatively high transition attempts compared to index-based methods.
-- **outlines**: Index-based regex matching with precomputed token patterns. Strengths include exceptional runtime efficiency (1-18 transitions per step). Its obvious weakness is the higher upfront cost (1.12s index build) and increased memory usage for storing the index.
+- **Aho-Corasick**: Token lattice approach for breaking up text into a Directed Acyclic Graph (forming all possible routes to build the text using the given vocabulary). The initial (one-time) build time (against the vocabulary) takes 2.23 s with extremely fast lattice construction (102 µs for 16 characters). Obviously no regular expression support, but good for constant values!
+- **derivre**: Pure regex-based matching with derivative automata. Slow because of the exhaustive token matching (255k matches per step).
+- **toktrie**: Hybrid approach combining derivre and toktrie. 261 µs build time and moderate efficiency through trie pruning (300-600 matches per step). Its weakness is the still relatively high transition attempts compared to index-based methods.
+- **outlines**: Index-based regex matching with precomputed token patterns. Its strength is its exceptional runtime efficiency (1-18 matches per step). The obvious weakness is the higher upfront cost (1.12s index build) and increased memory usage for storing the index.
 
 ## License
 
