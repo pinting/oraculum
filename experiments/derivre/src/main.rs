@@ -1,6 +1,18 @@
 use derivre::RegexBuilder;
 use std::io::{self, Write};
 
+fn get_routes(rx: &mut derivre::Regex, state: derivre::StateID, vocabulary: &Vec<&str>) -> Vec<String> {
+    vocabulary
+        .iter()
+        .filter(|&&token| {
+            let next = rx.transition_bytes(state, token.as_bytes());
+            
+            !next.is_dead()
+        })
+        .map(|&s| s.to_string())
+        .collect()
+}
+
 fn main() {
     let mut builder = RegexBuilder::new();
     let expr = builder.mk_regex("monday|tuesday|wednesday|thursday|friday").unwrap();
@@ -57,16 +69,4 @@ fn main() {
             input.push_str(c);
         }
     }
-}
-
-fn get_routes(rx: &mut derivre::Regex, state: derivre::StateID, vocabulary: &Vec<&str>) -> Vec<String> {
-    vocabulary
-        .iter()
-        .filter(|&&token| {
-            let next = rx.transition_bytes(state, token.as_bytes());
-            
-            !next.is_dead()
-        })
-        .map(|&s| s.to_string())
-        .collect()
 }
