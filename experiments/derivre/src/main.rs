@@ -2,6 +2,7 @@ use derivre::RegexBuilder;
 use std::fs;
 use std::io::{self, Write};
 use std::collections::HashMap;
+use std::time::Instant;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::rc::Rc;
 
@@ -71,6 +72,7 @@ fn get_routes(rx: &mut derivre::Regex, state: derivre::StateID, tokens: &[Rc<str
 }
 
 fn main() {
+    let start = Instant::now();
     let result = fs::read("../../vocabulary.tiktoken");
 
     let Ok(data) = result else {
@@ -93,9 +95,15 @@ fn main() {
         .map(|c| Rc::from(c.to_string()))
         .collect();
 
+    println!("Loaded vocabulary in {:?}", start.elapsed());
+
+    let start = Instant::now();
     let mut builder = RegexBuilder::new();
     let expr = builder.mk_regex("monday|tuesday|wednesday|thursday|friday").unwrap();
     let mut rx = builder.into_regex(expr);
+
+    println!("Built regex in {:?}", start.elapsed());
+
     let mut state = rx.initial_state();
     let mut input = String::new();
     

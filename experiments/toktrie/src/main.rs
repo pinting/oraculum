@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::rc::Rc;
+use std::time::Instant;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use toktrie::{
     recognizer::{FunctionalRecognizer, StackRecognizer},
@@ -107,6 +108,7 @@ fn get_routes(
 }
 
 fn main() {
+    let start = Instant::now();
     let result = fs::read("../../vocabulary.tiktoken");
 
     let Ok(data) = result else {
@@ -129,13 +131,21 @@ fn main() {
         .map(|c| Rc::from(c.to_string()))
         .collect();
 
+    println!("Loaded vocabulary in {:?}", start.elapsed());
+
+    let start = Instant::now();
     let mut builder = RegexBuilder::new();
     let expr = builder.mk_regex("monday|tuesday|wednesday|thursday|friday").unwrap();
     let mut rx = builder.into_regex(expr);
 
+    println!("Built regex in {:?}", start.elapsed());
+
+    let start = Instant::now();
     let words: Vec<Vec<u8>> = tokens.iter().map(|s| s.as_bytes().to_vec()).collect();
     let info = TokRxInfo::new(tokens.len() as u32, 0);
     let trie = TokTrie::from(&info, &words);
+
+    println!("Built trie in {:?}", start.elapsed());
 
     let mut state = rx.initial_state();
     let mut input = String::new();
@@ -165,7 +175,7 @@ fn main() {
 
         io::stdin().read_line(&mut buffer).unwrap();
 
-        let c = buffer..trim_matches('\n');
+        let c = buffer.trim_matches('\n');
 
         let next_state = rx.transition_bytes(state, c.as_bytes());
 
