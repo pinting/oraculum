@@ -100,10 +100,12 @@ The DFS ordering ensures all descendants are contiguous in memory, so `p += subt
 
 The derivre library implements Brzozowski derivatives - where the derivative of regex R with respect to character c produces a new regex matching suffixes: D_c(R) = {w : cw ∈ L(R)}. Key derivative rules:
 
-- D_c(c) = ε (consuming the expected character succeeds)
-- D_c(R₁R₂) = D_c(R₁)R₂ | ν(R₁)D_c(R₂) (nullable check for sequences)
-- D_c(R*) = D_c(R)R* (Kleene star recursion)
-- D_c(R₁&R₂) = D_c(R₁) & D_c(R₂) (intersection support)
+```
+D_c(c) = ε (consuming the expected character succeeds)
+D_c(R₁R₂) = D_c(R₁)R₂ | ν(R₁)D_c(R₂) (nullable check for sequences)
+D_c(R*) = D_c(R)R* (Kleene star recursion)
+D_c(R₁&R₂) = D_c(R₁) & D_c(R₂) (intersection support)
+```
 
 Unlike traditional regex engines that convert to NFA then DFA upfront, derivre constructs DFA states lazily on demand. This eliminates startup cost entirely - critical when constraints change per-request.
 
