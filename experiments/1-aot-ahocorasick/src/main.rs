@@ -208,17 +208,9 @@ fn main() {
         println!("Possible next tokens: {:?}", tokens);
 
         if routes.is_empty() {
-            if position == length {
-                println!("Reached the end of the lattice!");
-            } else {
-                println!("No valid continuations, resetting");
-            }
+            println!("No routes, exiting");
 
-            position = 0;
-
-            selected.clear();
-
-            continue;
+            return;
         }
 
         print!("Input: ");
@@ -229,19 +221,19 @@ fn main() {
 
         io::stdin().read_line(&mut buffer).unwrap();
 
-        let c = buffer.trim_matches('\n');
-        let found = routes.iter().find(|(token, _, _)| token.as_ref() == c);
+        let buffer = buffer.trim_matches('\n');
+        let route = routes
+            .iter()
+            .find(|(token, _, _)| token.as_ref() == buffer);
 
-        if let Some((token, _, target)) = found {
-            selected.push_str(token.as_ref());
+        let Some((token, _, target)) = route else {
+            println!("Invalid token / route");
 
-            position = *target;
-        } else {
-            println!("Invalid token, resetting");
+            continue
+        };
 
-            position = 0;
+        selected.push_str(token.as_ref());
 
-            selected.clear();
-        }
+        position = *target;
     }
 }

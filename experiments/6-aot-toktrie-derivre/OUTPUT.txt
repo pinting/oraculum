@@ -1,0 +1,21 @@
+Loaded vocabulary in 1.030589324s
+Built trie in 407.714708ms
+Enter regex pattern (press Enter for default): 
+Using pattern: (monday|tuesday|wednesday|thursday|friday)+
+Built index in 3.424099ms
+Current: ``
+Number of transition attempts: 22
+Possible next tokens: ["m", "tu", "f", "mo", "monday", "m", "thur", "t", "thu", "th", "t", "w", "wed", "f", "w", "fr", "mon", "mond", "fri", "friday", "frid", "we"]
+Input: mo
+Current: `mo`
+Number of transition attempts: 4
+Possible next tokens: ["nd", "n", "n", "nda"]
+Input: nd
+Current: `mond`
+Number of transition attempts: 4
+Possible next tokens: ["ay", "a", "a", "ayt"]
+Input: ay
+Current: `monday`
+Number of transition attempts: 23
+Possible next tokens: ["we", "thur", "EOS", "mo", "fri", "mon", "thu", "m", "wed", "t", "monday", "frid", "m", "f", "w", "friday", "f", "th", "w", "fr", "tu", "mond", "t"]
+Input: 

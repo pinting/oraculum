@@ -1,5 +1,5 @@
 [package]
-name = "experiment-toktrie"
+name = "experiment-3-jit-toktrie-derivre"
 version = "0.1.0"
 edition = "2021"
 
