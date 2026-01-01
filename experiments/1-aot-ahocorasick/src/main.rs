@@ -49,26 +49,41 @@ impl Vocabulary {
     }
 }
 
+type TokenId = u32;
+type TextPosition = usize;
+type EdgeIdx = u32;
+
 #[derive(Debug, Clone, Copy)]
 struct TokenEdge {
-    token_id: u32,
-    target: usize,
-    next_idx: u32,
+    token_id: TokenId,
+    target: TextPosition,
+    next: EdgeIdx,
 }
 
 struct TokenLattice {
-    heads: Vec<u32>,
+    heads: Vec<EdgeIdx>,
     edges: Vec<TokenEdge>,
-    cache: HashMap<(usize, u32), usize>, // (start, token_id) -> target
 }
 
 impl TokenLattice {
-    fn new(length: usize) -> Self {
-        Self {
+    fn new(input: &str, vocabulary: &Vocabulary, ac: &AhoCorasick) -> Self {
+        let length = input.len();
+        let mut lattice = Self {
             heads: vec![u32::MAX; length + 1],
             edges: Vec::with_capacity(length * 2),
-            cache: HashMap::with_capacity(length * 2)
+        };
+
+        for m in ac.find_overlapping_iter(input) {
+            let idx = m.pattern().as_usize();
+            let Some(id) = vocabulary.idx_to_id.get(&idx) else { continue };
+
+            let start = m.start();
+            let end = m.end();
+
+            lattice.add(start, end, id);
         }
+
+        lattice
     }
 
     fn add(&mut self, start: usize, end: usize, token_id: &u32) {
@@ -76,8 +91,8 @@ impl TokenLattice {
         
         let edge = TokenEdge {
             token_id: *token_id,
-            target: end,
-            next_idx: next_edge_idx,
+            target: end as TextPosition,
+            next: next_edge_idx,
         };
 
         let i = self.edges.len() as u32;
@@ -85,42 +100,9 @@ impl TokenLattice {
         self.edges.push(edge);
 
         self.heads[start] = i;
-        
-        self.cache.insert((start, *token_id), end);
-    }
-    
-    fn print(&self, vocabulary: &Vocabulary, length: usize) {
-        let mut current_path = Vec::new();
-
-        fn dfs(latice: &TokenLattice, u: usize, length: usize, path: &mut Vec<u32>, vocabulary: &Vocabulary) {
-            if u == length {
-                let tokens: Vec<&str> = path.iter()
-                    .filter_map(|id| vocabulary.id_to_token.get(id))
-                    .map(|s| s.as_ref())
-                    .collect();
-
-                println!("{:?}", tokens);
-
-                return;
-            }
-
-            let mut i = latice.heads[u];
-
-            while i != u32::MAX {
-                let edge = &latice.edges[i as usize];
-
-                path.push(edge.token_id);
-                dfs(latice, edge.target as usize, length, path, vocabulary);
-                path.pop();
-
-                i = edge.next_idx;
-            }
-        }
-
-        dfs(self, 0, length, &mut current_path, vocabulary);
     }
 
-    fn get_routes(&self, position: usize, vocabulary: &Vocabulary) -> Vec<(Rc<str>, u32, usize)> {
+    fn get_routes(&self, position: TextPosition, vocabulary: &Vocabulary) -> Vec<(Rc<str>, TokenId, TextPosition)> {
         let mut routes = Vec::new();
         let mut i = self.heads[position];
 
@@ -131,7 +113,7 @@ impl TokenLattice {
                 routes.push((token.clone(), edge.token_id, edge.target));
             }
 
-            i = edge.next_idx;
+            i = edge.next;
         }
 
         routes
@@ -178,22 +160,11 @@ fn main() {
 
     let start = Instant::now();
     let input = input.trim_matches('\n');
-    let mut lattice = TokenLattice::new(input.len());
-
-    for mat in ac.find_overlapping_iter(input) {
-        let idx = mat.pattern().as_usize();
-        let Some(id) = vocabulary.idx_to_id.get(&idx) else { continue };
-
-        let start = mat.start();
-        let end = mat.end();
-
-        lattice.add(start, end, id);
-    }
+    let lattice = TokenLattice::new(input, &vocabulary, &ac);
 
     println!("Constructed the token lattice in {:?}", start.elapsed());
 
-    let length = input.len();
-    let mut position = 0;
+    let mut position: TextPosition = 0;
     let mut selected = String::new();
 
     loop {
