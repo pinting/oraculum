@@ -2,7 +2,7 @@
 
 Text to SQL LLM enforcement research.
 
-**Warning:** This is a proof of concept and work in progress, currently at the experimenting stage!
+**Warning:** This is a proof of concept & work in progress project, currently at the experimenting stage!
 
 ## Setup
 
@@ -33,15 +33,15 @@ Hybrid approach combining derivre and toktrie. 261 µs build time and moderate e
 
 ### 4th - Ahead-of-time lattice building for regular expressions using `dottxt-ai/outlines-core`
 
-Prebuilt-based regex matching with precomputed token patterns. Its strength is its exceptional runtime efficiency (1-18 matches per step). The obvious weakness is the higher upfront cost (1.12 s index build) and increased memory usage for storing the index.
+Prebuilt-based regex matching with precomputed token patterns. Its strength is its exceptional runtime efficiency (1-30 matches per step). The obvious weakness is the higher upfront cost (1.12 s index build) and increased memory usage for storing the index.
 
 ### 5th - Ahead-of-time lattice building for regular expressions using `regex-automata` directly
 
-Same as `outlines-core`. The `Index::new` function of Outlines is using linear search to build a token DFA on top of the regular expression byte DFA of `regex-automata`. This strategy is slow, could be improved - and it makes no sense to depend on a library which wraps another library in a couple of hundreds of lines.
+Same as `outlines-core`. The `Index::new` function of Outlines is using linear search to build a token DFA on top of the regular expression byte DFA of `regex-automata`. This strategy is slow, could be improved - and it makes no sense to depend on a library which wraps another library in a couple of hundreds of lines. 614 ms building time for a small regular expression. The unanswered question, why build time decreased so much when using the same regular expression engine behind the scenes - perhaps it is due to no memory copy has to be initiated, the same vocabulary data structure is used as it is.
 
 ### 6th - Ahead-of-time lattice building for regular expressions using `microsoft/toktrie` and `guidance-ai/derivre`
 
-The combination of AOT index building with TokTrie - Derivre: faster build time, same number of token matching per step as Outlines.
+The combination of AOT index building with TokTrie - Derivre: faster build time, same number of token matching per step as Outlines. 408 ms trie building time (needed only once for a given vocabulary), 3.4 ms index building time for a small regular expressions.
 
 ## License
 
