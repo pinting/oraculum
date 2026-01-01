@@ -13,26 +13,26 @@ Constructing lattice
 T = 0
 
 [ ]
-[ M, M, M, M, M, M, M, M, M, M, M, M, M, M, M ]
+[ M, M, M, M, M, M, M ]
 
 T = 1
 
 [ a ]
-[ 0, M, M, M, M, M, M, M, M, M, M, M, M, M, M ]
+[ 0, M, M, M, M, M, M ]
 
 T = 2
 
 [ a, ab ]
-[ 1, M, M, M, M, M, M, M, M, M, M, M, M, M, M ]
+[ 1, M, M, M, M, M, M ]
 
 T = 3
 
 [ a, ab, bc ]
-[ 1, 2, M, M, M, M, M, M, M, M, M, M, M, M, M ]
+[ 1, 2, M, M, M, M, M ]
 
 T = 4
 
 [ a, ab, bc, c ]
-[ 1, 2, 3, M, M, M, M, M, M, M, M, M, M, M, M ]
+[ 1, 2, 3, M, M, M, M ]
 
 ...
