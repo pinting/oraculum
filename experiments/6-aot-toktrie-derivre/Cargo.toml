@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 base64 = "0.22.1"
 derivre = "0.3"
+rustc-hash = "2.1.1"
 toktrie = { git = "https://github.com/guidance-ai/llguidance.git", branch = "main" }
