@@ -25,11 +25,11 @@ Token lattice approach for breaking up text into a Directed Acyclic Graph (formi
 
 ### 2nd - Just-in-time lattice generation using only `guidance-ai/derivre`
 
-Pure regex-based matching with derivative automata. Slow because of the exhaustive token matching (255k matches per step).
+Pure regex-based matching with derivative automata. 252 µs build time for a small regular expression. Slow next token filtering because of the exhaustive token matching (255k matches per step).
 
 ### 3rd - Just-in-time lattice generation using `microsoft/toktrie` and `guidance-ai/derivre`
 
-Hybrid approach combining derivre and toktrie. 261 µs build time and moderate efficiency through trie pruning (300-600 matches per step). Its weakness is the still relatively high transition attempts compared to AOT-based methods.
+Hybrid approach combining derivre and toktrie. 411 µs trie building (one time for a given vocabulary), 260 µs build time for a single small regular expression. Moderate efficiency through trie pruning (300-600 matches per step). Its weakness is the still relatively high transition attempts compared to AOT-based methods.
 
 ### 4th - Ahead-of-time lattice building for regular expressions using `dottxt-ai/outlines-core`
 
