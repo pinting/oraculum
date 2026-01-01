@@ -1,7 +1,8 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use derivre::RegexBuilder;
 use std::cell::{RefCell};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{VecDeque};
+use rustc_hash::{FxHashMap as HashMap};
 use std::fs;
 use std::io::{self, Write};
 use std::rc::Rc;
@@ -38,9 +39,9 @@ struct Vocabulary {
 impl Vocabulary {
     fn new(eos_token_id: u32) -> Self {
         Self {
-            token_to_id: HashMap::new(),
-            id_to_token: HashMap::new(),
-            idx_to_id: HashMap::new(),
+            token_to_id: HashMap::default(),
+            id_to_token: HashMap::default(),
+            idx_to_id: HashMap::default(),
             tokens: Vec::new(),
             eos_token_id,
         }
@@ -122,7 +123,7 @@ impl Index {
         let start_state = rx.initial_state();
         let start_node: NodeId = 0;
         
-        let mut state_node_map: HashMap<derivre::StateID, NodeId> = HashMap::new();
+        let mut state_node_map: HashMap<derivre::StateID, NodeId> = HashMap::default();
 
         state_node_map.insert(start_state, start_node);
 
@@ -130,7 +131,7 @@ impl Index {
 
         queue.push_back(start_state);
 
-        let mut transitions: HashMap<NodeId, HashMap<TokenId, NodeId>> = HashMap::new();
+        let mut transitions: HashMap<NodeId, HashMap<TokenId, NodeId>> = HashMap::default();
         let mut next_state_id: NodeId = 1;
 
         // 3. Explore Graph (AOT)
