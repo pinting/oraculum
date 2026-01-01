@@ -15,23 +15,33 @@ uv venv --python 3.11
 source .venv/bin/activate
 make install
 make run
-
-# Experiments
-
-cd experiments/ahocorasick && cargo run
-cd experiments/derivre && cargo run
-cd experiments/outlines && cargo run
-cd experiments/toktrie && cargo run
 ```
 
 ## Experiments
 
-Four constrained generation approaches were tested using the Gemma 3 vocabulary:
+### 1st - Ahead-of-time lattice building for constants using the Aho-Corasick algorithm
 
-- **Aho-Corasick**: Token lattice approach for breaking up text into a Directed Acyclic Graph (forming all possible routes to build the text using the given vocabulary). The initial (one-time) build time (against the vocabulary) takes 2.23 s with extremely fast lattice construction (102 µs for 16 characters). Obviously no regular expression support, but good for constant values!
-- **derivre**: Pure regex-based matching with derivative automata. Slow because of the exhaustive token matching (255k matches per step).
-- **toktrie**: Hybrid approach combining derivre and toktrie. 261 µs build time and moderate efficiency through trie pruning (300-600 matches per step). Its weakness is the still relatively high transition attempts compared to index-based methods.
-- **outlines**: Index-based regex matching with precomputed token patterns. Its strength is its exceptional runtime efficiency (1-18 matches per step). The obvious weakness is the higher upfront cost (1.12s index build) and increased memory usage for storing the index.
+Token lattice approach for breaking up text into a Directed Acyclic Graph (forming all possible routes to build the text using the given vocabulary). The initial (one-time) build time (against the vocabulary) takes 2.23 s with extremely fast lattice construction (102 µs for 16 characters). **No regular expression support**, but good for constant values.
+
+### 2nd - Just-in-time lattice generation using only `guidance-ai/derivre`
+
+Pure regex-based matching with derivative automata. Slow because of the exhaustive token matching (255k matches per step).
+
+### 3rd - Just-in-time lattice generation using `microsoft/toktrie` and `guidance-ai/derivre`
+
+Hybrid approach combining derivre and toktrie. 261 µs build time and moderate efficiency through trie pruning (300-600 matches per step). Its weakness is the still relatively high transition attempts compared to AOT-based methods.
+
+### 4th - Ahead-of-time lattice building for regular expressions using `dottxt-ai/outlines-core`
+
+Prebuilt-based regex matching with precomputed token patterns. Its strength is its exceptional runtime efficiency (1-18 matches per step). The obvious weakness is the higher upfront cost (1.12 s index build) and increased memory usage for storing the index.
+
+### 5th - Ahead-of-time lattice building for regular expressions using `regex-automata` directly
+
+Same as `outlines-core`. The `Index::new` function of Outlines is using linear search to build a token DFA on top of the regular expression byte DFA of `regex-automata`. This strategy is slow, could be improved - and it makes no sense to depend on a library which wraps another library in a couple of hundreds of lines.
+
+### 6th - Ahead-of-time lattice building for regular expressions using `microsoft/toktrie` and `guidance-ai/derivre`
+
+The combination of AOT index building with TokTrie - Derivre: faster build time, same number of token matching per step as Outlines.
 
 ## License
 

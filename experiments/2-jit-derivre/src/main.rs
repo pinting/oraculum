@@ -1,15 +1,10 @@
 use derivre::RegexBuilder;
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::rc::Rc;
+use std::collections::HashMap;
 use std::time::Instant;
 use base64::{Engine, engine::general_purpose::STANDARD};
-use toktrie::{
-    recognizer::{FunctionalRecognizer, StackRecognizer},
-    TokRxInfo, TokTrie,
-};
+use std::rc::Rc;
 
 struct Vocabulary {
     token_to_id: HashMap<Rc<str>, u32>,
@@ -57,54 +52,23 @@ impl Vocabulary {
     }
 }
 
-struct RegexRecognizer<'a> {
-    rx: RefCell<&'a mut derivre::Regex>,
-    start_state: derivre::StateID,
-    n: &'a Cell<usize>,
-}
+fn get_routes(rx: &mut derivre::Regex, state: derivre::StateID, tokens: &[Rc<str>]) -> Vec<Rc<str>> {
+    let mut n = 0;
+    let result = tokens
+        .iter() 
+        .filter(|&token| {
+            let next = rx.transition_bytes(state, token.as_bytes());
+            
+            n += 1;
+            
+            !next.is_dead()
+        })
+        .map(|s| s.clone())
+        .collect();
 
-impl<'a> FunctionalRecognizer<derivre::StateID> for RegexRecognizer<'a> {
-    fn initial(&self) -> derivre::StateID {
-        self.start_state
-    }
-
-    fn try_append(&self, state: derivre::StateID, byte: u8) -> Option<derivre::StateID> {
-        let next = self.rx.borrow_mut().transition_bytes(state, &[byte]);
-
-        self.n.set(self.n.get() + 1);
-
-        if next.is_dead() {
-            None
-        } else {
-            Some(next)
-        }
-    }
-}
-
-fn get_routes(
-    trie: &TokTrie,
-    rx: &mut derivre::Regex,
-    state: derivre::StateID,
-    tokens: &[Rc<str>],
-) -> Vec<Rc<str>> {
-    let n = Cell::new(0);
-    let recognizer = RegexRecognizer {
-        rx: RefCell::new(rx),
-        start_state: state,
-        n: &n,
-    };
-    
-    let mut stack_recognizer = StackRecognizer::from(recognizer);
-    let mut result = trie.alloc_token_set();
-
-    trie.add_bias(&mut stack_recognizer, &mut result, &[]);
-
-    println!("Number of transition attempts: {}", n.get());
+    println!("Number of transition attempts: {}", n);
 
     result
-        .iter()
-        .map(|token_id| tokens[token_id as usize].clone())
-        .collect()
 }
 
 fn main() {
@@ -133,9 +97,9 @@ fn main() {
 
     println!("Loaded vocabulary in {:?}", start.elapsed());
 
-    let default_pattern = "monday|tuesday|wednesday|thursday|friday";
+    let default_pattern = "(monday|tuesday|wednesday|thursday|friday)+";
 
-    print!("Enter regex pattern (press Enter for default weekdays): ");
+    print!("Enter regex pattern (press Enter for default): ");
 
     io::stdout().flush().unwrap();
 
@@ -167,55 +131,41 @@ fn main() {
 
     println!("Built regex in {:?}", start.elapsed());
 
-    let start = Instant::now();
-    let words: Vec<Vec<u8>> = tokens.iter().map(|s| s.as_bytes().to_vec()).collect();
-    let info = TokRxInfo::new(tokens.len() as u32, 0);
-    let trie = TokTrie::from(&info, &words);
-
-    println!("Built trie in {:?}", start.elapsed());
-
     let mut state = rx.initial_state();
     let mut input = String::new();
-
+    
     loop {
         println!("Current: `{}`", input);
 
-        let routes = get_routes(&trie, &mut rx, state, &tokens);
+        let routes = get_routes(&mut rx, state, &tokens);
 
         println!("Possible next tokens: {:?}", routes);
-
+        
         if routes.is_empty() {
-            println!("No valid continuations, resetting");
+            println!("No routes, exiting");
 
-            state = rx.initial_state();
+            return;
+        }
+        
+        print!("Input: ");
 
-            input.clear();
+        io::stdout().flush().unwrap();
+        
+        let mut buffer = String::new();
+
+        io::stdin().read_line(&mut buffer).unwrap();
+        
+        let buffer = buffer.trim_matches('\n');
+        let next_state = rx.transition_bytes(state, buffer.as_bytes());
+
+        if next_state.is_dead() {
+            println!("Invalid token");
 
             continue;
         }
 
-        print!("Input: ");
+        state = next_state;
 
-        io::stdout().flush().unwrap();
-
-        let mut buffer = String::new();
-
-        io::stdin().read_line(&mut buffer).unwrap();
-
-        let c = buffer.trim_matches('\n');
-
-        let next_state = rx.transition_bytes(state, c.as_bytes());
-
-        if next_state.is_dead() {
-            println!("Invalid character, resetting");
-
-            state = rx.initial_state();
-
-            input.clear();
-        } else {
-            state = next_state;
-
-            input.push_str(c);
-        }
+        input.push_str(buffer);
     }
 }

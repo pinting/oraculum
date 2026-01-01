@@ -1,8 +1,8 @@
 [package]
-name = "experiment-outlines"
+name = "experiment-2-jit-derivre"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 base64 = "0.22.1"
-outlines-core = "0.2"
+derivre = "0.3"

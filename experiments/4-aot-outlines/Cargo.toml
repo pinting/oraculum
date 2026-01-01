@@ -1,8 +1,8 @@
 [package]
-name = "experiment-derivre"
+name = "experiment-4-aot-outlines"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 base64 = "0.22.1"
-derivre = "0.3"
+outlines-core = "0.2"

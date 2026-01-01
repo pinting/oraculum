@@ -87,18 +87,24 @@ fn main() {
     println!("Loaded vocabulary in {:?}", start.elapsed());
 
     let start = Instant::now();
-    let eos_token_id = 26;
+
+    // Literal "EOS" 103824    
+    let eos_token_id = 103824;
     let mut v = prelude::Vocabulary::new(eos_token_id);
 
     for (token, &id) in &vocabulary.token_to_id {
+        if id == eos_token_id {
+            continue;
+        }
+
         v.try_insert(token.as_ref(), id).unwrap();
     }
 
     println!("Built outlines vocabulary in {:?}", start.elapsed());
 
-    let default_pattern = "monday|tuesday|wednesday|thursday|friday";
+    let default_pattern = "(monday|tuesday|wednesday|thursday|friday)+";
 
-    print!("Enter regex pattern (press Enter for default weekdays): ");
+    print!("Enter regex pattern (press Enter for default): ");
 
     io::stdout().flush().unwrap();
 
@@ -139,13 +145,9 @@ fn main() {
         println!("Possible next tokens: {:?}", routes);
 
         if routes.is_empty() {
-            println!("No valid continuations, resetting");
+            println!("No routes, exiting");
 
-            state = index.initial_state();
-
-            input.clear();
-
-            continue;
+            return;
         }
 
         print!("Input: ");
@@ -156,27 +158,29 @@ fn main() {
 
         io::stdin().read_line(&mut buffer).unwrap();
 
-        let c = buffer.trim_matches('\n');
-        let token_id = vocabulary.token_to_id.get(c);
+        let buffer = buffer.trim_matches('\n');
+        let token_id = vocabulary.token_to_id.get(buffer);
 
-        if let Some(&id) = token_id {
-            if let Some(next_state) = index.next_state(&state, &id) {
-                state = next_state;
+        let Some(&id) = token_id else {
+            println!("Invalid token");
 
-                input.push_str(c);
-            } else {
-                println!("Invalid state, resetting");
+            continue;
+        };
 
-                state = index.initial_state();
+        let Some(next_state) = index.next_state(&state, &id) else {
+            if id == eos_token_id {
+                println!("EOS reached, exiting");
 
-                input.clear();
+                return;
             }
-        } else {
-            println!("Invalid token, resetting");
 
-            state = index.initial_state();
+            println!("Invalid route for token {}", id);
 
-            input.clear();
-        }
+            continue;
+        };
+
+        state = next_state;
+
+        input.push_str(buffer);
     }
 }
