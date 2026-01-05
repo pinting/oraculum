@@ -5,21 +5,21 @@ import (
 )
 
 type RegExp interface {
-	Nullable() bool
+	Accepting() bool
 	Derive(c rune) RegExp
 	Simplify() RegExp
 	String() string
 }
 
 /*
- * Empty ∅
+ * Empty ∅ denotes the empty set: L(∅) = {}
  */
 
 type Empty struct{}
 
 func NewEmpty() RegExp { return &Empty{} }
 
-func (e *Empty) Nullable() bool { return false }
+func (e *Empty) Accepting() bool { return false }
 
 func (e *Empty) Derive(c rune) RegExp { return NewEmpty() }
 
@@ -28,23 +28,23 @@ func (e *Empty) Simplify() RegExp { return e }
 func (e *Empty) String() string { return "∅" }
 
 /*
- * Null ε
+ * Epsilon ε denotes the singleton set containing the empty string: L(ε) = {ε}
  */
 
-type Null struct{}
+type Epsilon struct{}
 
-func NewNull() RegExp { return &Null{} }
+func NewEpsilon() RegExp { return &Epsilon{} }
 
-func (n *Null) Nullable() bool { return true }
+func (n *Epsilon) Accepting() bool { return true }
 
-func (n *Null) Derive(c rune) RegExp { return NewEmpty() }
+func (n *Epsilon) Derive(c rune) RegExp { return NewEmpty() }
 
-func (n *Null) Simplify() RegExp { return n }
+func (n *Epsilon) Simplify() RegExp { return n }
 
-func (n *Null) String() string { return "ε" }
+func (n *Epsilon) String() string { return "ε" }
 
 /*
- * Literal 'a'
+ * Literal 'a' denotes the singleton set containing the single-symbol string a: L(a) = {a}
  */
 
 type Literal struct {
@@ -53,12 +53,13 @@ type Literal struct {
 
 func NewLiteral(c rune) RegExp { return &Literal{R: c} }
 
-func (l *Literal) Nullable() bool { return false }
+func (l *Literal) Accepting() bool { return false }
 
 func (l *Literal) Derive(c rune) RegExp {
 	if l.R == c {
-		return NewNull()
+		return NewEpsilon()
 	}
+
 	return NewEmpty()
 }
 
@@ -67,7 +68,7 @@ func (l *Literal) Simplify() RegExp { return l }
 func (l *Literal) String() string { return string(l.R) }
 
 /*
- * Union R | S
+ * Union R | S denotes the union of R and S: L(R ∨ S) = L(R) ∪ L(S)
  */
 
 type Union struct {
@@ -76,7 +77,7 @@ type Union struct {
 
 func NewUnion(r1, r2 RegExp) RegExp { return &Union{Left: r1, Right: r2} }
 
-func (u *Union) Nullable() bool { return u.Left.Nullable() || u.Right.Nullable() }
+func (u *Union) Accepting() bool { return u.Left.Accepting() || u.Right.Accepting() }
 
 func (u *Union) Derive(c rune) RegExp {
 	d1 := u.Left.Derive(c)
@@ -107,7 +108,7 @@ func (u *Union) String() string {
 }
 
 /*
- * Concat R . S
+ * Concat R . S denotes the concatenation of R and S: L(RS) = L(R) · L(S)
  */
 
 func NewConcat(r1, r2 RegExp) RegExp { return &Concat{Left: r1, Right: r2} }
@@ -116,21 +117,21 @@ type Concat struct {
 	Left, Right RegExp
 }
 
-func (c *Concat) Nullable() bool {
-	return c.Left.Nullable() && c.Right.Nullable()
+func (c *Concat) Accepting() bool {
+	return c.Left.Accepting() && c.Right.Accepting()
 }
 
 // D_r(RS) = D_r(R)S | ν(R)D_r(S)
 func (c *Concat) Derive(r rune) RegExp {
-	d1r2 := NewConcat(c.Left.Derive(r), c.Right)
+	a := NewConcat(c.Left.Derive(r), c.Right)
 
-	if c.Left.Nullable() {
-		d2 := c.Right.Derive(r)
+	if c.Left.Accepting() {
+		b := c.Right.Derive(r)
 
-		return NewUnion(d1r2, d2).Simplify()
+		return NewUnion(a, b).Simplify()
 	}
 
-	return d1r2.Simplify()
+	return a.Simplify()
 }
 
 func (c *Concat) Simplify() RegExp {
@@ -148,12 +149,12 @@ func (c *Concat) Simplify() RegExp {
 	}
 
 	// ε . R = R
-	if _, ok := s1.(*Null); ok {
+	if _, ok := s1.(*Epsilon); ok {
 		return s2
 	}
 
 	// R . ε = R
-	if _, ok := s2.(*Null); ok {
+	if _, ok := s2.(*Epsilon); ok {
 		return s1
 	}
 
@@ -165,7 +166,7 @@ func (c *Concat) String() string {
 }
 
 /*
- * Star R*
+ * Star R* denotes the Kleene closure of R: L(R*) = L(R)*
  */
 
 type Star struct {
@@ -174,7 +175,7 @@ type Star struct {
 
 func NewStar(r RegExp) RegExp { return &Star{Operand: r} }
 
-func (s *Star) Nullable() bool {
+func (s *Star) Accepting() bool {
 	return true
 }
 
@@ -190,60 +191,73 @@ func (s *Star) Simplify() RegExp {
 
 	// ∅* = ε
 	if _, ok := op.(*Empty); ok {
-		return NewNull()
+		return NewEpsilon()
 	}
 
 	// ε* = ε
-	if _, ok := op.(*Null); ok {
-		return NewNull()
+	if _, ok := op.(*Epsilon); ok {
+		return NewEpsilon()
 	}
 
 	return NewStar(op)
 }
 
 func (s *Star) String() string {
-	return fmt.Sprintf("%s*", s.Operand.String())
+	op := s.Operand.Simplify()
+
+	if _, ok := op.(*Concat); ok {
+		return fmt.Sprintf("(%s)*", op.String())
+	}
+
+	return fmt.Sprintf("%s*", op.String())
 }
 
-func Matches(r RegExp, text string) bool {
-	current := r
+func Matches(current RegExp, text string) {
+	fmt.Printf("Start: %s", current)
+
+	if current.Accepting() {
+		fmt.Print("\nAccepting")
+	}
+
+	fmt.Print("\n")
 
 	for _, r := range text {
 		current = current.Derive(r)
 
+		fmt.Printf("Derive '%c' -> %s", r, current)
+
+		if current.Accepting() {
+			fmt.Print("\tAccepting")
+		}
+
+		fmt.Print("\n")
+
 		if _, ok := current.(*Empty); ok {
-			return false
+			return
 		}
 	}
-
-	return current.Nullable()
 }
 
 func main() {
-	// (a|b)*cd
-	pattern := NewConcat(
+	fmt.Printf("Example #1 - Basic\n\n")
+
+	start := NewConcat(
 		NewStar(NewUnion(NewLiteral('a'), NewLiteral('b'))),
 		NewConcat(NewLiteral('c'), NewLiteral('d')),
 	)
 
-	r := pattern
+	Matches(start, "abcd")
 
-	fmt.Printf("Start:  %s\n", r)
+	fmt.Printf("\nExample #2 - (ab)* can be ignored\n\n")
 
-	r = r.Derive('a')
+	start = NewConcat(
+		NewStar(NewConcat(NewLiteral('a'), NewLiteral('b'))),
+		NewLiteral('c'),
+	)
 
-	fmt.Printf("Derive 'a' -> %s\n", r)
+	Matches(start, "c")
 
-	r = r.Derive('b')
+	fmt.Printf("\nExample #3 - However once (ab)* is started, it needs to be finished\n\n")
 
-	fmt.Printf("Derive 'b' -> %s\n", r)
-
-	r = r.Derive('c')
-
-	fmt.Printf("Derive 'c' -> %s\n", r)
-
-	r = r.Derive('d')
-
-	fmt.Printf("Derive 'd' -> %s\n", r)
-	fmt.Printf("Nullable? %v\n", r.Nullable())
+	Matches(start, "ababc")
 }
