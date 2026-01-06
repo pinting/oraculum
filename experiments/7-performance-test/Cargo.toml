@@ -1,5 +1,5 @@
 [package]
-name = "experiment-7-hashmap-dfa-flat-dfa-performance-test"
+name = "experiment-7-performance-test"
 version = "0.1.0"
 edition = "2024"
 
