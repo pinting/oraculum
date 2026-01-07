@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+use rustc_hash::{FxHashMap as HashMap};
 use std::time::{Duration, Instant};
 use rand::Rng;
 use rand::rngs::ThreadRng;
@@ -13,52 +14,13 @@ trait DFA {
     fn name(&self) -> &str;
 }
 
-struct HashDFA {
-    map: HashMap<(NodeId, TokenId), NodeId>,
+struct HashBTreeDFA {
+    map: HashMap<NodeId, BTreeMap<TokenId, NodeId>>,
 }
 
-impl HashDFA {
+impl HashBTreeDFA {
     fn new(transitions: &[(NodeId, TokenId, NodeId)]) -> Self {
-        let mut map = HashMap::new();
-
-        for &(src, token, target) in transitions {
-            map.insert((src, token), target);
-        }
-
-        Self { map }
-    }
-}
-
-impl DFA for HashDFA {
-    #[inline(always)]
-    fn lookup(&self, src: NodeId, token: TokenId) -> Option<NodeId> {
-        self.map.get(&(src, token)).copied()
-    }
-
-    fn transitions(&self, node: NodeId) -> u128 {
-        let mut sum = 0;
-
-        for (&(src, token), _) in &self.map {
-            if src == node {
-                sum += token as u128;
-            }
-        }
-
-        sum
-    }
-
-    fn name(&self) -> &str {
-        "HashDFA"
-    }
-}
-
-struct NestedHashDFA {
-    map: HashMap<NodeId, HashMap<TokenId, NodeId>>,
-}
-
-impl NestedHashDFA {
-    fn new(transitions: &[(NodeId, TokenId, NodeId)]) -> Self {
-        let mut map: HashMap<NodeId, HashMap<TokenId, NodeId>> = HashMap::new();
+        let mut map: HashMap<NodeId, BTreeMap<TokenId, NodeId>> = HashMap::default();
 
         for &(src, token, target) in transitions {
             map.entry(src).or_default().insert(token, target);
@@ -68,7 +30,7 @@ impl NestedHashDFA {
     }
 }
 
-impl DFA for NestedHashDFA {
+impl DFA for HashBTreeDFA {
     #[inline(always)]
     fn lookup(&self, src: NodeId, token: TokenId) -> Option<NodeId> {
         self.map.get(&src).and_then(|m| m.get(&token)).copied()
@@ -87,7 +49,85 @@ impl DFA for NestedHashDFA {
     }
 
     fn name(&self) -> &str {
-        "NestedHashDFA"
+        "HashBTreeDFA"
+    }
+}
+
+struct DoubleBTreeDFA {
+    map: BTreeMap<NodeId, BTreeMap<TokenId, NodeId>>,
+}
+
+impl DoubleBTreeDFA {
+    fn new(transitions: &[(NodeId, TokenId, NodeId)]) -> Self {
+        let mut map: BTreeMap<NodeId, BTreeMap<TokenId, NodeId>> = BTreeMap::new();
+
+        for &(src, token, target) in transitions {
+            map.entry(src).or_default().insert(token, target);
+        }
+
+        Self { map }
+    }
+}
+
+impl DFA for DoubleBTreeDFA {
+    #[inline(always)]
+    fn lookup(&self, src: NodeId, token: TokenId) -> Option<NodeId> {
+        self.map.get(&src).and_then(|m| m.get(&token)).copied()
+    }
+
+    fn transitions(&self, node: NodeId) -> u128 {
+        let mut sum = 0;
+
+        if let Some(inner) = self.map.get(&node) {
+            for &token in inner.keys() {
+                sum += token as u128;
+            }
+        }
+        
+        sum
+    }
+
+    fn name(&self) -> &str {
+        "DoubleBTreeDFA"
+    }
+}
+
+struct DoubleHashDFA {
+    map: HashMap<NodeId, HashMap<TokenId, NodeId>>,
+}
+
+impl DoubleHashDFA {
+    fn new(transitions: &[(NodeId, TokenId, NodeId)]) -> Self {
+        let mut map: HashMap<NodeId, HashMap<TokenId, NodeId>> = HashMap::default();
+
+        for &(src, token, target) in transitions {
+            map.entry(src).or_default().insert(token, target);
+        }
+
+        Self { map }
+    }
+}
+
+impl DFA for DoubleHashDFA {
+    #[inline(always)]
+    fn lookup(&self, src: NodeId, token: TokenId) -> Option<NodeId> {
+        self.map.get(&src).and_then(|m| m.get(&token)).copied()
+    }
+
+    fn transitions(&self, node: NodeId) -> u128 {
+        let mut sum = 0;
+
+        if let Some(inner) = self.map.get(&node) {
+            for &token in inner.keys() {
+                sum += token as u128;
+            }
+        }
+        
+        sum
+    }
+
+    fn name(&self) -> &str {
+        "DoubleHashDFA"
     }
 }
 
@@ -111,7 +151,7 @@ impl FlatDFA {
         let mut offsets = vec![0; (nodes_count + 2) as usize];
         let mut edges = Vec::with_capacity(transitions.len());
 
-        let mut c = 0; // Current NodeId
+        let mut c = 0; 
         let mut idx = 0;
 
         for (src, token, target) in &transitions {
@@ -179,7 +219,7 @@ impl DFA for FlatDFA {
     }
 }
 
-fn bench(
+fn benchmark_dfa(
     dfa: &dyn DFA,
     transitions: &[(NodeId, TokenId, NodeId)], 
     nodes_count: u32, 
@@ -228,14 +268,10 @@ fn bench(
     (lookup_duration, scan_duration, checksum)
 }
 
-fn main() {
-    let nodes_count = 200;
-    let min_links = 50;
-    let max_links = 100;
-    let vocabulary_size = 256_000;
-    let lookup_count = 10_000_000;
-    let scan_count = 1_000;
-
+fn benchmark(nodes_count: u32, min_links: u32, max_links: u32, vocabulary_size: u32, lookup_count: u32, scan_count: usize) {
+    println!("Benchmarking with nodes_count = {}, min_links = {}, max_links = {}, vocabulary_size = {}, lookup_count = {}, scan_count = {}", 
+        nodes_count, min_links, max_links, vocabulary_size, lookup_count, scan_count);
+    
     println!("Generating...");
 
     let mut rng = ThreadRng::default();
@@ -247,7 +283,7 @@ fn main() {
 
         tokens.shuffle(&mut rng);
 
-        let selected_tokens = &tokens[0..links_count];
+        let selected_tokens = &tokens[0..(links_count as usize)];
 
         for &token in selected_tokens {
             let target = rng.random_range(0..nodes_count);
@@ -262,23 +298,20 @@ fn main() {
 
     println!("Generated {} edges", transitions.len());
 
-    let hash_dfa = HashDFA::new(&transitions);
-    let nested_dfa = NestedHashDFA::new(&transitions);
+    let nested_btree_dfa = HashBTreeDFA::new(&transitions);
+    let double_btree_dfa = DoubleBTreeDFA::new(&transitions);
+    let nested_dfa = DoubleHashDFA::new(&transitions);
     let flat_dfa = FlatDFA::new(&transitions, nodes_count);
 
-    let dfas: Vec<&dyn DFA> = vec![&hash_dfa, &nested_dfa, &flat_dfa];
+    let dfas: Vec<&dyn DFA> = vec![&nested_btree_dfa, &double_btree_dfa, &nested_dfa, &flat_dfa];
 
     let mut prev_checksum: Option<u128> = None;
+    let mut results = Vec::new();
 
     for dfa in dfas {
-        println!("Benchmarking {}", dfa.name());
-
         let (lookup_duration, scan_duration, checksum) = 
-            bench(dfa, &test_transitions, nodes_count, lookup_count, scan_count);
+            benchmark_dfa(dfa, &test_transitions, nodes_count, lookup_count as usize, scan_count);
         
-        println!("Lookup duration: {:?}", lookup_duration);
-        println!("Scan duration: {:?}", scan_duration);
-
         if let Some(prev_checksum) = prev_checksum {
             if prev_checksum != checksum {
                 println!("Checksum MISMATCH!");
@@ -286,5 +319,63 @@ fn main() {
         }
 
         prev_checksum = Some(checksum);
+        results.push((dfa.name(), lookup_duration, scan_duration));
     }
+
+    let mut lookup_results = results.clone();
+
+    lookup_results.sort_by_key(|r| r.1);
+
+    println!("Lookup placements:");
+
+    for (name, duration, _) in lookup_results {
+        println!("\t{} - {:?}", name, duration);
+    }
+
+    let mut scan_results = results;
+
+    scan_results.sort_by_key(|r| r.2);
+
+    println!("Scan placements:");
+
+    for (name, _, duration) in scan_results {
+        println!("\t{} - {:?}", name, duration);
+    }
+}
+
+fn main() {
+    let vocabulary_size = 256_000;
+
+    let lookup_count = 2_500;
+    let scan_count = 2_500;
+
+    let nodes_count = 200;
+    let min_links = 50;
+    let max_links = 100;
+
+    benchmark(nodes_count, min_links, max_links, vocabulary_size, lookup_count, scan_count);
+
+    let nodes_count = 2_000;
+    let min_links = 500;
+    let max_links = 1_000;
+
+    benchmark(nodes_count, min_links, max_links, vocabulary_size, lookup_count, scan_count);
+
+    let nodes_count = 2_000;
+    let min_links = 5_000;
+    let max_links = 10_000;
+
+    benchmark(nodes_count, min_links, max_links, vocabulary_size, lookup_count, scan_count);
+
+    let nodes_count = 2_000;
+    let min_links = 50_000;
+    let max_links = 100_000;
+
+    benchmark(nodes_count, min_links, max_links, vocabulary_size, lookup_count, scan_count);
+
+    let nodes_count = 5_000;
+    let min_links = 200_000;
+    let max_links = 250_000;
+
+    benchmark(nodes_count, min_links, max_links, vocabulary_size, lookup_count, scan_count);
 }

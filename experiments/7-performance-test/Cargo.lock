@@ -13,6 +13,7 @@ name = "experiment-7-performance-test"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "rustc-hash",
 ]
 
 [[package]]
@@ -94,6 +95,12 @@ checksum = "99d9a13982dcf210057a8a78572b2217b667c3beacbf3a0d8b454f6f82837d38"
 dependencies = [
  "getrandom",
 ]
+
+[[package]]
+name = "rustc-hash"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
 
 [[package]]
 name = "syn"
