@@ -158,22 +158,18 @@ impl DFA for FlatDFA {
 }
 
 struct HybridDFA {
-    targets: HashMap<(NodeId, TokenId), NodeId>,
     offsets: Vec<NodeId>,
     tokens: Vec<TokenId>,
+    targets: Vec<HashMap<TokenId, NodeId>>,
 }
 
 impl HybridDFA {
     fn new(transitions: &[(NodeId, TokenId, NodeId)], nodes_count: u32) -> Self {
-        let mut targets = HashMap::default();
+        let mut targets = vec![HashMap::default(); nodes_count as usize];
 
-        for &(src, token, target) in transitions {
-            targets.insert((src, token), target);
-        }
+        let mut transitions = transitions.to_vec();
 
-        let mut sorted_transitions = transitions.to_vec();
-        
-        sorted_transitions.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        transitions.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         let mut offsets = vec![0; (nodes_count + 2) as usize];
         let mut tokens = Vec::with_capacity(transitions.len());
@@ -181,13 +177,17 @@ impl HybridDFA {
         let mut c = 0;
         let mut idx = 0;
 
-        for (src, token, _) in &sorted_transitions {
-            while c < (*src as usize) {
+        for (src, token, target) in transitions {
+            if let Some(map) = targets.get_mut(src as usize) {
+                map.insert(token, target);
+            }
+
+            while c < (src as usize) {
                 c += 1;
                 offsets[c] = idx;
             }
 
-            tokens.push(*token);
+            tokens.push(token);
             idx += 1;
         }
 
@@ -196,18 +196,16 @@ impl HybridDFA {
             offsets[c] = idx;
         }
 
-        Self {
-            targets,
-            offsets,
-            tokens,
-        }
+        Self { targets, offsets, tokens }
     }
 }
 
 impl DFA for HybridDFA {
     #[inline(always)]
     fn lookup(&self, src: NodeId, token: TokenId) -> Option<NodeId> {
-        self.targets.get(&(src, token)).copied()
+        self.targets.get(src as usize)
+            .and_then(|m| m.get(&token))
+            .copied()
     }
 
     fn transitions(&self, node: NodeId) -> u128 {
@@ -230,10 +228,17 @@ impl DFA for HybridDFA {
     }
 
     fn memory_usage(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + self.targets.capacity() * (std::mem::size_of::<(NodeId, TokenId)>() + std::mem::size_of::<NodeId>() + 1)
-            + self.offsets.capacity() * std::mem::size_of::<NodeId>()
-            + self.tokens.capacity() * std::mem::size_of::<TokenId>()
+        let mut mem = std::mem::size_of::<Self>();
+
+        mem += self.targets.capacity() * std::mem::size_of::<HashMap<TokenId, NodeId>>();
+        for map in &self.targets {
+            mem += map.capacity() * (std::mem::size_of::<TokenId>() + std::mem::size_of::<NodeId>() + 1);
+        }
+
+        mem += self.offsets.capacity() * std::mem::size_of::<NodeId>();
+        mem += self.tokens.capacity() * std::mem::size_of::<TokenId>();
+
+        mem
     }
 }
 
@@ -368,8 +373,13 @@ fn benchmark(nodes_count: usize, links_count: usize, vocabulary_size: u32, looku
 fn main() {
     let vocabulary_size = 256_000;
 
-    let lookup_count = 2_500;
-    let scan_count = 2_500;
+    let lookup_count = 100_000;
+    let scan_count = 100_000;
+
+    let nodes_count = 200;
+    let links = 50;
+
+    benchmark(nodes_count, links, vocabulary_size, lookup_count, scan_count);
 
     let nodes_count = 200;
     let links = 100;
