@@ -63,15 +63,9 @@ impl DFA for DoubleHashDFA {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct FlatEdge {
-    token: TokenId,
-    target: NodeId,
-}
-
 struct FlatDFA {
     offsets: Vec<NodeId>,
-    edges: Vec<FlatEdge>,
+    edges: Vec<(TokenId, NodeId)>,
 }
 
 impl FlatDFA {
@@ -92,9 +86,7 @@ impl FlatDFA {
                 offsets[c] = idx;
             }
 
-            let edge = FlatEdge { token: *token, target: *target };
-
-            edges.push(edge);
+            edges.push((*token, *target));
 
             idx += 1;
         }
@@ -126,9 +118,9 @@ impl DFA for FlatDFA {
 
         let slice = &self.edges[start..end];
 
-        slice.binary_search_by_key(&token, |e| e.token)
+        slice.binary_search_by_key(&token, |e| e.0)
             .ok()
-            .map(|i| slice[i].target)
+            .map(|i| slice[i].1)
     }
 
     fn transitions(&self, node: NodeId) -> u128 {
@@ -140,7 +132,7 @@ impl DFA for FlatDFA {
             let end = self.offsets[idx + 1] as usize;
 
             for edge in &self.edges[start..end] {
-                sum += edge.token as u128;
+                sum += edge.0 as u128;
             }
         }
         sum
@@ -153,7 +145,7 @@ impl DFA for FlatDFA {
     fn memory_usage(&self) -> usize {
         std::mem::size_of::<Self>()
             + self.offsets.capacity() * std::mem::size_of::<NodeId>()
-            + self.edges.capacity() * std::mem::size_of::<FlatEdge>()
+            + self.edges.capacity() * std::mem::size_of::<(TokenId, NodeId)>()
     }
 }
 
