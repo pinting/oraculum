@@ -43,6 +43,10 @@ Same as `outlines-core`. The `Index::new` function of Outlines is using linear s
 
 The combination of AOT index building with TokTrie - Derivre: faster build time, same number of token matching per step as Outlines. 408 ms trie building time (needed only once for a given vocabulary), 3.4 ms index building time for a small regular expressions.
 
+### 7th - Performance comparison between HashMap - nested HashMap - CSR continuous vector as DFA data structure
+
+
+
 ## License
 
 This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
