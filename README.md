@@ -49,7 +49,7 @@ The combination of AOT index building with TokTrie - Derivre: faster build time,
 
 ### 7th - Performance comparisons between double HashMap / CSR continuous vector / hybrid approach
 
-The benchmarks demonstrate a distinct space-time trade-off where the HybridDFA achieves the fastest performance for both lookups and scanning but requires the largest memory allocation due to its dual data structure approach. In contrast, the FlatDFA is the most memory-efficient option and maintains competitive scan speeds, though its binary search lookup mechanism causes performance to degrade significantly as the density of links increases. Ultimately, the DoubleHashDFA (the implementation outlines-core uses) proves to be the least effective implementation, consistently suffering from the slowest scan times while offering no distinct advantage in lookup speed or memory usage compared to the other architectures.
+The benchmarks demonstrate a distinct space-time trade-off where the HybridDFA achieves the fastest performance for both lookups and scanning but requires the largest memory allocation due to its dual data structure approach. In contrast, the FlatDFA is the most memory-efficient option and maintains competitive scan speeds, though its binary search lookup mechanism causes performance to degrade significantly as the density of links increases. Ultimately, the DoubleHashDFA (the implementation `outlines-core` uses) proves to be the least effective implementation, consistently suffering from the slowest scan times while offering no distinct advantage in lookup speed or memory usage compared to the other architectures.
 
 ```
 Benchmarking with nodes_count = 2000, links_count = 10000, vocabulary_size = 256000, lookup_count = 100000, scan_count = 100000
