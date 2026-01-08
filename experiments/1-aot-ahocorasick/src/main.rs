@@ -170,8 +170,10 @@ fn main() {
     loop {
         println!("Current: `{}`", selected);
 
+        let start = Instant::now();
         let routes = lattice.get_routes(position, &vocabulary);
 
+        println!("Time taken: {:?}", start.elapsed());
         println!("Number of possible transitions: {}", routes.len());
 
         let tokens: Vec<&str> = routes.iter().map(|(t, _, _)| t.as_ref()).collect();

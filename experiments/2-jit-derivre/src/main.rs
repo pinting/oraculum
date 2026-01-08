@@ -53,20 +53,15 @@ impl Vocabulary {
 }
 
 fn get_routes(rx: &mut derivre::Regex, state: derivre::StateID, tokens: &[Rc<str>]) -> Vec<Rc<str>> {
-    let mut n = 0;
     let result = tokens
         .iter() 
         .filter(|&token| {
             let next = rx.transition_bytes(state, token.as_bytes());
             
-            n += 1;
-            
             !next.is_dead()
         })
         .map(|s| s.clone())
         .collect();
-
-    println!("Number of transition attempts: {}", n);
 
     result
 }
@@ -137,8 +132,10 @@ fn main() {
     loop {
         println!("Current: `{}`", input);
 
+        let start = Instant::now();
         let routes = get_routes(&mut rx, state, &tokens);
 
+        println!("Time taken: {:?}", start.elapsed());
         println!("Possible next tokens: {:?}", routes);
         
         if routes.is_empty() {

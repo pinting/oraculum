@@ -229,21 +229,17 @@ impl Index {
     }
 }
 
-fn get_routes(index: &Index, state: &u32, vocabulary: &Vocabulary) -> (Vec<Rc<str>>, usize) {
+fn get_routes(index: &Index, state: &u32, vocabulary: &Vocabulary) -> Vec<Rc<str>> {
     let Some(ids) = index.allowed_tokens(state) else {
-        return (Vec::new(), 0);
+        return Vec::new();
     };
 
-    let mut count = 0;
-    let routes = ids
+    ids
         .iter()
         .filter_map(|&id| {
-            count += 1;
             vocabulary.id_to_token.get(&id).cloned()
         })
-        .collect();
-
-    (routes, count)
+        .collect()
 }
 
 fn main() {
@@ -315,9 +311,10 @@ fn main() {
     loop {
         println!("Current: `{}`", input);
 
-        let (routes, n) = get_routes(&index, &state, &vocabulary);
+        let start_route = Instant::now();
+        let routes = get_routes(&index, &state, &vocabulary);
 
-        println!("Number of transition attempts: {}", n);
+        println!("Time taken: {:?}", start_route.elapsed());
         println!("Possible next tokens: {:?}", routes);
 
         if routes.is_empty() {
