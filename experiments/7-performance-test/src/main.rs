@@ -5,7 +5,7 @@ use rand::rngs::ThreadRng;
 use rand::seq::SliceRandom;
 
 type TokenId = u32;
-type NodeId = u32;
+type NodeId = u16;
 
 trait DFA {
     fn lookup(&self, src: NodeId, token: TokenId) -> Option<NodeId>;
@@ -64,7 +64,7 @@ impl DFA for DoubleHashDFA {
 }
 
 struct FlatDFA {
-    offsets: Vec<NodeId>,
+    offsets: Vec<u32>,
     edges: Vec<(TokenId, NodeId)>,
 }
 
@@ -150,7 +150,7 @@ impl DFA for FlatDFA {
 }
 
 struct HybridDFA {
-    offsets: Vec<NodeId>,
+    offsets: Vec<u32>,
     tokens: Vec<TokenId>,
     targets: Vec<HashMap<TokenId, NodeId>>,
 }
@@ -268,7 +268,7 @@ fn benchmark_dfa(
 
     'outer: loop {
         for node_id in 0..nodes_count {
-            checksum += dfa.transitions(node_id as u32);
+            checksum += dfa.transitions(node_id as NodeId);
 
             if i == 0 {
                 break 'outer
@@ -294,14 +294,14 @@ fn benchmark(nodes_count: usize, links_count: usize, vocabulary_size: u32, looku
     let mut transitions: Vec<(NodeId, TokenId, NodeId)> = Vec::new();
 
     for src in 0..nodes_count {
-        let src = src as u32;
+        let src = src as NodeId;
 
         tokens.shuffle(&mut rng);
 
         let selected_tokens = &tokens[0..links_count];
 
         for &token in selected_tokens {
-            let target = rng.random_range(0..nodes_count) as u32;
+            let target = rng.random_range(0..nodes_count) as NodeId;
 
             transitions.push((src, token, target));
         }

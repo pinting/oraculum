@@ -185,21 +185,17 @@ impl Index {
     }
 }
 
-fn get_routes(index: &Index, state: &u32, vocabulary: &Vocabulary) -> (Vec<Rc<str>>, usize) {
+fn get_routes(index: &Index, state: &u32, vocabulary: &Vocabulary) -> Vec<Rc<str>> {
     let Some(ids) = index.allowed_tokens(state) else {
-        return (Vec::new(), 0);
+        return Vec::new();
     };
 
-    let mut count = 0;
-    let routes = ids
+    ids
         .iter()
         .filter_map(|&id| {
-            count += 1;
             vocabulary.id_to_token.get(&id).cloned()
         })
-        .collect();
-
-    (routes, count)
+        .collect()
 }
 
 fn main() {
@@ -210,8 +206,8 @@ fn main() {
         println!("Failed to read vocabulary. Ensure ../../vocabulary.tiktoken exists.");
         return;
     };
-
-    // Literal "EOS" 103824    
+   
+    // Literal "EOS" 103824
     let eos_token_id = 103824;
     
     let mut vocabulary = Vocabulary::new(eos_token_id);
@@ -263,9 +259,10 @@ fn main() {
     loop {
         println!("Current: `{}`", input);
 
-        let (routes, n) = get_routes(&index, &state, &vocabulary);
+        let start_routes = Instant::now();
+        let routes = get_routes(&index, &state, &vocabulary);
 
-        println!("Number of transition attempts: {}", n);
+        println!("Time to get routes: {:?}", start_routes.elapsed());
         println!("Possible next tokens: {:?}", routes);
 
         if routes.is_empty() {

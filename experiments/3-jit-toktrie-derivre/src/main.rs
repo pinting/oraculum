@@ -29,7 +29,7 @@ impl Vocabulary {
     }
 
     fn load(&mut self, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-        let text = str::from_utf8(data)?;
+        let text = std::str::from_utf8(data)?;
 
         for line in text.lines() {
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -60,7 +60,6 @@ impl Vocabulary {
 struct RegexRecognizer<'a> {
     rx: RefCell<&'a mut derivre::Regex>,
     start_state: derivre::StateID,
-    n: &'a Cell<usize>,
 }
 
 impl<'a> FunctionalRecognizer<derivre::StateID> for RegexRecognizer<'a> {
@@ -70,8 +69,6 @@ impl<'a> FunctionalRecognizer<derivre::StateID> for RegexRecognizer<'a> {
 
     fn try_append(&self, state: derivre::StateID, byte: u8) -> Option<derivre::StateID> {
         let next = self.rx.borrow_mut().transition_bytes(state, &[byte]);
-
-        self.n.set(self.n.get() + 1);
 
         if next.is_dead() {
             None
@@ -87,19 +84,15 @@ fn get_routes(
     state: derivre::StateID,
     tokens: &[Rc<str>],
 ) -> Vec<Rc<str>> {
-    let n = Cell::new(0);
     let recognizer = RegexRecognizer {
         rx: RefCell::new(rx),
         start_state: state,
-        n: &n,
     };
     
     let mut stack_recognizer = StackRecognizer::from(recognizer);
     let mut result = trie.alloc_token_set();
 
     trie.add_bias(&mut stack_recognizer, &mut result, &[]);
-
-    println!("Number of transition attempts: {}", n.get());
 
     result
         .iter()
@@ -180,8 +173,10 @@ fn main() {
     loop {
         println!("Current: `{}`", input);
 
+        let start = Instant::now();
         let routes = get_routes(&trie, &mut rx, state, &tokens);
 
+        println!("Time taken: {:?}", start.elapsed());
         println!("Possible next tokens: {:?}", routes);
 
         if routes.is_empty() {
