@@ -63,92 +63,6 @@ impl DFA for DoubleHashDFA {
     }
 }
 
-struct FlatDFA {
-    offsets: Vec<u32>,
-    edges: Vec<(TokenId, NodeId)>,
-}
-
-impl FlatDFA {
-    fn new(transitions: &[(NodeId, TokenId, NodeId)], nodes_count: u32) -> Self {
-        let mut transitions: Vec<(NodeId, TokenId, NodeId)> = transitions.to_vec();
-
-        transitions.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-
-        let mut offsets = vec![0; (nodes_count + 2) as usize];
-        let mut edges = Vec::with_capacity(transitions.len());
-
-        let mut c = 0; 
-        let mut idx = 0;
-
-        for (src, token, target) in &transitions {
-            while c < (*src as usize) {
-                c += 1;
-                offsets[c] = idx;
-            }
-
-            edges.push((*token, *target));
-
-            idx += 1;
-        }
-
-        while c < nodes_count as usize {
-            c += 1;
-            offsets[c] = idx;
-        }
-
-        Self { offsets, edges }
-    }
-}
-
-impl DFA for FlatDFA {
-    #[inline(always)]
-    fn lookup(&self, src: NodeId, token: TokenId) -> Option<NodeId> {
-        let idx = src as usize;
-
-        if idx + 1 >= self.offsets.len() {
-            return None;
-        }
-
-        let start = self.offsets[idx] as usize;
-        let end = self.offsets[idx + 1] as usize;
-
-        if start == end {
-            return None;
-        }
-
-        let slice = &self.edges[start..end];
-
-        slice.binary_search_by_key(&token, |e| e.0)
-            .ok()
-            .map(|i| slice[i].1)
-    }
-
-    fn transitions(&self, node: NodeId) -> u128 {
-        let idx = node as usize;
-        let mut sum = 0;
-
-        if idx + 1 < self.offsets.len() {
-            let start = self.offsets[idx] as usize;
-            let end = self.offsets[idx + 1] as usize;
-
-            for edge in &self.edges[start..end] {
-                sum += edge.0 as u128;
-            }
-        }
-        sum
-    }
-
-    fn name(&self) -> &str {
-        "FlatDFA"
-    }
-
-    fn memory_usage(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + self.offsets.capacity() * std::mem::size_of::<NodeId>()
-            + self.edges.capacity() * std::mem::size_of::<(TokenId, NodeId)>()
-    }
-}
-
 struct HybridDFA {
     offsets: Vec<u32>,
     tokens: Vec<TokenId>,
@@ -229,6 +143,260 @@ impl DFA for HybridDFA {
 
         mem += self.offsets.capacity() * std::mem::size_of::<NodeId>();
         mem += self.tokens.capacity() * std::mem::size_of::<TokenId>();
+
+        mem
+    }
+}
+
+struct FastHashDFA {
+    headers: Vec<(/* data_offset: */ u32, /* index_offset: */ u32, /* section_mask: */ u32)>, // N = nodes_count
+    tokens: Vec<TokenId>,
+    targets: Vec<NodeId>,
+    index: Vec<u32>,
+}
+
+impl FastHashDFA {
+    #[inline(always)]
+    fn hash(token: u32, mask: u32) -> u32 {
+        /*
+        * Why `0x9E3779B9`?
+        *
+        * It all comes down to the golden ratio ϕ and the modulo of odd numbers.
+        *
+        * `ϕ = 1.618033988749...`
+        *
+        * Scale this down into 32-bit integer space:
+        *
+        * `2^32 / ϕ = 2654435769.498698323...`
+        *
+        * Cut off the fractions, and the result is `0x9E3779B9` in hexadecimal.
+        *
+        * Why is this beneficial?
+        *
+        * 1.
+        *
+        * In hash algorithms, it is desirable to distribute outputs as uniformly as possible.
+        * If token IDs were not scattered, they would not use the memory section evenly,
+        * increasing the possibility of a collision (which is expensive).
+        *
+        * 2.
+        *
+        * Because the maximum size of a section is always `2^N`, it is important to
+        * scale with a number `a` where `GCD(a, 2) = 1`; thus, `a` must be an odd number.
+        *
+        * Why is this important?
+        *
+        * E.g., a section size is 2^3 = 8, so its mask is 7 = 0111b.
+        * 
+        * Let's try with `a = 2` where `GCD(2, 2) = 2`.
+        *
+        * ```
+        * token_id => (token_id * a) & mask
+        *
+        * 0 =>  0 & 7 = 00000 & 00111 = 0
+        * 1 =>  2 & 7 = 00010 & 00111 = 2
+        * 2 =>  4 & 7 = 00100 & 00111 = 4
+        * 3 =>  6 & 7 = 00110 & 00111 = 6
+        * 4 =>  8 & 7 = 01000 & 00111 = 0 Collision!
+        * 5 => 10 & 7 = 01010 & 00111 = 2 Collision!
+        * 6 => 12 & 7 = 01100 & 00111 = 4 Collision!
+        * 7 => 14 & 7 = 01110 & 00111 = 6 Collision!
+        * ```
+        *
+        * Let's try with `a = 3` where `GCD(3, 2) = 1`.
+        *
+        * ```
+        * token_id => (token_id * a) & mask
+        *
+        * 0 =>  0 & 7 = 00000 & 00111 = 0
+        * 1 =>  3 & 7 = 00011 & 00111 = 3
+        * 2 =>  6 & 7 = 00110 & 00111 = 6
+        * 3 =>  9 & 7 = 01001 & 00111 = 1
+        * 4 => 12 & 7 = 01100 & 00111 = 4
+        * 5 => 15 & 7 = 01111 & 00111 = 7
+        * 6 => 18 & 7 = 10010 & 00111 = 2
+        * 7 => 21 & 7 = 10101 & 00111 = 5
+        * ```
+        *
+        * No collisions within the section size!
+        *
+        * As `ax ≡ 1 (mod m)`,
+        * if `x <= m` and `GCD(a, m) = 1`,
+        * it reshuffles numbers between [0, m) without overlaps.
+        */
+
+        return token.wrapping_mul(0x9E3779B9) & mask
+    }
+
+    fn new(transitions: &[(NodeId, TokenId, NodeId)], max_node_id: u32) -> Self {
+        let mut transitions = transitions.to_vec();
+
+        transitions.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let mut headers = Vec::with_capacity(max_node_id as usize);
+        let mut tokens = Vec::with_capacity(transitions.len());
+        let mut targets = Vec::with_capacity(transitions.len());
+        
+        let mut idx = 0;
+        let mut index_size = 0;
+
+        // Iterate over the nodes to fill up headers, tokens and targets
+        // and calculate the size of the index.
+        for node_id in 0..max_node_id {
+            let node_id = node_id as NodeId;
+            let data_offset = tokens.len();
+
+            while idx < transitions.len() && transitions[idx].0 == node_id {
+                let (_, token, target) = transitions[idx];
+
+                tokens.push(token);
+                targets.push(target);
+
+                idx += 1;
+            }
+            
+            let data_count = tokens.len() - data_offset;
+
+            if data_count == 0 {
+                headers.push((0, 0, 0));
+
+                continue
+            }
+
+            // While data count equals with the actual length of the data section,
+            // the index section needs room to reduce the number of hash collisions.
+            // Keeping the size 2^N is required to replace the expensive modulo
+            // operation with bit masking.
+            let section_size = (data_count * 2).next_power_of_two().max(4);
+
+            // The section size is a single 1 bit at position N.
+            // So the subtraction of 1 = 0001b will result in flipping the bits 
+            // between [0, N], creating a mask where the first 0 bit is at N.
+            let section_mask = section_size - 1; 
+
+            let index_offset = index_size;
+            
+            index_size += section_size;
+
+            headers.push((data_offset as u32, index_offset as u32, section_mask as u32));
+        }
+        
+        // Create the index
+        let mut index = vec![u32::MAX; index_size];
+
+        // Iterate over the nodes once again to fill the index
+        for node_id in 0..max_node_id {
+            let node_id = node_id as usize;
+
+            let (start_idx, index_offset, section_mask) = match headers.get(node_id) {
+                Some(&h) => h,
+                None => panic!("Headers out of bounds!"),
+            };
+
+            let end_idx = match headers.get(node_id + 1) {
+                Some(&h) => h.0,
+                None => transitions.len() as u32,
+            };
+
+            let count = end_idx - start_idx;
+
+            for i in 0..count {
+                let idx = (start_idx + i) as usize;
+                let (_, token, _) = match transitions.get(idx) {
+                    Some(&t) => t,
+                    None => panic!("Transitions out of bounds!"),
+                };
+
+                let i = i as u32;
+                let mut h = FastHashDFA::hash(token, section_mask);
+                
+                loop {
+                    let p = (index_offset + h) as usize;
+
+                    if index[p] == u32::MAX {
+                        index[p] = i;
+
+                        break;
+                    }
+
+                    h = (h + 1) & section_mask;
+                }
+            }
+        }
+
+        Self {
+            headers,
+            tokens,
+            targets,
+            index,
+        }
+    }
+}
+
+impl DFA for FastHashDFA {
+    #[inline(always)]
+    fn lookup(&self, src: NodeId, token: TokenId) -> Option<NodeId> {
+        let src = src as usize;
+        
+        let (data_offset, index_offset, section_mask) = match self.headers.get(src) {
+            Some(&h) => h,
+            None => return None,
+        };
+
+        if section_mask == 0 { return None; }
+
+        let mut h = FastHashDFA::hash(token, section_mask) as usize;
+        let index_offset = index_offset as usize;
+
+        loop {
+            let p = index_offset + h;
+            let i = unsafe { *self.index.get_unchecked(p) };
+
+            if i == u32::MAX {
+                return None;
+            }
+
+            let idx = (data_offset as usize) + (i as usize);
+            let candidate = unsafe { *self.tokens.get_unchecked(idx) };
+
+            if candidate == token {
+                return Some(unsafe { *self.targets.get_unchecked(idx) });
+            }
+
+            h = (h + 1) & section_mask as usize;
+        }
+    }
+
+    fn transitions(&self, node: NodeId) -> u128 {
+        let mut checksum = 0;
+        let idx = node as usize;
+
+        if let Some(&(start, _, _)) = self.headers.get(idx) {
+            let end = if idx + 1 < self.headers.len() {
+                self.headers[idx + 1].0
+            } else {
+                self.tokens.len() as u32
+            };
+
+            for &token in &self.tokens[start as usize..end as usize] {
+                checksum += token as u128;
+            }
+        }
+
+        checksum
+    }
+
+    fn name(&self) -> &str {
+        "FastHashDFA"
+    }
+
+    fn memory_usage(&self) -> usize {
+        let mut mem = std::mem::size_of::<Self>();
+
+        mem += self.headers.capacity() * std::mem::size_of::<(u32, u32, u32)>();
+        mem += self.tokens.capacity() * std::mem::size_of::<TokenId>();
+        mem += self.targets.capacity() * std::mem::size_of::<NodeId>();
+        mem += self.index.capacity() * std::mem::size_of::<u32>();
 
         mem
     }
@@ -315,8 +483,8 @@ fn benchmark(nodes_count: usize, links_count: usize, vocabulary_size: u32, looku
 
     let dfas: Vec<Box<dyn DFA>> = vec![
         Box::new(DoubleHashDFA::new(&transitions)),
-        Box::new(FlatDFA::new(&transitions, nodes_count as u32)),
         Box::new(HybridDFA::new(&transitions, nodes_count as u32)),
+        Box::new(FastHashDFA::new(&transitions, nodes_count as u32)),
     ];
 
     let mut prev_checksum: Option<u128> = None;
@@ -328,7 +496,7 @@ fn benchmark(nodes_count: usize, links_count: usize, vocabulary_size: u32, looku
         
         if let Some(prev_checksum) = prev_checksum {
             if prev_checksum != checksum {
-                println!("Checksum MISMATCH!");
+                println!("Checksum MISMATCH for {}", dfa.name());
             }
         }
 
@@ -390,11 +558,6 @@ fn main() {
 
     let nodes_count = 2_000;
     let links = 100_000;
-
-    benchmark(nodes_count, links, vocabulary_size, lookup_count, scan_count);
-
-    let nodes_count = 5_000;
-    let links = 250_000;
 
     benchmark(nodes_count, links, vocabulary_size, lookup_count, scan_count);
 }
