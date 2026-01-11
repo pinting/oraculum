@@ -349,6 +349,9 @@ impl DFA for FastHashDFA {
         let index_offset = index_offset as usize;
 
         loop {
+            // Unsafe access is used here for maximum performance.
+            // Bounds checks are omitted because `h` is masked by `section_mask` 
+            // which guarantees it falls within the allocated section size for this node.
             let p = index_offset + h;
             let i = unsafe { *self.index.get_unchecked(p) };
 
