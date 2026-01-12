@@ -1,0 +1,97 @@
+use rustc_hash::{FxHashMap as HashMap};
+
+use crate::number::Number;
+use crate::dfa::DFA;
+
+pub struct HybridDFA<N, T> {
+    offsets: Vec<u32>,
+    tokens: Vec<T>,
+    targets: Vec<HashMap<T, N>>,
+}
+
+impl<N, T> HybridDFA<N, T>
+where N: Number, T: Number {
+    pub fn new(transitions: &[(N, T, N)], nodes_count: usize) -> Self {
+        let mut targets = vec![HashMap::default(); nodes_count];
+
+        let mut transitions = transitions.to_vec();
+
+        transitions.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let mut offsets = vec![0; nodes_count + 2];
+        let mut tokens = Vec::with_capacity(transitions.len());
+
+        let mut c = 0;
+        let mut idx = 0;
+
+        for (src, token, target) in transitions {
+            if let Some(map) = targets.get_mut(src.to_usize()) {
+                map.insert(token, target);
+            }
+
+            while c < src.to_usize() {
+                c += 1;
+                offsets[c] = idx;
+            }
+
+            tokens.push(token);
+            idx += 1;
+        }
+
+        while c < nodes_count {
+            c += 1;
+            offsets[c] = idx;
+        }
+
+        Self { targets, offsets, tokens }
+    }
+}
+
+impl<N, T> DFA<N, T> for HybridDFA<N, T>
+where N: Number, T: Number {
+    #[inline(always)]
+    fn lookup(&self, src: N, token: T) -> Option<N> {
+        self.targets.get(src.to_usize())
+            .and_then(|m| m.get(&token))
+            .copied()
+    }
+
+    fn transitions(&self, node: N) -> Option<Vec<T>> {
+        let node = node.to_usize();
+
+        if node + 1 >= self.offsets.len() {
+            return None
+        }
+
+        let start = self.offsets[node] as usize;
+        let end = self.offsets[node + 1] as usize;
+
+        let count = end - start;
+        let mut result = Vec::with_capacity(count);
+
+        for &token in &self.tokens[start..end] {
+            result.push(token);
+        }
+        
+        Some(result)
+    }
+
+    fn name(&self) -> &str {
+        "HybridDFA"
+    }
+
+    fn memory_usage(&self) -> usize {
+        let mut mem = std::mem::size_of::<Self>();
+
+        mem += self.targets.capacity() * std::mem::size_of::<HashMap<T, N>>();
+
+        for map in &self.targets {
+            mem += map.capacity() * (std::mem::size_of::<T>() + std::mem::size_of::<N>() + 1);
+        }
+
+        mem += self.offsets.capacity() * std::mem::size_of::<N>();
+        mem += self.tokens.capacity() * std::mem::size_of::<T>();
+
+        mem
+    }
+}
