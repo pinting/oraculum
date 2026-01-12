@@ -76,9 +76,9 @@ fn benchmark_dfa<N: Number, T: Number>(
     (lookup_duration, scan_duration, checksum)
 }
 
-fn benchmark<N: Number, T: Number>(nodes_count: usize, links_count: usize, vocabulary_size: u32, lookup_count: usize, scan_count: usize) {
-    println!("Benchmarking with nodes_count = {}, links_count = {}, vocabulary_size = {}, lookup_count = {}, scan_count = {}", 
-        nodes_count, links_count, vocabulary_size, lookup_count, scan_count);
+fn benchmark<N: Number, T: Number>(nodes_count: usize, min_links: usize, max_links: usize, vocabulary_size: u32, lookup_count: usize, scan_count: usize) {
+    println!("Benchmarking with nodes_count = {}, min_links = {}, max_links = {}, vocabulary_size = {}, lookup_count = {}, scan_count = {}", 
+        nodes_count, min_links, max_links, vocabulary_size, lookup_count, scan_count);
     
     println!("Generating...");
 
@@ -91,7 +91,8 @@ fn benchmark<N: Number, T: Number>(nodes_count: usize, links_count: usize, vocab
 
         tokens.shuffle(&mut rng);
 
-        let selected_tokens = &tokens[0..links_count];
+        let count = rng.random_range(min_links..max_links + 1);
+        let selected_tokens = &tokens[0..count];
 
         for &token in selected_tokens {
             let target = N::from_usize(rng.random_range(0..nodes_count));
@@ -106,18 +107,20 @@ fn benchmark<N: Number, T: Number>(nodes_count: usize, links_count: usize, vocab
 
     println!("Generated {} edges", transitions.len());
 
-    let dfas: Vec<Box<dyn DFA<N, T>>> = vec![
-        Box::new(DoubleHashDFA::new(&transitions)),
-        Box::new(FlatDFA::<N, T, u32>::new(&transitions, nodes_count)),
-        Box::new(HybridDFA::new(&transitions, nodes_count)),
-        Box::new(FastHashDFA::<N, T, u32, u32>::new(&transitions, nodes_count)),
-        Box::new(DynamicFastHashDFA::<N, T, u32>::new(&transitions, nodes_count)),
+    let factories: Vec<Box<dyn Fn() -> Box<dyn DFA<N, T>>>> = vec![
+        Box::new(|| Box::new(DoubleHashDFA::new(&transitions))),
+        Box::new(|| Box::new(FlatDFA::<N, T, u32>::new(&transitions, nodes_count))),
+        Box::new(|| Box::new(HybridDFA::new(&transitions, nodes_count))),
+        Box::new(|| Box::new(FastHashDFA::<N, T, u32, u32>::new(&transitions, nodes_count))),
+        Box::new(|| Box::new(DynamicFastHashDFA::<N, T, u32>::new(&transitions, nodes_count))),
     ];
 
     let mut prev_checksum: Option<u128> = None;
     let mut results = Vec::new();
 
-    for dfa in &dfas {
+    for factory in factories {
+        let dfa = factory();
+        
         let (lookup_duration, scan_duration, checksum) = 
             benchmark_dfa(dfa.as_ref(), &test_transitions, nodes_count, lookup_count, scan_count);
         
@@ -129,7 +132,7 @@ fn benchmark<N: Number, T: Number>(nodes_count: usize, links_count: usize, vocab
 
         prev_checksum = Some(checksum);
 
-        results.push((dfa.name(), lookup_duration, scan_duration, dfa.memory_usage()));
+        results.push((dfa.name().to_string(), lookup_duration, scan_duration, dfa.memory_usage()));
     }
 
     results.sort_by_key(|r| r.1);
@@ -159,32 +162,13 @@ fn benchmark<N: Number, T: Number>(nodes_count: usize, links_count: usize, vocab
 
 fn main() {
     let vocabulary_size = 256_000;
-
     let lookup_count = 100_000;
     let scan_count = 100_000;
 
-    let nodes_count = 200;
-    let links = 50;
-
-    benchmark::<u16, u32>(nodes_count, links, vocabulary_size, lookup_count, scan_count);
-
-    let nodes_count = 200;
-    let links = 100;
-
-    benchmark::<u16, u32>(nodes_count, links, vocabulary_size, lookup_count, scan_count);
-
-    let nodes_count = 2_000;
-    let links = 1_000;
-
-    benchmark::<u16, u32>(nodes_count, links, vocabulary_size, lookup_count, scan_count);
-
-    let nodes_count = 2_000;
-    let links = 10_000;
-
-    benchmark::<u16, u32>(nodes_count, links, vocabulary_size, lookup_count, scan_count);
-
-    let nodes_count = 2_000;
-    let links = 50_000;
-
-    benchmark::<u16, u32>(nodes_count, links, vocabulary_size, lookup_count, scan_count);
+    benchmark::<u16, u32>(200, 25, 75, vocabulary_size, lookup_count, scan_count);
+    benchmark::<u16, u32>(200, 50, 150, vocabulary_size, lookup_count, scan_count);
+    benchmark::<u16, u32>(2_000, 50, 1_000, vocabulary_size, lookup_count, scan_count);
+    benchmark::<u16, u32>(2_000, 500, 1_500, vocabulary_size, lookup_count, scan_count);
+    benchmark::<u16, u32>(2_000, 5_000, 15_000, vocabulary_size, lookup_count, scan_count);
+    benchmark::<u16, u32>(2_000, 25_000, 75_000, vocabulary_size, lookup_count, scan_count);
 }
