@@ -4,14 +4,14 @@ use std::borrow::Cow;
 use crate::number::Number;
 use crate::dfa::DFA;
 
-pub struct HybridDFA<N, T> {
-    offsets: Vec<u32>,
+pub struct HybridDFA<N, T, O> {
+    offsets: Vec<O>,
     tokens: Vec<T>,
     targets: Vec<HashMap<T, N>>,
 }
 
-impl<N, T> HybridDFA<N, T>
-where N: Number, T: Number {
+impl<N, T, O> HybridDFA<N, T, O>
+where N: Number, T: Number, O: Number {
     pub fn new(transitions: &[(N, T, N)], nodes_count: usize) -> Self {
         let mut targets = vec![HashMap::default(); nodes_count];
 
@@ -19,11 +19,11 @@ where N: Number, T: Number {
 
         transitions.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-        let mut offsets = vec![0; nodes_count + 2];
+        let mut offsets = vec![O::from_usize(0); nodes_count + 2];
         let mut tokens = Vec::with_capacity(transitions.len());
 
         let mut c = 0;
-        let mut idx = 0;
+        let mut idx = O::from_usize(0);
 
         for (src, token, target) in transitions {
             if let Some(map) = targets.get_mut(src.to_usize()) {
@@ -36,7 +36,7 @@ where N: Number, T: Number {
             }
 
             tokens.push(token);
-            idx += 1;
+            idx += O::from_usize(1);
         }
 
         while c < nodes_count {
@@ -48,8 +48,8 @@ where N: Number, T: Number {
     }
 }
 
-impl<N, T> DFA<N, T> for HybridDFA<N, T>
-where N: Number, T: Number {
+impl<N, T, O> DFA<N, T> for HybridDFA<N, T, O>
+where N: Number, T: Number, O: Number {
     #[inline(always)]
     fn lookup(&self, src: N, token: T) -> Option<N> {
         self.targets.get(src.to_usize())
@@ -64,8 +64,11 @@ where N: Number, T: Number {
             return None
         }
 
-        let start = self.offsets[node] as usize;
-        let end = self.offsets[node + 1] as usize;
+        let start = self.offsets[node];
+        let start = start.to_usize();
+
+        let end: O = self.offsets[node + 1];
+        let end = end.to_usize();
 
         Some(Cow::Borrowed(&self.tokens[start..end]))
     }
@@ -83,7 +86,7 @@ where N: Number, T: Number {
             mem += map.capacity() * (std::mem::size_of::<T>() + std::mem::size_of::<N>() + 1);
         }
 
-        mem += self.offsets.capacity() * std::mem::size_of::<N>();
+        mem += self.offsets.capacity() * std::mem::size_of::<O>();
         mem += self.tokens.capacity() * std::mem::size_of::<T>();
 
         mem

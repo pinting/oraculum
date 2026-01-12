@@ -70,7 +70,7 @@ where N: Number, T: Number, O: Number {
             } else if section_size < u64::MAX as usize {
                 64
             } else {
-                panic!("Section size is too large!")
+                panic!("Section size is too large!");
             };
 
             let bytes = section_size * (unit_size as usize / 8);
