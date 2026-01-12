@@ -49,25 +49,40 @@ The combination of AOT index building with TokTrie - Derivre: faster build time,
 
 ### 7th - Performance comparisons between double HashMap / CSR continuous vector / hybrid approach
 
-The benchmarks demonstrate a distinct space-time trade-off where the HybridDFA achieves the fastest performance for both lookups and scanning but requires the largest memory allocation due to its dual data structure approach. In contrast, the FlatDFA is the most memory-efficient option and maintains competitive scan speeds, though its binary search lookup mechanism causes performance to degrade significantly as the density of links increases. Ultimately, the DoubleHashDFA (the implementation `outlines-core` uses) proves to be the least effective implementation, consistently suffering from the slowest scan times while offering no distinct advantage in lookup speed or memory usage compared to the other architectures.
+The benchmarks demonstrate a space-time trade-off where the flat structures achieves the fastest performance for scanning and hash structures for lookups; while hybrid solutions are the fastest, they require the largest memory allocation due to their dual data structure approach. Ultimately, the `DoubleHashDFA` (the implementation `outlines-core` uses) proves to be a good universal solution, average in both lookups and scans, but only suffering (worst case) 2x memory usage compared to `FlatDFA` which is the most compact, but having a slow lookup algorithm due to its linearity (optimized by binary tree search, but still lacking the effectiveness of hash based approaches).
+
+The heavily optimized `DynamicFastHashDFA` outperforms other candidates in lookup and scan speeds, but suffers a memory explosion after 15k links.
 
 ```
-Benchmarking with nodes_count = 2000, links_count = 10000, vocabulary_size = 256000, lookup_count = 100000, scan_count = 100000
+Nodes: 200 | Links: 25 - 75
 
-Lookup placements:
-	HybridDFA - 30.546402ms
-	DoubleHashDFA - 39.001341ms
-	FlatDFA - 70.799119ms
+Speed: 6.04ms (Lookup) / 37.17ms (Scan)
+Memory: 168% of FlatDFA / 91% of DoubleHashDFA
 
-Scan placements:
-	HybridDFA - 5.33641904s
-	FlatDFA - 5.411008303s
-	DoubleHashDFA - 16.131345855s
+Nodes: 200 | Links: 50 - 150
 
-Memory placements:
-	FlatDFA - 152.59175 MB
-	DoubleHashDFA - 191.52591 MB
-	HybridDFA - 267.76512 MB
+Speed: 6.30ms (Lookup) / 67.00ms (Scan)
+Memory: 193% of FlatDFA / 109% of DoubleHashDFA
+
+Nodes: 2,000 | Links: 50 - 1,000
+
+Speed: 11.98ms (Lookup) / 332.35ms (Scan)
+Memory: 190% of FlatDFA / 112% of DoubleHashDFA
+
+Nodes: 2,000 | Links: 500 - 1,500
+
+Speed: 16.97ms (Lookup) / 640.64ms (Scan)
+Memory: 200% of FlatDFA / 119% of DoubleHashDFA
+
+Nodes: 2,000 | Links: 5,000 - 15,000
+
+Speed: 25.19ms (Lookup) / 6.33s (Scan)
+Memory: 192% of FlatDFA / 119% of DoubleHashDFA
+
+Nodes: 2,000 | Links: 25,000 - 75,000
+
+Speed: 25.49ms (Lookup) / 31.73s (Scan)
+Memory: 295% of FlatDFA / 169% of DoubleHashDFA
 ```
 
 ## License
