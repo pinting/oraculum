@@ -1,15 +1,12 @@
+use std::borrow::Cow;
+
 use crate::number::Number;
 use crate::dfa::DFA;
 
-#[derive(Debug, Clone, Copy)]
-struct Edge<N, T> {
-    token: T,
-    target: N,
-}
-
 pub struct FlatDFA<N, T, O> {
     offsets: Vec<O>,
-    edges: Vec<Edge<N, T>>,
+    tokens: Vec<T>,
+    targets: Vec<N>,
 }
 
 impl<N, T, O> FlatDFA<N, T, O>
@@ -20,7 +17,8 @@ where N: Number, T: Number, O: Number {
         transitions.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
         let mut offsets = vec![O::from_usize(0); nodes_count + 2];
-        let mut edges = Vec::with_capacity(transitions.len());
+        let mut tokens = Vec::with_capacity(transitions.len());
+        let mut targets = Vec::with_capacity(transitions.len());
 
         let mut c = 0; // Current node
         let mut idx = O::from_usize(0);
@@ -33,9 +31,8 @@ where N: Number, T: Number, O: Number {
                 offsets[c] = idx;
             }
 
-            let edge = Edge { token: *token, target: *target };
-
-            edges.push(edge);
+            tokens.push(*token);
+            targets.push(*target);
 
             idx += O::from_usize(1);
         }
@@ -45,7 +42,7 @@ where N: Number, T: Number, O: Number {
             offsets[c] = idx;
         }
 
-        Self { offsets, edges }
+        Self { offsets, tokens, targets }
     }
 }
 
@@ -69,14 +66,14 @@ where N: Number, T: Number, O: Number {
             return None;
         }
 
-        let slice = &self.edges[start..end];
+        let slice = &self.tokens[start..end];
 
-        slice.binary_search_by_key(&token, |e| e.token)
+        slice.binary_search(&token)
             .ok()
-            .map(|i| slice[i].target)
+            .map(|i| self.targets[start + i])
     }
-
-    fn transitions(&self, node: N) -> Option<Vec<T>> {
+    
+    fn transitions<'a>(&'a self, node: N) -> Option<Cow<'a, [T]>> {
         let node = node.to_usize();
 
         if node + 1 >= self.offsets.len() {
@@ -89,14 +86,7 @@ where N: Number, T: Number, O: Number {
         let end = self.offsets[node + 1];
         let end = end.to_usize();
 
-        let count = end - start;
-        let mut result = Vec::with_capacity(count);
-
-        for edge in &self.edges[start..end] {
-            result.push(edge.token);
-        }
-
-        Some(result)
+        Some(Cow::Borrowed(&self.tokens[start..end]))
     }
 
     fn name(&self) -> &str {
@@ -106,7 +96,8 @@ where N: Number, T: Number, O: Number {
     fn memory_usage(&self) -> usize {
         let mut mem = std::mem::size_of::<Self>();
 
-        mem += self.edges.capacity() * std::mem::size_of::<Edge<N, T>>();
+        mem += self.tokens.capacity() * std::mem::size_of::<T>();
+        mem += self.targets.capacity() * std::mem::size_of::<N>();
         mem += self.offsets.capacity() * std::mem::size_of::<O>();
 
         mem

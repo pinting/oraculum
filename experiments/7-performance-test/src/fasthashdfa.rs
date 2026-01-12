@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::number::Number;
 use crate::dfa::DFA;
 
@@ -169,7 +171,7 @@ where N: Number, T: Number, O: Number, I: Number {
         }
     }
 
-    fn transitions(&self, node: N) -> Option<Vec<T>> {
+    fn transitions<'a>(&'a self, node: N) -> Option<Cow<'a, [T]>> {
         let node = node.to_usize();
 
         let header = self.headers.get(node)?;
@@ -181,14 +183,7 @@ where N: Number, T: Number, O: Number, I: Number {
             None => self.tokens.len(),
         };
 
-        let count = end - start;
-        let mut result = Vec::with_capacity(count);
-
-        for &token in &self.tokens[start..end] {
-            result.push(token);
-        }
-
-        Some(result)
+        Some(Cow::Borrowed(&self.tokens[start..end]))
     }
 
     fn name(&self) -> &str {
