@@ -111,7 +111,7 @@ where N: Number, T: Number, O: Number, I: Number {
                     None => panic!("Transitions out of bounds!"),
                 };
 
-                let mut h = fast_hash(token, section_mask);
+                let mut h = hash(token, section_mask);
                 
                 loop {
                     let p = index_offset.to_usize() + h.to_usize();
@@ -145,7 +145,7 @@ where N: Number, T: Number, O: Number, I: Number {
         let header = self.headers.get(src)?;
         let Header { data_offset, index_offset, section_mask } = *header;
 
-        let mut h = fast_hash(token, section_mask);
+        let mut h = hash(token, section_mask);
 
         loop {
             // Unsafe access is used here for maximum performance.
@@ -208,7 +208,7 @@ where N: Number, T: Number, O: Number, I: Number {
 }
 
 /*
- * How fast_hash() works under the hood?
+ * How hash() works under the hood?
  * 
  * What is this magical number the hash algorithm multiplies with?
  *
@@ -277,6 +277,6 @@ where N: Number, T: Number, O: Number, I: Number {
  */
 
 #[inline(always)]
-fn fast_hash<N: Number>(n: N, mask: N) -> N {
+fn hash<N: Number>(n: N, mask: N) -> N {
     return n.wrapping_mul(N::GOLDEN_RATIO) & mask
 }

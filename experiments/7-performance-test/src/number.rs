@@ -20,6 +20,16 @@ pub trait Number: Copy + Clone + Debug + Hash + Eq + Ord + Sized
     fn wrapping_mul(self, rhs: Self) -> Self;
 }
 
+impl Number for u8 {
+    const GOLDEN_RATIO: Self = 0x9E;
+
+    #[inline(always)] fn max_value() -> Self { u8::MAX }
+    #[inline(always)] fn from_usize(v: usize) -> Self { v as Self }
+    #[inline(always)] fn to_usize(self) -> usize { self as usize }
+    #[inline(always)] fn to_u128(self) -> u128 { self as u128 }
+    #[inline(always)] fn wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
+}
+
 impl Number for u16 {
     const GOLDEN_RATIO: Self = 0x9E37;
 

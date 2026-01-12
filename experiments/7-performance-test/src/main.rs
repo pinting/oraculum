@@ -9,13 +9,15 @@ mod flatdfa;
 mod doublehashdfa;
 mod hybriddfa;
 mod fasthashdfa;
+mod dynamicfasthashdfa;
 
-use crate::flatdfa::FlatDFA;
 use crate::number::Number;
 use crate::dfa::DFA;
+use crate::flatdfa::FlatDFA;
 use crate::doublehashdfa::DoubleHashDFA;
 use crate::hybriddfa::HybridDFA;
 use crate::fasthashdfa::FastHashDFA;
+use crate::dynamicfasthashdfa::DynamicFastHashDFA;
 
 fn benchmark_dfa<N: Number, T: Number>(
     dfa: &dyn DFA<N, T>,
@@ -109,6 +111,7 @@ fn benchmark<N: Number, T: Number>(nodes_count: usize, links_count: usize, vocab
         Box::new(FlatDFA::<N, T, u32>::new(&transitions, nodes_count)),
         Box::new(HybridDFA::new(&transitions, nodes_count)),
         Box::new(FastHashDFA::<N, T, u32, u32>::new(&transitions, nodes_count)),
+        Box::new(DynamicFastHashDFA::<N, T, u32>::new(&transitions, nodes_count)),
     ];
 
     let mut prev_checksum: Option<u128> = None;
@@ -160,7 +163,6 @@ fn main() {
     let lookup_count = 100_000;
     let scan_count = 100_000;
 
-    /*
     let nodes_count = 200;
     let links = 50;
 
@@ -175,17 +177,14 @@ fn main() {
     let links = 1_000;
 
     benchmark::<u16, u32>(nodes_count, links, vocabulary_size, lookup_count, scan_count);
-    */
 
     let nodes_count = 2_000;
     let links = 10_000;
 
     benchmark::<u16, u32>(nodes_count, links, vocabulary_size, lookup_count, scan_count);
 
-    /*
     let nodes_count = 2_000;
-    let links = 100_000;
+    let links = 50_000;
 
     benchmark::<u16, u32>(nodes_count, links, vocabulary_size, lookup_count, scan_count);
-    */
 }
