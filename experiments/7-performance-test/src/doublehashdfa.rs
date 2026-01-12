@@ -1,4 +1,5 @@
 use rustc_hash::{FxHashMap as HashMap};
+use std::borrow::Cow;
 
 use crate::number::Number;
 use crate::dfa::DFA;
@@ -26,17 +27,16 @@ where N: Number, T: Number {
     fn lookup(&self, src: N, token: T) -> Option<N> {
         self.m.get(&src).and_then(|m| m.get(&token)).copied()
     }
-
-    fn transitions(&self, node: N) -> Option<Vec<T>> {
+    
+    fn transitions<'a>(&'a self, node: N) -> Option<Cow<'a, [T]>> {
         let inner = self.m.get(&node)?;
-
         let mut result = Vec::new();
 
         for &token in inner.keys() {
             result.push(token);
         }
         
-        Some(result)
+        Some(Cow::Owned(result))
     }
 
     fn name(&self) -> &str {

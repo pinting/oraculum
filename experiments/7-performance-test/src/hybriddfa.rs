@@ -1,4 +1,5 @@
 use rustc_hash::{FxHashMap as HashMap};
+use std::borrow::Cow;
 
 use crate::number::Number;
 use crate::dfa::DFA;
@@ -56,7 +57,7 @@ where N: Number, T: Number {
             .copied()
     }
 
-    fn transitions(&self, node: N) -> Option<Vec<T>> {
+    fn transitions<'a>(&'a self, node: N) -> Option<Cow<'a, [T]>> {
         let node = node.to_usize();
 
         if node + 1 >= self.offsets.len() {
@@ -66,14 +67,7 @@ where N: Number, T: Number {
         let start = self.offsets[node] as usize;
         let end = self.offsets[node + 1] as usize;
 
-        let count = end - start;
-        let mut result = Vec::with_capacity(count);
-
-        for &token in &self.tokens[start..end] {
-            result.push(token);
-        }
-        
-        Some(result)
+        Some(Cow::Borrowed(&self.tokens[start..end]))
     }
 
     fn name(&self) -> &str {
