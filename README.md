@@ -47,42 +47,48 @@ Same as `outlines-core`. The `Index::new` function of Outlines is using linear s
 
 The combination of AOT index building with TokTrie - Derivre: faster build time, same number of token matching per step as Outlines. 399.975656 ms trie building time (needed only once for a given vocabulary), 4.334894 ms index building time for the example regular expression and 7-21 µs per step.
 
-### 7th - Performance comparisons between double HashMap / CSR continuous vector / hybrid approach
+### 7th - Performance comparisons between `FastHashDFA` vs. `DoubleHashDFA` vs. CSR based `FlatDFA`
 
-The benchmarks demonstrate a space-time trade-off where the flat structures achieves the fastest performance for scanning and hash structures for lookups; while hybrid solutions are the fastest, they require the largest memory allocation due to their dual data structure approach. Ultimately, the `DoubleHashDFA` (the implementation `outlines-core` uses) proves to be a good universal solution, average in both lookups and scans, but only suffering (worst case) 2x memory usage compared to `FlatDFA` which is the most compact, but having a slow lookup algorithm due to its linearity (optimized by binary tree search, but still lacking the effectiveness of hash based approaches).
+The benchmarks demonstrate a space-time trade-off where the flat structures achieves the fastest performance for scanning and hash structures for lookups; while hybrid solutions are the fastest, they require the largest memory allocation. Ultimately, the `DoubleHashDFA` (the implementation `outlines-core` uses) proves to be a good universal solution, average in both lookups and scans, but only suffering (worst case) 2x memory usage compared to `FlatDFA` which is the most compact, but having a slow lookup algorithm due to its linearity (optimized by binary tree search on a CSR data structure, but still lacking the jump capabilities of hash functions).
 
-The heavily optimized `DynamicFastHashDFA` outperforms other candidates in lookup and scan speeds, but suffers a memory explosion after 15k links.
+The heavily optimized `FastHashDFA` tries to combine both of the two worlds and outperforms other candidates in lookup and scan speeds, but suffers a memory explosion after 15k links.
 
 ```
 Nodes: 200 | Links: 25 - 75
 
-Speed: 6.04ms (Lookup) / 37.17ms (Scan)
-Memory: 168% of FlatDFA / 91% of DoubleHashDFA
+Lookup: 5.99ms (49% of FlatDFA / 31% of DoubleHashDFA)
+Scan: 36.94ms (101% of FlatDFA / 23% of DoubleHashDFA)
+Memory: 170% of FlatDFA / 92% of DoubleHashDFA
 
 Nodes: 200 | Links: 50 - 150
 
-Speed: 6.30ms (Lookup) / 67.00ms (Scan)
-Memory: 193% of FlatDFA / 109% of DoubleHashDFA
+Lookup: 6.19ms (46% of FlatDFA / 31% of DoubleHashDFA)
+Scan: 67.48ms (101% of FlatDFA / 23% of DoubleHashDFA)
+Memory: 195% of FlatDFA / 110% of DoubleHashDFA
 
 Nodes: 2,000 | Links: 50 - 1,000
 
-Speed: 11.98ms (Lookup) / 332.35ms (Scan)
-Memory: 190% of FlatDFA / 112% of DoubleHashDFA
+Lookup: 14.62ms (57% of FlatDFA / 49% of DoubleHashDFA)
+Scan: 337.53ms (100% of FlatDFA / 24% of DoubleHashDFA)
+Memory: 190% of FlatDFA / 111% of DoubleHashDFA
 
 Nodes: 2,000 | Links: 500 - 1,500
 
-Speed: 16.97ms (Lookup) / 640.64ms (Scan)
-Memory: 200% of FlatDFA / 119% of DoubleHashDFA
+Lookup: 18.73ms (59% of FlatDFA / 58% of DoubleHashDFA)
+Scan: 641.35ms (100% of FlatDFA / 24% of DoubleHashDFA)
+Memory: 201% of FlatDFA / 119% of DoubleHashDFA
 
 Nodes: 2,000 | Links: 5,000 - 15,000
 
-Speed: 25.19ms (Lookup) / 6.33s (Scan)
-Memory: 192% of FlatDFA / 119% of DoubleHashDFA
+Lookup: 25.75ms (38% of FlatDFA / 65% of DoubleHashDFA)
+Scan: 6.39s (100% of FlatDFA / 24% of DoubleHashDFA)
+Memory: 191% of FlatDFA / 121% of DoubleHashDFA
 
 Nodes: 2,000 | Links: 25,000 - 75,000
 
-Speed: 25.49ms (Lookup) / 31.73s (Scan)
-Memory: 295% of FlatDFA / 169% of DoubleHashDFA
+Lookup: 35.28ms (34% of FlatDFA / 79% of DoubleHashDFA)
+Scan: 31.81s (100% of FlatDFA / 24% of DoubleHashDFA)
+Memory: 293% of FlatDFA / 167% of DoubleHashDFA
 ```
 
 ## License
