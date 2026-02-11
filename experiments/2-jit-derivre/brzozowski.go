@@ -260,4 +260,16 @@ func main() {
 	fmt.Printf("\nExample #3 - However once (ab)* is started, it needs to be finished\n\n")
 
 	Matches(start, "ababc")
+
+	fmt.Printf("\nExample #4 - Dead end\n\n")
+
+	start = NewConcat(
+		NewLiteral('a'),
+		NewConcat(
+			NewLiteral('b'),
+			NewLiteral('c'),
+		),
+	)
+
+	Matches(start, "abz")
 }
