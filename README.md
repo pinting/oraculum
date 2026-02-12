@@ -47,7 +47,7 @@ Same as `outlines-core`. The `Index::new` function of Outlines is using linear s
 
 The combination of AOT index building with TokTrie - Derivre: faster build time, same number of token matching per step as Outlines. 399.975656 ms trie building time (needed only once for a given vocabulary), 4.334894 ms index building time for the example regular expression and 7-21 µs per step.
 
-### 7th - Performance comparisons between `FastHashDFA` vs. `DoubleHashDFA` vs. CSR based `FlatDFA`
+### 7th - Performance comparisons between `FastHashDFA` vs. `DoubleHashDFA` vs. `FlatDFA`
 
 The benchmarks demonstrate a space-time trade-off where the flat structures achieves the fastest performance for scanning and hash structures for lookups; while hybrid solutions are the fastest, they require the largest memory allocation. Ultimately, the `DoubleHashDFA` (the implementation `outlines-core` uses) proves to be a good universal solution, average in both lookups and scans, but only suffering (worst case) 2x memory usage compared to `FlatDFA` which is the most compact, but having a slow lookup algorithm due to its linearity (optimized by binary tree search on a CSR data structure, but still lacking the jump capabilities of hash functions).
 
@@ -56,38 +56,38 @@ The heavily optimized `FastHashDFA` tries to combine both of the two worlds and 
 ```
 Nodes: 200 | Links: 25 - 75
 
-Lookup: 5.99ms (49% of FlatDFA / 31% of DoubleHashDFA)
-Scan: 36.94ms (101% of FlatDFA / 23% of DoubleHashDFA)
+Lookup: 5.99ms (2.04x FlatDFA / 3.23x DoubleHashDFA)
+Scan: 36.94ms (0.99x FlatDFA / 4.35x DoubleHashDFA)
 Memory: 170% of FlatDFA / 92% of DoubleHashDFA
 
 Nodes: 200 | Links: 50 - 150
 
-Lookup: 6.19ms (46% of FlatDFA / 31% of DoubleHashDFA)
-Scan: 67.48ms (101% of FlatDFA / 23% of DoubleHashDFA)
+Lookup: 6.19ms (2.17x FlatDFA / 3.23x DoubleHashDFA)
+Scan: 67.48ms (0.99x FlatDFA / 4.35x DoubleHashDFA)
 Memory: 195% of FlatDFA / 110% of DoubleHashDFA
 
 Nodes: 2,000 | Links: 50 - 1,000
 
-Lookup: 14.62ms (57% of FlatDFA / 49% of DoubleHashDFA)
-Scan: 337.53ms (100% of FlatDFA / 24% of DoubleHashDFA)
+Lookup: 14.62ms (1.75x FlatDFA / 2.04x DoubleHashDFA)
+Scan: 337.53ms (1.00x FlatDFA / 4.17x DoubleHashDFA)
 Memory: 190% of FlatDFA / 111% of DoubleHashDFA
 
 Nodes: 2,000 | Links: 500 - 1,500
 
-Lookup: 18.73ms (59% of FlatDFA / 58% of DoubleHashDFA)
-Scan: 641.35ms (100% of FlatDFA / 24% of DoubleHashDFA)
+Lookup: 18.73ms (1.69x FlatDFA / 1.72x DoubleHashDFA)
+Scan: 641.35ms (1.00x FlatDFA / 4.17x DoubleHashDFA)
 Memory: 201% of FlatDFA / 119% of DoubleHashDFA
 
 Nodes: 2,000 | Links: 5,000 - 15,000
 
-Lookup: 25.75ms (38% of FlatDFA / 65% of DoubleHashDFA)
-Scan: 6.39s (100% of FlatDFA / 24% of DoubleHashDFA)
+Lookup: 25.75ms (2.63x FlatDFA / 1.54x DoubleHashDFA)
+Scan: 6.39s (1.00x FlatDFA / 4.17x DoubleHashDFA)
 Memory: 191% of FlatDFA / 121% of DoubleHashDFA
 
 Nodes: 2,000 | Links: 25,000 - 75,000
 
-Lookup: 35.28ms (34% of FlatDFA / 79% of DoubleHashDFA)
-Scan: 31.81s (100% of FlatDFA / 24% of DoubleHashDFA)
+Lookup: 35.28ms (2.94x FlatDFA / 1.27x DoubleHashDFA)
+Scan: 31.81s (1.00x FlatDFA / 4.17x DoubleHashDFA)
 Memory: 293% of FlatDFA / 167% of DoubleHashDFA
 ```
 
