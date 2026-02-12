@@ -1,4 +1,4 @@
-use aho_corasick::AhoCorasick;
+use aho_corasick::{AhoCorasick, AhoCorasickKind};
 use std::{collections::HashMap, io::{self, Write}, rc::Rc, time::Instant};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::fs;
@@ -126,8 +126,7 @@ fn main() {
 
     let Ok(data) = result else {
         println!("Failed to read vocabulary");
-
-        return
+        return;
     };
 
     let mut vocabulary = Vocabulary::new();
@@ -135,21 +134,14 @@ fn main() {
 
     if result.is_err() {
         println!("Failed to load vocabulary");
-
-        return
+        return;
     }
 
-    let tokens: Vec<&str> = vocabulary.tokens.iter().map(|v|v.as_ref()).collect();
+    let tokens: Vec<&str> = vocabulary.tokens.iter().map(|v| v.as_ref()).collect();
     let tokens = &tokens;
 
     println!("Loaded vocabulary in {:?}", start.elapsed());
-
-    let start = Instant::now();
-    let ac = AhoCorasick::builder()
-        .build(tokens)
-        .unwrap();
-
-    println!("Built graph in {:?}", start.elapsed());
+    println!("Vocabulary size: {} tokens", tokens.len());
     println!("Define constant: ");
 
     let mut input = String::new();
@@ -158,11 +150,67 @@ fn main() {
         .read_line(&mut input)
         .expect("Failed to read line");
 
-    let start = Instant::now();
     let input = input.trim_matches('\n');
-    let lattice = TokenLattice::new(input, &vocabulary, &ac);
 
-    println!("Constructed the token lattice in {:?}", start.elapsed());
+    println!("NonContiguousNFA");
+
+    let (build_time, memory_usage, nfa_ac) = {
+        let start = Instant::now();
+        let ac = AhoCorasick::builder()
+            .kind(Some(AhoCorasickKind::NoncontiguousNFA))
+            .build(tokens)
+            .unwrap();
+        (start.elapsed(), ac.memory_usage(), ac)
+    };
+
+    println!("\tBuild time: {:?}", build_time);
+    println!("\tMemory usage: {:.2} MB", memory_usage as f64 / (1024.0 * 1024.0));
+
+    let start = Instant::now();
+    
+    TokenLattice::new(input, &vocabulary, &nfa_ac);
+
+    println!("\tLattice construction time: {:?}", start.elapsed());
+
+    println!("ContiguousNFA");
+
+    let (build_time, memory_usage, contiguous_nfa_ac) = {
+        let start = Instant::now();
+        let ac = AhoCorasick::builder()
+            .kind(Some(AhoCorasickKind::ContiguousNFA))
+            .build(tokens)
+            .unwrap();
+
+        (start.elapsed(), ac.memory_usage(), ac)
+    };
+    
+    println!("\tBuild time: {:?}", build_time);
+    println!("\tMemory usage: {:.2} MB", memory_usage as f64 / (1024.0 * 1024.0));
+
+    let start = Instant::now();
+
+    TokenLattice::new(input, &vocabulary, &contiguous_nfa_ac);
+
+    println!("\tLattice construction time: {:?}", start.elapsed());
+
+    println!("DFA");
+
+    let (build_time, memory_usage, dfa_ac) = {
+        let start = Instant::now();
+        let ac = AhoCorasick::builder()
+            .kind(Some(AhoCorasickKind::DFA))
+            .build(tokens)
+            .unwrap();
+        (start.elapsed(), ac.memory_usage(), ac)
+    };
+
+    println!("\tBuild time: {:?}", build_time);
+    println!("\tMemory usage: {:.2} MB", memory_usage as f64 / (1024.0 * 1024.0));
+
+    let start = Instant::now();
+    let lattice = TokenLattice::new(input, &vocabulary, &dfa_ac);
+
+    println!("\tLattice construction time: {:?}", start.elapsed());
 
     let mut position: TextPosition = 0;
     let mut selected = String::new();
@@ -195,14 +243,14 @@ fn main() {
         io::stdin().read_line(&mut buffer).unwrap();
 
         let buffer = buffer.trim_matches('\n');
+        
         let route = routes
             .iter()
             .find(|(token, _, _)| token.as_ref() == buffer);
 
         let Some((token, _, target)) = route else {
             println!("Invalid token / route");
-
-            continue
+            continue;
         };
 
         selected.push_str(token.as_ref());
