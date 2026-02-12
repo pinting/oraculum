@@ -56,7 +56,6 @@ type EdgeIdx = u32;
 #[derive(Debug, Clone, Copy)]
 struct TokenEdge {
     token_id: TokenId,
-    target: TextPosition,
     next: EdgeIdx,
 }
 
@@ -78,20 +77,18 @@ impl TokenLattice {
             let Some(id) = vocabulary.idx_to_id.get(&idx) else { continue };
 
             let start = m.start();
-            let end = m.end();
 
-            lattice.add(start, end, id);
+            lattice.insert(start, id);
         }
 
         lattice
     }
 
-    fn add(&mut self, start: usize, end: usize, token_id: &u32) {
+    fn insert(&mut self, start: usize, token_id: &u32) {
         let next_edge_idx = self.heads[start];
         
         let edge = TokenEdge {
             token_id: *token_id,
-            target: end as TextPosition,
             next: next_edge_idx,
         };
 
@@ -102,21 +99,29 @@ impl TokenLattice {
         self.heads[start] = i;
     }
 
-    fn get_routes(&self, position: TextPosition, vocabulary: &Vocabulary) -> Vec<(Rc<str>, TokenId, TextPosition)> {
+    pub fn transitions(&self, position: TextPosition) -> Vec<TokenId> {
         let mut routes = Vec::new();
         let mut i = self.heads[position];
 
         while i != u32::MAX {
             let edge = &self.edges[i as usize];
+            let token_id = edge.token_id;
 
-            if let Some(token) = vocabulary.id_to_token.get(&edge.token_id) {
-                routes.push((token.clone(), edge.token_id, edge.target));
-            }
+            routes.push(token_id);
 
             i = edge.next;
         }
 
         routes
+    }
+
+    pub fn memory_usage(&self) -> usize {
+        let mut mem = std::mem::size_of::<Self>();
+
+        mem += self.heads.capacity() * std::mem::size_of::<EdgeIdx>();
+        mem += self.edges.capacity() * std::mem::size_of::<TokenEdge>();
+
+        mem
     }
 }
 
@@ -126,6 +131,7 @@ fn main() {
 
     let Ok(data) = result else {
         println!("Failed to read vocabulary");
+
         return;
     };
 
@@ -134,6 +140,7 @@ fn main() {
 
     if result.is_err() {
         println!("Failed to load vocabulary");
+        
         return;
     }
 
@@ -152,14 +159,15 @@ fn main() {
 
     let input = input.trim_matches('\n');
 
-    println!("NonContiguousNFA");
+    println!("Building DFA...");
 
-    let (build_time, memory_usage, nfa_ac) = {
+    let (build_time, memory_usage, dfa_ac) = {
         let start = Instant::now();
         let ac = AhoCorasick::builder()
-            .kind(Some(AhoCorasickKind::NoncontiguousNFA))
+            .kind(Some(AhoCorasickKind::DFA))
             .build(tokens)
             .unwrap();
+
         (start.elapsed(), ac.memory_usage(), ac)
     };
 
@@ -168,11 +176,34 @@ fn main() {
 
     let start = Instant::now();
     
-    TokenLattice::new(input, &vocabulary, &nfa_ac);
+    let lattice = TokenLattice::new(input, &vocabulary, &dfa_ac);
 
     println!("\tLattice construction time: {:?}", start.elapsed());
+    println!("\tLattice memory usage: {:?} KB", lattice.memory_usage() as f64 / (1024.0));
 
-    println!("ContiguousNFA");
+    println!("Building NonContiguousNFA...");
+
+    let (build_time, memory_usage, nfa_ac) = {
+        let start = Instant::now();
+        let ac = AhoCorasick::builder()
+            .kind(Some(AhoCorasickKind::NoncontiguousNFA))
+            .build(tokens)
+            .unwrap();
+        
+        (start.elapsed(), ac.memory_usage(), ac)
+    };
+
+    println!("\tBuild time: {:?}", build_time);
+    println!("\tMemory usage: {:.2} MB", memory_usage as f64 / (1024.0 * 1024.0));
+
+    let start = Instant::now();
+    
+    let lattice = TokenLattice::new(input, &vocabulary, &nfa_ac);
+
+    println!("\tLattice construction time: {:?}", start.elapsed());
+    println!("\tLattice memory usage: {:?} KB", lattice.memory_usage() as f64 / (1024.0));
+
+    println!("Building ContiguousNFA...");
 
     let (build_time, memory_usage, contiguous_nfa_ac) = {
         let start = Instant::now();
@@ -188,49 +219,32 @@ fn main() {
     println!("\tMemory usage: {:.2} MB", memory_usage as f64 / (1024.0 * 1024.0));
 
     let start = Instant::now();
-
-    TokenLattice::new(input, &vocabulary, &contiguous_nfa_ac);
-
-    println!("\tLattice construction time: {:?}", start.elapsed());
-
-    println!("DFA");
-
-    let (build_time, memory_usage, dfa_ac) = {
-        let start = Instant::now();
-        let ac = AhoCorasick::builder()
-            .kind(Some(AhoCorasickKind::DFA))
-            .build(tokens)
-            .unwrap();
-        (start.elapsed(), ac.memory_usage(), ac)
-    };
-
-    println!("\tBuild time: {:?}", build_time);
-    println!("\tMemory usage: {:.2} MB", memory_usage as f64 / (1024.0 * 1024.0));
-
-    let start = Instant::now();
-    let lattice = TokenLattice::new(input, &vocabulary, &dfa_ac);
+    let lattice = TokenLattice::new(input, &vocabulary, &contiguous_nfa_ac);
 
     println!("\tLattice construction time: {:?}", start.elapsed());
+    println!("\tLattice memory usage: {:?} KB", lattice.memory_usage() as f64 / (1024.0));
 
     let mut position: TextPosition = 0;
-    let mut selected = String::new();
+    let mut current = String::new();
 
     loop {
-        println!("Current: `{}`", selected);
+        println!("Current: `{}`", current);
 
         let start = Instant::now();
-        let routes = lattice.get_routes(position, &vocabulary);
+        let routes = lattice.transitions(position);
 
         println!("Time taken: {:?}", start.elapsed());
         println!("Number of possible transitions: {}", routes.len());
 
-        let tokens: Vec<&str> = routes.iter().map(|(t, _, _)| t.as_ref()).collect();
+        let tokens: Vec<&str> = routes.iter()
+            .filter_map(|id| vocabulary.id_to_token.get(id))
+            .map(|t| t.as_ref())
+            .collect();
 
         println!("Possible next tokens: {:?}", tokens);
 
         if routes.is_empty() {
             println!("No routes, exiting");
-
             return;
         }
 
@@ -244,17 +258,11 @@ fn main() {
 
         let buffer = buffer.trim_matches('\n');
         
-        let route = routes
-            .iter()
-            .find(|(token, _, _)| token.as_ref() == buffer);
-
-        let Some((token, _, target)) = route else {
+        if !tokens.contains(&buffer) {
             println!("Invalid token / route");
-            continue;
-        };
+        }
 
-        selected.push_str(token.as_ref());
-
-        position = *target;
+        current += buffer;
+        position += buffer.len();
     }
 }
