@@ -1,4 +1,4 @@
-.PHONY: build develop install clean run test
+.PHONY: build develop install clean run test fastlines
 
 build:
 	maturin build --release
@@ -22,3 +22,6 @@ run:
 
 test:
 	python -c "import oraculum; print('Module oraculum loaded successfully!')"
+
+fastlines:
+	cd fastlines && ./setup.sh

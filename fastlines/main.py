@@ -34,29 +34,36 @@ def main() -> None:
         print(f"Expression base (TokTrie) built with FastHashDFA<32, 32, 32> config ({(t1 - t0) * 1000:.2f} ms)")
 
         indexes: list[fl.Lattice | fl.Expression] = []
+
         input_str: str = "Why "
 
         t0 = time.perf_counter()
-        indexes.append(fl.Lattice(input_str, vocabulary, ac_base))
+        index = fl.Lattice(input_str, vocabulary, ac_base)
         t1 = time.perf_counter()
 
-        print(f"Lattice '{input_str}' created ({(t1 - t0) * 1000:.2f} ms)")
+        indexes.append(index)
+
+        print(f"Lattice '{input_str}' created ({(t1 - t0) * 1000:.2f} ms), memory usage: {index.memory_usage()} bytes")
 
         input_str = "monday|tuesday|wednesday|thursday|friday"
 
         t0 = time.perf_counter()
-        indexes.append(fl.Expression(input_str, vocabulary, toktrie_base))
+        index = fl.Expression(input_str, vocabulary, toktrie_base)
         t1 = time.perf_counter()
 
-        print(f"Expression '{input_str}' created ({(t1 - t0) * 1000:.2f} ms)")
+        indexes.append(index)
+
+        print(f"Expression '{input_str}' created ({(t1 - t0) * 1000:.2f} ms), memory usage: {index.memory_usage()} bytes")
 
         input_str = "?"
 
         t0 = time.perf_counter()
-        indexes.append(fl.Lattice(input_str, vocabulary, ac_base))
+        index = fl.Lattice(input_str, vocabulary, ac_base)
         t1 = time.perf_counter()
 
-        print(f"Lattice '{input_str}' created ({(t1 - t0) * 1000:.2f} ms)")
+        indexes.append(index)
+
+        print(f"Lattice '{input_str}' created ({(t1 - t0) * 1000:.2f} ms), memory usage: {index.memory_usage()} bytes")
 
         current: str = ""
         eos_id: int = vocabulary.get_eos_id()

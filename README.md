@@ -4,17 +4,34 @@ Text to SQL LLM enforcement research.
 
 **Warning:** This is a proof of concept & work in progress project, currently at the experimenting stage!
 
-## Setup
+## `fastlines`
 
-Have [Rust](https://rustup.rs) and [UV](https://docs.astral.sh/uv/getting-started/installation) installed!
+`fastlines` is a directed graph generator library, the conclusion of Experiment 1-7. It can translate either regular expressions or constant strings to DFAs. It inherits the AOT data structure of `outlines-core`, but utilizes optimizations demonstrated in `llguidance` along with custom data structure (still researched!) found in Experiment 7.
+
+Setup and use according to `fastlines/setup.sh` and `fastlines/main.py`!
 
 ```bash
-# Main project
-
-uv venv --python 3.11
-source .venv/bin/activate
-make install
-make run
+Vocabulary loaded (815.47 ms)
+Lattice base (AhoCorasick) built (2229.88 ms)
+Expression base (TokTrie) built with FastHashDFA<32, 32, 32> config (409.39 ms)
+Lattice 'Why ' created (0.07 ms), memory usage: 128 bytes
+Expression 'monday|tuesday|wednesday|thursday|friday' created (3.27 ms), memory usage: 1304 bytes
+Lattice '?' created (0.03 ms), memory usage: 80 bytes
+Routes: `Why` `Wh` `W` `W`
+> Wh
+Current: Wh
+Routes: `y` `y`
+> y
+Current: Why
+Routes: ` ` ` `
+>  
+Current: Why 
+Routes: `monday` `w` `wed` `fri` `fr` `mond` `frid` `thur` `t` `tu` `m` `th` `w` `m` `mo` `f` `mon` `f` `friday` `we` `t` `thu`
+> monday
+Current: Why monday
+Routes: `?` `?`
+> ?
+Current: Why monday?
 ```
 
 ## Experiments
