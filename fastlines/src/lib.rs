@@ -5,6 +5,7 @@ use numpy::{PyArray1, PyArrayMethods};
 use toktrie::TokTrie;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::borrow::Cow;
 
 mod number;
 mod dfa;
@@ -132,23 +133,72 @@ impl PyLattice {
 #[derive(Clone)]
 struct PyTokTrie {
     inner: Arc<TokTrie>,
+    dfa_type: u8,
+    n_size: u8,
+    t_size: u8,
+    o_size: u8,
 }
 
 #[pymethods]
 impl PyTokTrie {
     #[staticmethod]
-    fn new(vocabulary_py: &PyVocabulary) -> PyResult<Self> {
+    fn new(vocabulary_py: &PyVocabulary, dfa_type: u8, n_size: u8, t_size: u8, o_size: u8) -> PyResult<Self> {
         let trie = Expression::<u16, u32, FastHashDFA<u16, u32, u32>>::base(vocabulary_py.inner.clone())
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to build TokTrie base"))?;
         
-        Ok(PyTokTrie { inner: Arc::new(trie) })
+        Ok(PyTokTrie { 
+            inner: Arc::new(trie),
+            dfa_type,
+            n_size,
+            t_size,
+            o_size,
+        })
+    }
+}
+
+#[derive(Clone)]
+enum ExpressionVariant {
+    // FastHashDFA (Type 0)
+    // Format: FH_<N_SIZE>_<T_SIZE>_<O_SIZE>
+    FhU16U32U32(Arc<Expression<u16, u32, FastHashDFA<u16, u32, u32>>>),
+    FhU16U32U16(Arc<Expression<u16, u32, FastHashDFA<u16, u32, u16>>>),
+    FhU32U32U32(Arc<Expression<u32, u32, FastHashDFA<u32, u32, u32>>>),
+    FhU32U32U16(Arc<Expression<u32, u32, FastHashDFA<u32, u32, u16>>>),
+}
+
+impl ExpressionVariant {
+    fn start(&self) -> u32 {
+        match self {
+            Self::FhU16U32U32(e) => e.start() as u32,
+            Self::FhU16U32U16(e) => e.start() as u32,
+            Self::FhU32U32U32(e) => e.start(),
+            Self::FhU32U32U16(e) => e.start(),
+        }
+    }
+
+    fn next(&self, node_id: u32, token_id: u32) -> Option<u32> {
+        match self {
+            Self::FhU16U32U32(e) => e.next(node_id as u16, token_id).map(|x| x as u32),
+            Self::FhU16U32U16(e) => e.next(node_id as u16, token_id).map(|x| x as u32),
+            Self::FhU32U32U32(e) => e.next(node_id, token_id),
+            Self::FhU32U32U16(e) => e.next(node_id, token_id),
+        }
+    }
+
+    fn transitions<'a>(&'a self, node_id: u32) -> Option<Cow<'a, [u32]>> {
+        match self {
+            Self::FhU16U32U32(e) => e.transitions(node_id as u16),
+            Self::FhU16U32U16(e) => e.transitions(node_id as u16),
+            Self::FhU32U32U32(e) => e.transitions(node_id),
+            Self::FhU32U32U16(e) => e.transitions(node_id),
+        }
     }
 }
 
 #[pyclass(name = "Expression")]
 #[derive(Clone)]
 struct PyExpression {
-    inner: Arc<Expression<u16, u32, FastHashDFA<u16, u32, u32>>>,
+    inner: ExpressionVariant,
     vocabulary: Arc<Vocabulary<u32>>,
 }
 
@@ -156,21 +206,66 @@ struct PyExpression {
 impl PyExpression {
     #[new]
     fn new(input: &str, vocabulary_py: &PyVocabulary, toktrie_base: &PyTokTrie) -> PyResult<Self> {
-        let expression = Expression::new(input, vocabulary_py.inner.clone(), &toktrie_base.inner)
-            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Failed to create Expression index with data '{}'", input)))?;
+        // Unpack configuration from the trie
+        let dfa_type = toktrie_base.dfa_type;
+        let n_size = toktrie_base.n_size;
+        let t_size = toktrie_base.t_size;
+        let o_size = toktrie_base.o_size;
+
+        if t_size != 4 {
+             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("Vocabulary is u32, so token size (T) must be 4."));
+        }
+
+        let variant = match (dfa_type, n_size, o_size) {
+            (0, 2, 4) => {
+                let e = Expression::<u16, u32, FastHashDFA<u16, u32, u32>>::new(
+                    input, vocabulary_py.inner.clone(), &toktrie_base.inner
+                ).ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to create Expression"))?;
+
+                ExpressionVariant::FhU16U32U32(Arc::new(e))
+            },
+
+            (0, 2, 2) => {
+                let e = Expression::<u16, u32, FastHashDFA<u16, u32, u16>>::new(
+                    input, vocabulary_py.inner.clone(), &toktrie_base.inner
+                ).ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to create Expression"))?;
+
+                ExpressionVariant::FhU16U32U16(Arc::new(e))
+            },
+
+            (0, 4, 4) => {
+                let e = Expression::<u32, u32, FastHashDFA<u32, u32, u32>>::new(
+                    input, vocabulary_py.inner.clone(), &toktrie_base.inner
+                ).ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to create Expression"))?;
+
+                ExpressionVariant::FhU32U32U32(Arc::new(e))
+            },
+
+            (0, 4, 2) => {
+                let e = Expression::<u32, u32, FastHashDFA<u32, u32, u16>>::new(
+                    input, vocabulary_py.inner.clone(), &toktrie_base.inner
+                ).ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to create Expression"))?;
+
+                ExpressionVariant::FhU32U32U16(Arc::new(e))
+            },
+            
+            _ => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                format!("Unsupported configuration: Type={}, N={}, T={}, O={}", dfa_type, n_size, t_size, o_size)
+            )),
+        };
         
         Ok(PyExpression {
-            inner: Arc::new(expression),
+            inner: variant,
             vocabulary: vocabulary_py.inner.clone(),
         })
     }
 
     fn start(&self) -> u32 {
-        self.inner.start() as u32
+        self.inner.start()
     }
 
     fn transitions<'py>(&self, py: Python<'py>, node_id: u32) -> PyResult<Bound<'py, PyArray1<u32>>> {
-        let t = self.inner.transitions(node_id as u16);
+        let t = self.inner.transitions(node_id);
         let v: Vec<u32> = match t {
             Some(tv) => tv.iter().cloned().collect(),
             None => Vec::new(),
@@ -180,6 +275,6 @@ impl PyExpression {
     }
 
     fn next(&self, node_id: u32, token_id: u32) -> Option<u32> {
-        self.inner.next(node_id as u16, token_id).map(|x| x as u32)
+        self.inner.next(node_id, token_id)
     }
 }
