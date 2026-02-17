@@ -72,25 +72,13 @@ impl<T> Vocabulary<T> where T: Number {
     }
 
     #[inline(always)]
-    pub fn get_token_by_id(&self, id: T) -> Option<Arc<str>> {
-        let token = self.id_to_token.get(&id);
-
-        let Some(token) = token else {
-            return None;
-        };
-
-        Some(token.clone())
+    pub fn get_token_by_id(&self, id: T) -> Option<&str> {
+        self.id_to_token.get(&id).map(|s| &**s)
     }
 
     #[inline(always)]
-    pub fn get_token_by_idx(&self, idx: usize) -> Option<Arc<str>> {
-        let token = self.tokens.get(idx);
-
-        let Some(token) = token else {
-            return None;
-        };
-
-        Some(token.clone())
+    pub fn get_token_by_idx(&self, idx: usize) -> Option<&str> {
+        self.tokens.get(idx).map(|s| &**s)
     }
 
     #[inline(always)]

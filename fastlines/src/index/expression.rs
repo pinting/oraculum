@@ -107,21 +107,17 @@ where
                     .insert(eos_id, current_node);
             }
 
-            let next_token_idxs: Vec<u32> = {
-                let recognizer = RegexRecognizer {
-                    rx: RefCell::new(&mut rx),
-                    start_state: current_state,
-                };
-                
-                let mut stack_recognizer = StackRecognizer::from(recognizer);
-                let mut result = trie.alloc_token_set();
-
-                trie.add_bias(&mut stack_recognizer, &mut result, &[]);
-                
-                result.iter().collect()
+            let recognizer = RegexRecognizer {
+                rx: RefCell::new(&mut rx),
+                start_state: current_state,
             };
+            
+            let mut stack_recognizer = StackRecognizer::from(recognizer);
+            let mut result = trie.alloc_token_set();
 
-            for token_idx in next_token_idxs {
+            trie.add_bias(&mut stack_recognizer, &mut result, &[]);
+
+            for token_idx in result.iter() {
                 let token_idx = token_idx as usize;
 
                 let Some(token_id) = vocabulary.get_id_by_idx(token_idx) else {

@@ -107,7 +107,7 @@ impl PyLattice {
     fn transitions<'py>(&self, py: Python<'py>, node_id: u32) -> PyResult<Bound<'py, PyArray1<u32>>> {
         let t = self.inner.transitions(node_id as u16);
         let v: Vec<u32> = match t {
-            Some(transitions_vec) => transitions_vec.iter().cloned().collect(),
+            Some(tv) => tv.iter().cloned().collect(),
             None => Vec::new(),
         };
 
@@ -163,7 +163,7 @@ impl PyExpression {
     fn transitions<'py>(&self, py: Python<'py>, node_id: u32) -> PyResult<Bound<'py, PyArray1<u32>>> {
         let t = self.inner.transitions(node_id as u16);
         let v: Vec<u32> = match t {
-            Some(transitions_vec) => transitions_vec.iter().cloned().collect(),
+            Some(tv) => tv.iter().cloned().collect(),
             None => Vec::new(),
         };
 
