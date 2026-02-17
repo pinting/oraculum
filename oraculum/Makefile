@@ -24,4 +24,4 @@ test:
 	python -c "import oraculum; print('Module oraculum loaded successfully!')"
 
 fastlines:
-	cd fastlines && ./setup.sh
+	cd ../fastlines && ./setup.sh

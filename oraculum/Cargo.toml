@@ -8,6 +8,6 @@ name = "oraculum"
 crate-type = ["cdylib"]
 
 [dependencies]
-base64 = "0.22.1"
+fastlines = { path = "../fastlines" }
 numpy = "0.22"
 pyo3 = { version = "0.22", features = ["extension-module"] }

@@ -102,6 +102,11 @@ impl<T> Vocabulary<T> where T: Number {
     }
 
     #[inline(always)]
+    pub fn get_ids(&self) -> &Vec<T> {
+        &self.ids
+    }
+
+    #[inline(always)]
     pub fn get_token_by_id(&self, id: T) -> Option<&str> {
         self.id_to_token.get(&id).map(|s| &**s)
     }

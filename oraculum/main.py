@@ -23,8 +23,8 @@ CREATE TABLE orders (
 """
 
 def main() -> None:
-    model_path: str = "./models/gemma-3-4b-it-Q8_0.gguf"
-    vocabulary_path: str = "./vocabulary.tiktoken"
+    model_path: str = "../models/gemma-3-4b-it-Q8_0.gguf"
+    vocabulary_path: str = "../vocabulary.tiktoken"
 
     print(f"Loading model from {model_path}...")
 
