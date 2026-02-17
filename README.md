@@ -8,7 +8,7 @@ Text to SQL LLM enforcement research.
 
 `fastlines` is a directed graph generator library, the conclusion of Experiment 1-7. It can translate either regular expressions or constant strings to DFAs. It inherits the AOT data structure of `outlines-core`, but utilizes optimizations demonstrated in `llguidance` along with custom data structure (still researched!) found in Experiment 7.
 
-Setup and use according to `fastlines/setup.sh` and `fastlines/main.py`!
+Setup and use according to `fastlines/README.md`!
 
 ```bash
 Vocabulary loaded (815.47 ms)
