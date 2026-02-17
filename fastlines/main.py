@@ -17,9 +17,14 @@ def main():
         
         print("Lattice base (AhoCorasick) built.")
 
-        expression_base = fastlines.TokTrie.new(vocabulary)
+        # Configuration:
+        # Type 0: FastHashDFA
+        # Node unit size: 2 (u16)
+        # Target/Token unit size size: 4 (u32)
+        # O size: 4 (u32)
+        expression_base = fastlines.TokTrie.new(vocabulary, 0, 2, 4, 4)
 
-        print("Expression base (TokTrie) built.")
+        print("Expression base (TokTrie) built with FastHashDFA<u16, u32, u32> config.")
 
         indexes = []
 
@@ -62,6 +67,7 @@ def main():
 
                 for token_id in transitions:
                     token = vocabulary.get_token_by_id(int(token_id))
+
                     if token:
                         routes.append(f"`{token}`")
                 
@@ -86,9 +92,11 @@ def main():
                             print("Invalid or non-existent token!")
                     except EOFError:
                         print("\nExiting")
+
                         return
                     except Exception as e:
                         print(f"Error during input: {e}")
+
                         return
 
                 selected_token = vocabulary.get_token_by_id(selected_token_id)
