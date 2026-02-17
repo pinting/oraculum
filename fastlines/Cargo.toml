@@ -1,7 +1,11 @@
 [package]
 name = "fastlines"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[lib]
+name = "fastlines"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 rand = "0.10.0"
@@ -10,6 +14,11 @@ base64 = "0.22.1"
 aho-corasick = "1.1.4"
 derivre = "0.3"
 toktrie = { git = "https://github.com/guidance-ai/llguidance.git", branch = "main" }
+pyo3 = { version = "0.22", features = ["extension-module"] }
+numpy = "0.22"
+
+[tool.maturin]
+bindings = "pyo3"
 
 [lints.rust]
 dead_code = "allow"
