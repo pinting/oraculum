@@ -265,7 +265,77 @@ where N: Number, T: Number, O: Number {
     }
 }
 
+
+/*
+ * How hash() works under the hood?
+ * 
+ * What is this magical number the hash algorithm multiplies with?
+ *
+ * It is the golden ratio scaled into the integer space.
+ *
+ * `ϕ = 1.618033988749...`
+ *
+ * Scaling this down into 32 bit space:
+ *
+ * `2^32 / ϕ = 2654435769.498698323...`
+ *
+ * Cut off the fractions and the result is `0x9E3779B9` in hexadecimal (for 32 bit space).
+ *
+ * Why is this beneficial?
+ *
+ * 1.
+ *
+ * In hash algorithms, it is desirable to distribute outputs as uniformly as possible.
+ * If token IDs were not scattered, they would not use the memory section evenly,
+ * increasing the possibility of a collision (which is expensive).
+ *
+ * 2.
+ *
+ * Because the maximum size of a section is always `2^N`, it is important to
+ * scale with a number `a` where `GCD(a, 2) = 1`; thus, `a` must be an odd number.
+ *
+ * Why is this important?
+ *
+ * E.g. a section size is 2^3 = 8, so its mask is 7 = 0111b.
+ * 
+ * Try with `a = 2` where `GCD(2, 2) = 2`.
+ *
+ * ```
+ * token => (token * a) & mask
+ *
+ * 0 =>  0 & 7 = 00000 & 00111 = 0
+ * 1 =>  2 & 7 = 00010 & 00111 = 2
+ * 2 =>  4 & 7 = 00100 & 00111 = 4
+ * 3 =>  6 & 7 = 00110 & 00111 = 6
+ * 4 =>  8 & 7 = 01000 & 00111 = 0 Collision!
+ * 5 => 10 & 7 = 01010 & 00111 = 2 Collision!
+ * 6 => 12 & 7 = 01100 & 00111 = 4 Collision!
+ * 7 => 14 & 7 = 01110 & 00111 = 6 Collision!
+ * ```
+ *
+ * Try with `a = 3` where `GCD(3, 2) = 1`.
+ *
+ * ```
+ * token => (token * a) & mask
+ *
+ * 0 =>  0 & 7 = 00000 & 00111 = 0
+ * 1 =>  3 & 7 = 00011 & 00111 = 3
+ * 2 =>  6 & 7 = 00110 & 00111 = 6
+ * 3 =>  9 & 7 = 01001 & 00111 = 1
+ * 4 => 12 & 7 = 01100 & 00111 = 4
+ * 5 => 15 & 7 = 01111 & 00111 = 7
+ * 6 => 18 & 7 = 10010 & 00111 = 2
+ * 7 => 21 & 7 = 10101 & 00111 = 5
+ * ```
+ *
+ * No collisions within the section size!
+ *
+ * As `ax ≡ 1 (mod m)`,
+ * if `x <= m` and `GCD(a, m) = 1`,
+ * it reshuffles numbers between [0, m) without overlaps.
+ */
+
 #[inline(always)]
 fn hash<N: Number>(n: N, mask: N) -> N {
-    n.wrapping_mul(N::GOLDEN_RATIO) & mask
+    return n.wrapping_mul(N::GOLDEN_RATIO) & mask
 }

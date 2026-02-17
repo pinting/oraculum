@@ -17,7 +17,7 @@ toktrie = { git = "https://github.com/guidance-ai/llguidance.git", branch = "mai
 pyo3 = { version = "0.22", features = ["extension-module"] }
 numpy = "0.22"
 
-[tool.maturin]
+[package.metadata.maturin]
 bindings = "pyo3"
 
 [lints.rust]

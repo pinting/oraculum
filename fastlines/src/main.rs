@@ -17,15 +17,8 @@ use crate::number::Number;
 use crate::vocabulary::Vocabulary;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let raw_vocabulary = match std::fs::read("../vocabulary.tiktoken") {
-        Ok(data) => data,
-        Err(e) => {
-            return Err(e.into());
-        }
-    };
-
     let now = Instant::now();
-    let vocabulary = match Vocabulary::new(&raw_vocabulary, 1u32) {
+    let vocabulary = match Vocabulary::from_file_path("../vocabulary.tiktoken", 1u32) {
         Some(vocab) => Arc::new(vocab),
         None => {
             return Err("Failed to create vocabulary".into());
@@ -59,7 +52,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Creating indexes...");
 
     let now = Instant::now();
-    let input = "John is having a busy ";
+    let input = "Today is ";
     let index = Lattice::new(input, vocabulary.clone(), &ac);
 
     indexes.push(Box::new(index));
@@ -84,7 +77,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Expression '{}' created in {:?}", input, now.elapsed());
     
     let now = Instant::now();
-    let input = " this week!";
+    let input = "!";
     let index = Lattice::new(input, vocabulary.clone(), &ac);
 
     indexes.push(Box::new(index));

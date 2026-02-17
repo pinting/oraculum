@@ -1,3 +1,5 @@
+use std::io::{BufReader, BufRead};
+use std::fs::File;
 use std::sync::Arc;
 use rustc_hash::{FxHashMap as HashMap};
 
@@ -15,21 +17,12 @@ pub struct Vocabulary<T> {
 }
 
 impl<T> Vocabulary<T> where T: Number {
-    // EOS = 1 for pre-trained Gemma 3 model
-    // EOS = 106 for instruction-tuned Gemma 3 model
-    pub fn new(data: &[u8], eos_id: T) -> Option<Self> {
-        let mut vocabulary = Self {
-            token_to_id: HashMap::default(),
-            id_to_token: HashMap::default(),
-            idx_to_id: HashMap::default(),
-            tokens: Vec::new(),
-            ids: Vec::new(),
-            eos_id: eos_id,
-        };
-
-        let text = std::str::from_utf8(data).ok()?;
-
-        for line in text.lines() {
+    fn _process_lines<I>(vocabulary: &mut Self, lines: I) -> Option<()>
+    where
+        I: Iterator<Item = Result<String, std::io::Error>>,
+    {
+        for line in lines {
+            let line = line.ok()?;
             let parts: Vec<&str> = line.split_whitespace().collect();
 
             if parts.len() != 2 {
@@ -44,7 +37,7 @@ impl<T> Vocabulary<T> where T: Number {
 
             let id = T::from_usize(id);
 
-            if id == eos_id {
+            if id == vocabulary.eos_id {
                 continue;
             }
 
@@ -57,6 +50,43 @@ impl<T> Vocabulary<T> where T: Number {
             vocabulary.tokens.push(token);
             vocabulary.ids.push(id);
         }
+        Some(())
+    }
+
+    pub fn from_file_path(file_path: &str, eos_id: T) -> Option<Self> {
+        let file = File::open(file_path).ok()?;
+        let reader = BufReader::new(file);
+        
+        let mut vocabulary = Self {
+            token_to_id: HashMap::default(),
+            id_to_token: HashMap::default(),
+            idx_to_id: HashMap::default(),
+            tokens: Vec::new(),
+            ids: Vec::new(),
+            eos_id: eos_id,
+        };
+
+        Self::_process_lines(&mut vocabulary, reader.lines())?;
+
+        Some(vocabulary)
+    }
+
+    // EOS = 1 for pre-trained Gemma 3 model
+    // EOS = 106 for instruction-tuned Gemma 3 model
+    pub fn new(data: &[u8], eos_id: T) -> Option<Self> {
+        let mut vocabulary = Self {
+            token_to_id: HashMap::default(),
+            id_to_token: HashMap::default(),
+            idx_to_id: HashMap::default(),
+            tokens: Vec::new(),
+            ids: Vec::new(),
+            eos_id: eos_id,
+        };
+
+        let text = std::str::from_utf8(data).ok()?;
+        let lines_iter = text.lines().map(|s| Ok(s.to_string()));
+
+        Self::_process_lines(&mut vocabulary, lines_iter)?;
 
         Some(vocabulary)
     }
