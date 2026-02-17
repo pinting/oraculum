@@ -1,18 +1,18 @@
 use aho_corasick::{AhoCorasick, AhoCorasickKind};
-use std::{borrow::Cow, rc::Rc};
+use std::{borrow::Cow, sync::Arc};
 
 use crate::{index::index::Index, number::Number, vocabulary::Vocabulary};
 
 pub struct Lattice<N, T> {
     offsets: Vec<N>,
     targets: Vec<T>,
-    vocabulary: Rc<Vocabulary<T>>,
+    vocabulary: Arc<Vocabulary<T>>,
     length: usize,
 }
 
 impl<N, T> Lattice<N, T>
 where N: Number, T: Number {
-    pub fn base(kind: AhoCorasickKind, vocabulary: Rc<Vocabulary<T>>) -> Option<AhoCorasick> {
+    pub fn base(kind: AhoCorasickKind, vocabulary: Arc<Vocabulary<T>>) -> Option<AhoCorasick> {
         let tokens = vocabulary.get_tokens();
         let patterns: Vec<&str> = tokens.iter().map(|token| token.as_ref()).collect();
         
@@ -22,7 +22,7 @@ where N: Number, T: Number {
             .ok()
     }
 
-    pub fn new(constant: &str, vocabulary: Rc<Vocabulary<T>>, ac: &AhoCorasick) -> Self {
+    pub fn new(constant: &str, vocabulary: Arc<Vocabulary<T>>, ac: &AhoCorasick) -> Self {
         let length = constant.len();
 
         let mut heads = vec![N::max_value(); length + 1];

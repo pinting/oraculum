@@ -1,7 +1,7 @@
 use aho_corasick::AhoCorasickKind;
 use std::error::Error;
 use std::io::{self, Write};
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
 mod number;
@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let now = Instant::now();
     let vocabulary = match Vocabulary::new(&raw_vocabulary, 1u32) {
-        Some(vocab) => Rc::new(vocab),
+        Some(vocab) => Arc::new(vocab),
         None => {
             return Err("Failed to create vocabulary".into());
         }
@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn demo(
     indexes: &[Box<dyn Index<u16, u32>>],
-    vocabulary: Rc<Vocabulary<u32>>,
+    vocabulary: Arc<Vocabulary<u32>>,
 ) -> Result<(), Box<dyn Error>> {
     let mut current = String::new();
 

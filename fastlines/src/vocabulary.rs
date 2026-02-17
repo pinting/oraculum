@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 use rustc_hash::{FxHashMap as HashMap};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -6,10 +6,10 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use crate::number::Number;
 
 pub struct Vocabulary<T> {
-    token_to_id: HashMap<Rc<str>, T>,
-    id_to_token: HashMap<T, Rc<str>>,
+    token_to_id: HashMap<Arc<str>, T>,
+    id_to_token: HashMap<T, Arc<str>>,
     idx_to_id: HashMap<usize, T>,
-    tokens: Vec<Rc<str>>,
+    tokens: Vec<Arc<str>>,
     ids: Vec<T>,
     eos_id: T,
 }
@@ -48,7 +48,7 @@ impl<T> Vocabulary<T> where T: Number {
                 continue;
             }
 
-            let token: Rc<str> = Rc::from(token);
+            let token: Arc<str> = Arc::from(token);
             let idx = vocabulary.tokens.len();
 
             vocabulary.token_to_id.insert(token.clone(), id);
@@ -62,7 +62,7 @@ impl<T> Vocabulary<T> where T: Number {
     }
     
     #[inline(always)]
-    pub fn get_tokens(&self) -> &Vec<Rc<str>> {
+    pub fn get_tokens(&self) -> &Vec<Arc<str>> {
         &self.tokens
     }
 
@@ -72,7 +72,7 @@ impl<T> Vocabulary<T> where T: Number {
     }
 
     #[inline(always)]
-    pub fn get_token_by_id(&self, id: T) -> Option<Rc<str>> {
+    pub fn get_token_by_id(&self, id: T) -> Option<Arc<str>> {
         let token = self.id_to_token.get(&id);
 
         let Some(token) = token else {
@@ -83,7 +83,7 @@ impl<T> Vocabulary<T> where T: Number {
     }
 
     #[inline(always)]
-    pub fn get_token_by_idx(&self, idx: usize) -> Option<Rc<str>> {
+    pub fn get_token_by_idx(&self, idx: usize) -> Option<Arc<str>> {
         let token = self.tokens.get(idx);
 
         let Some(token) = token else {

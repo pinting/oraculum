@@ -3,7 +3,7 @@ use toktrie::TokRxInfo;
 use std::cell::{RefCell};
 use std::collections::{VecDeque};
 use rustc_hash::{FxHashMap as HashMap};
-use std::rc::Rc;
+use std::sync::Arc;
 use std::borrow::Cow;
 use toktrie::{
     recognizer::{FunctionalRecognizer, StackRecognizer},
@@ -54,7 +54,7 @@ where
     T: Number,
     D: DFA<N, T>,
 {
-    pub fn base(vocabulary: Rc<Vocabulary<T>>) -> Option<TokTrie> {
+    pub fn base(vocabulary: Arc<Vocabulary<T>>) -> Option<TokTrie> {
         let words: Vec<Vec<u8>> = vocabulary.get_tokens()
             .iter()
             .map(|token| token.as_bytes().to_vec())
@@ -67,7 +67,7 @@ where
 
     pub fn new(
         expression: &str,
-        vocabulary: Rc<Vocabulary<T>>,
+        vocabulary: Arc<Vocabulary<T>>,
         trie: &TokTrie,
     ) -> Option<Self> {
         let eos_id = vocabulary.get_eos_id();
