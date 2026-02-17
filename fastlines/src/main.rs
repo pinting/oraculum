@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Creating indexes...");
 
     let now = Instant::now();
-    let input = "Today is ";
+    let input = "Why ";
     let index = Lattice::new(input, vocabulary.clone(), &ac);
 
     indexes.push(Box::new(index));
@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Expression '{}' created in {:?}", input, now.elapsed());
     
     let now = Instant::now();
-    let input = "!";
+    let input = "?";
     let index = Lattice::new(input, vocabulary.clone(), &ac);
 
     indexes.push(Box::new(index));

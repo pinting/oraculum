@@ -7,6 +7,14 @@ edition = "2021"
 name = "fastlines"
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "fastlines"
+required-features = []
+
+[features]
+default = []
+pyo3 = ["dep:pyo3", "dep:numpy"]
+
 [dependencies]
 rand = "0.10.0"
 rustc-hash = "2.1.1"
@@ -14,11 +22,12 @@ base64 = "0.22.1"
 aho-corasick = "1.1.4"
 derivre = "0.3"
 toktrie = { git = "https://github.com/guidance-ai/llguidance.git", branch = "main" }
-pyo3 = { version = "0.22", features = ["extension-module"] }
-numpy = "0.22"
+pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
+numpy = { version = "0.22", optional = true }
 
 [package.metadata.maturin]
 bindings = "pyo3"
+features = ["pyo3"]
 
 [lints.rust]
 dead_code = "allow"

@@ -7,4 +7,4 @@ uv pip install -r requirements.txt
 rm -rf target/
 rm -rf *.so
 
-maturin develop
+maturin develop --features pyo3
