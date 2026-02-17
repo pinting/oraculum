@@ -1,5 +1,6 @@
 use aho_corasick::{AhoCorasick, AhoCorasickKind};
 use pyo3::prelude::*;
+use pyo3::types::{PyType, PyModule};
 use numpy::{PyArray1, PyArrayMethods};
 use toktrie::TokTrie;
 use std::collections::HashSet;
@@ -41,6 +42,14 @@ impl PyVocabulary {
         let vocabulary = Vocabulary::new(data, eos_id)
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to create vocabulary"))?;
 
+        Ok(PyVocabulary { inner: Arc::new(vocabulary) })
+    }
+
+    #[classmethod]
+    fn from_file_path(_cls: &Bound<'_, PyType>, _py: Python<'_>, file_path: &str, eos_id: u32) -> PyResult<Self> {
+        let vocabulary = Vocabulary::from_file_path(file_path, eos_id)
+            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to create vocabulary from file"))?;
+        
         Ok(PyVocabulary { inner: Arc::new(vocabulary) })
     }
 

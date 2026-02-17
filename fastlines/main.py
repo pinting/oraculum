@@ -4,15 +4,12 @@ import sys
 def main():
     try:
         try:
-            with open("../vocabulary.tiktoken", "rb") as f:
-                vocab_data = f.read()
+            # Assuming EOS token ID is 1
+            vocabulary = fastlines.Vocabulary.from_file_path("../vocabulary.tiktoken", 1)
         
-        except FileNotFoundError:
-            print("Error: vocabulary.tiktoken file not found.")
+        except Exception: # Catch any exception during file loading
+            print("Error: vocabulary.tiktoken file not found or failed to load.")
             return
-
-        # Assuming EOS token ID is 1
-        vocabulary = fastlines.Vocabulary(vocab_data, 1)
 
         print("Vocabulary loaded.")
 
@@ -26,7 +23,7 @@ def main():
 
         indexes = []
 
-        input_str = "John is having a busy "
+        input_str = "Today is "
 
         indexes.append(fastlines.Lattice(input_str, vocabulary, lattice_base))
 
@@ -38,7 +35,7 @@ def main():
 
         print(f"Expression '{input_str}' created.")
 
-        input_str = " this week!"
+        input_str = "!"
 
         indexes.append(fastlines.Lattice(input_str, vocabulary, lattice_base))
 
