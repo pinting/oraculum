@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import numpy as np
 from numpy.typing import NDArray
 import sys
@@ -9,41 +10,53 @@ import fastlines_typed as fl
 def main() -> None:
     try:
         try:
+            t0: float = time.perf_counter()
             vocabulary: fl.Vocabulary = fl.Vocabulary.from_file_path("../vocabulary.tiktoken", 1, 32)
+            t1: float = time.perf_counter()
 
         except Exception:
             print("Error: vocabulary.tiktoken file not found or failed to load.")
 
             return
 
-        print("Vocabulary loaded")
+        print(f"Vocabulary loaded ({(t1 - t0) * 1000:.2f} ms)")
 
+        t0 = time.perf_counter()
         ac_base: fl.AhoCorasick = fl.AhoCorasick(vocabulary, fl.AC_CONTIGUOUS_NFA)
+        t1 = time.perf_counter()
 
-        print("Lattice base (AhoCorasick) built")
+        print(f"Lattice base (AhoCorasick) built ({(t1 - t0) * 1000:.2f} ms)")
 
+        t0 = time.perf_counter()
         toktrie_base: fl.TokTrie = fl.TokTrie(vocabulary, fl.FAST_HASH_DFA, 32, 32, 32)
+        t1 = time.perf_counter()
 
-        print("Expression base (TokTrie) built with FastHashDFA<32, 32, 32> config")
+        print(f"Expression base (TokTrie) built with FastHashDFA<32, 32, 32> config ({(t1 - t0) * 1000:.2f} ms)")
 
         indexes: list[fl.Lattice | fl.Expression] = []
         input_str: str = "Why "
 
+        t0 = time.perf_counter()
         indexes.append(fl.Lattice(input_str, vocabulary, ac_base))
+        t1 = time.perf_counter()
 
-        print(f"Lattice '{input_str}' created")
+        print(f"Lattice '{input_str}' created ({(t1 - t0) * 1000:.2f} ms)")
 
         input_str = "monday|tuesday|wednesday|thursday|friday"
 
+        t0 = time.perf_counter()
         indexes.append(fl.Expression(input_str, vocabulary, toktrie_base))
+        t1 = time.perf_counter()
 
-        print(f"Expression '{input_str}' created")
+        print(f"Expression '{input_str}' created ({(t1 - t0) * 1000:.2f} ms)")
 
         input_str = "?"
 
+        t0 = time.perf_counter()
         indexes.append(fl.Lattice(input_str, vocabulary, ac_base))
+        t1 = time.perf_counter()
 
-        print(f"Lattice '{input_str}' created")
+        print(f"Lattice '{input_str}' created ({(t1 - t0) * 1000:.2f} ms)")
 
         current: str = ""
         eos_id: int = vocabulary.get_eos_id()
