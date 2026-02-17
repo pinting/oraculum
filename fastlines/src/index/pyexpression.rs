@@ -153,6 +153,38 @@ impl ExpressionUnit {
         }
     }
 
+    pub fn memory_usage(&self) -> usize {
+        macro_rules! call_mem {
+            ($e:expr) => { $e.memory_usage() }
+        }
+
+        match self {
+            Self::FhU16U16U16(e) => call_mem!(e), Self::FhU16U16U32(e) => call_mem!(e), Self::FhU16U16U64(e) => call_mem!(e),
+            Self::FhU32U16U16(e) => call_mem!(e), Self::FhU32U16U32(e) => call_mem!(e), Self::FhU32U16U64(e) => call_mem!(e),
+            Self::FhU64U16U16(e) => call_mem!(e), Self::FhU64U16U32(e) => call_mem!(e), Self::FhU64U16U64(e) => call_mem!(e),
+            Self::FhU16U32U16(e) => call_mem!(e), Self::FhU16U32U32(e) => call_mem!(e), Self::FhU16U32U64(e) => call_mem!(e),
+            Self::FhU32U32U16(e) => call_mem!(e), Self::FhU32U32U32(e) => call_mem!(e), Self::FhU32U32U64(e) => call_mem!(e),
+            Self::FhU64U32U16(e) => call_mem!(e), Self::FhU64U32U32(e) => call_mem!(e), Self::FhU64U32U64(e) => call_mem!(e),
+            Self::FhU16U64U16(e) => call_mem!(e), Self::FhU16U64U32(e) => call_mem!(e), Self::FhU16U64U64(e) => call_mem!(e),
+            Self::FhU32U64U16(e) => call_mem!(e), Self::FhU32U64U32(e) => call_mem!(e), Self::FhU32U64U64(e) => call_mem!(e),
+            Self::FhU64U64U16(e) => call_mem!(e), Self::FhU64U64U32(e) => call_mem!(e), Self::FhU64U64U64(e) => call_mem!(e),
+
+            Self::DoubleU16U16(e) => call_mem!(e), Self::DoubleU32U16(e) => call_mem!(e), Self::DoubleU64U16(e) => call_mem!(e),
+            Self::DoubleU16U32(e) => call_mem!(e), Self::DoubleU32U32(e) => call_mem!(e), Self::DoubleU64U32(e) => call_mem!(e),
+            Self::DoubleU16U64(e) => call_mem!(e), Self::DoubleU32U64(e) => call_mem!(e), Self::DoubleU64U64(e) => call_mem!(e),
+
+            Self::FlatU16U16U16(e) => call_mem!(e), Self::FlatU16U16U32(e) => call_mem!(e), Self::FlatU16U16U64(e) => call_mem!(e),
+            Self::FlatU32U16U16(e) => call_mem!(e), Self::FlatU32U16U32(e) => call_mem!(e), Self::FlatU32U16U64(e) => call_mem!(e),
+            Self::FlatU64U16U16(e) => call_mem!(e), Self::FlatU64U16U32(e) => call_mem!(e), Self::FlatU64U16U64(e) => call_mem!(e),
+            Self::FlatU16U32U16(e) => call_mem!(e), Self::FlatU16U32U32(e) => call_mem!(e), Self::FlatU16U32U64(e) => call_mem!(e),
+            Self::FlatU32U32U16(e) => call_mem!(e), Self::FlatU32U32U32(e) => call_mem!(e), Self::FlatU32U32U64(e) => call_mem!(e),
+            Self::FlatU64U32U16(e) => call_mem!(e), Self::FlatU64U32U32(e) => call_mem!(e), Self::FlatU64U32U64(e) => call_mem!(e),
+            Self::FlatU16U64U16(e) => call_mem!(e), Self::FlatU16U64U32(e) => call_mem!(e), Self::FlatU16U64U64(e) => call_mem!(e),
+            Self::FlatU32U64U16(e) => call_mem!(e), Self::FlatU32U64U32(e) => call_mem!(e), Self::FlatU32U64U64(e) => call_mem!(e),
+            Self::FlatU64U64U16(e) => call_mem!(e), Self::FlatU64U64U32(e) => call_mem!(e), Self::FlatU64U64U64(e) => call_mem!(e),
+        }
+    }
+
     pub fn transitions<'a>(&'a self, node_id: u64) -> Option<Cow<'a, [u64]>> {
         macro_rules! call_trans {
             ($e:expr, $N:ty) => {
@@ -362,5 +394,9 @@ impl PyExpression {
 
     fn next(&self, node_id: u64, token_id: u64) -> Option<u64> {
         self.unit.next(node_id, token_id)
+    }
+
+    fn memory_usage(&self) -> usize {
+        self.unit.memory_usage()
     }
 }

@@ -79,6 +79,9 @@ class Lattice:
     def next(self, node_id: int, token_id: int) -> int | None:
         return self.unit.next(node_id, token_id)
 
+    def memory_usage(self) -> int:
+        return self.unit.memory_usage()
+
 
 class TokTrie:
     __slots__ = ("unit",)
@@ -116,3 +119,6 @@ class Expression:
 
     def next(self, node_id: int, token_id: int) -> int | None:
         return self.unit.next(node_id, token_id)
+
+    def memory_usage(self) -> int:
+        return self.unit.memory_usage()

@@ -81,4 +81,12 @@ impl PyLattice {
             LatticeUnit::U64(l) => l.next(node_id as u32, token_id).map(|n| n as u64),
         }
     }
+
+    fn memory_usage(&self) -> usize {
+        match &self.unit {
+            LatticeUnit::U16(l) => l.memory_usage(),
+            LatticeUnit::U32(l) => l.memory_usage(),
+            LatticeUnit::U64(l) => l.memory_usage(),
+        }
+    }
 }

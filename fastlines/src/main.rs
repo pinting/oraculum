@@ -84,6 +84,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Lattice '{}' created in {:?}", input, now.elapsed());
 
+    for index in &indexes {
+        println!("{} memory usage: {} bytes", index.name(), index.memory_usage());
+    }
+
     if let Err(e) = demo(&indexes, vocabulary.clone()) {
         return Err(e);
     }
