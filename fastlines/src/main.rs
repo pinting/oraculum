@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Lattice base (AhoCorasick) built in {:?}", now.elapsed());
 
     let now = Instant::now();
-    let toktrie = match Expression::<u16, u32, FastHashDFA<u16, u32, u32>>::base(vocabulary.clone()) {
+    let toktrie = match Expression::<u16, u32, FastHashDFA<u16, u32>>::base(vocabulary.clone()) {
         Some(base) => base,
         None => {
             return Err("Failed to build TokTrie base".into());
@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let now = Instant::now();
     let input = "monday|tuesday|wednesday|thursday|friday";
-    let index: Expression<u16, u32, FastHashDFA<u16, u32, u32>> = match Expression::new(
+    let index: Expression<u16, u32, FastHashDFA<u16, u32>> = match Expression::new(
         input,
         vocabulary.clone(),
         &toktrie,
