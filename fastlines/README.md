@@ -16,15 +16,45 @@ source .venv/bin/activate
 python main.py # Example application
 ```
 
-## DFA Backends
+## Benchmark
 
-| Backend | Lookup | Scan | Memory |
-|---|---|---|---|
-| `FAST_HASH_DFA` | Fastest | Fastest | Moderate - Highest (after 15k links) |
-| `DOUBLE_HASH_DFA` | Balanced | Balanced | Moderate |
-| `FLAT_DFA` | Slowest | Fastest | Lowest |
+```
+LOOKUP LEADERBOARD:
+--------------------------------
+DFA Type                Avg (us)
+--------------------------------
+#1 FastHashDFA             0.986
+#2 FlatDFA                 1.052
+#3 DoubleHashDFA           1.122
+--------------------------------
 
-All backends support configurable 16, 32, and 64-bit unit sizes for nodes, tokens, and offsets.
+SCAN LEADERBOARD:
+--------------------------------
+DFA Type                Avg (us)
+--------------------------------
+#1 FastHashDFA            22.195
+#2 FlatDFA                24.587
+#3 DoubleHashDFA          79.970
+--------------------------------
+
+BUILD LEADERBOARD:
+--------------------------------
+DFA Type                Avg (ms)
+--------------------------------
+#1 DoubleHashDFA          17.900
+#2 FastHashDFA            20.871
+#3 FlatDFA                26.033
+--------------------------------
+
+MEMORY LEADERBOARD:
+--------------------------------
+DFA Type                Avg (KB)
+--------------------------------
+#1 FlatDFA               120.275
+#2 DoubleHashDFA         208.841
+#3 FastHashDFA           284.461
+--------------------------------
+```
 
 ## License
 

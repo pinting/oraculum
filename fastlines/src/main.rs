@@ -9,7 +9,7 @@ mod dfa;
 mod index;
 mod vocabulary;
 
-use crate::dfa::fasthashdfa::FastHashDFA;
+use crate::dfa::flatdfa::FlatDFA;
 use crate::index::lattice::Lattice;
 use crate::index::index::Index;
 use crate::index::expression::Expression;
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Vocabulary loaded in {:?}", now.elapsed());
 
     let now = Instant::now();
-    let ac = match Lattice::<u16, u32>::base(AhoCorasickKind::ContiguousNFA, vocabulary.clone()) {
+    let ac = match Lattice::<u32, u32>::base(AhoCorasickKind::ContiguousNFA, vocabulary.clone()) {
         Some(base) => base,
         None => {
             return Err("Failed to build AhoCorasick base".into());
@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Lattice base (AhoCorasick) built in {:?}", now.elapsed());
 
     let now = Instant::now();
-    let toktrie = match Expression::<u16, u32, FastHashDFA<u16, u32>>::base(vocabulary.clone()) {
+    let toktrie = match Expression::<u32, u32, FlatDFA<u32, u32>>::base(vocabulary.clone()) {
         Some(base) => base,
         None => {
             return Err("Failed to build TokTrie base".into());
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Expression base (TokTrie) built in {:?}", now.elapsed());
 
-    let mut indexes: Vec<Box<dyn Index<u16, u32>>> = Vec::new();
+    let mut indexes: Vec<Box<dyn Index<u32, u32>>> = Vec::new();
 
     println!("Creating indexes...");
 
@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let now = Instant::now();
     let input = "monday|tuesday|wednesday|thursday|friday";
-    let index: Expression<u16, u32, FastHashDFA<u16, u32>> = match Expression::new(
+    let index: Expression<u32, u32, FlatDFA<u32, u32>> = match Expression::new(
         input,
         vocabulary.clone(),
         &toktrie,
@@ -96,13 +96,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn demo(
-    indexes: &[Box<dyn Index<u16, u32>>],
+    indexes: &[Box<dyn Index<u32, u32>>],
     vocabulary: Arc<Vocabulary<u32>>,
 ) -> Result<(), Box<dyn Error>> {
     let mut current = String::new();
 
     for (_, index) in indexes.iter().enumerate() {
-        let mut current_node = 0u16;
+        let mut current_node = 0;
 
         loop {
             let transitions = match index.transitions(current_node) {

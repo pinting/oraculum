@@ -11,24 +11,27 @@ Text to SQL LLM enforcement research.
 Setup and use according to `fastlines/README.md`!
 
 ```bash
-Vocabulary loaded (815.47 ms)
-Lattice base (AhoCorasick) built (2229.88 ms)
-Expression base (TokTrie) built with FastHashDFA<32, 32, 32> config (409.39 ms)
+Vocabulary loaded (856.29 ms)
+Lattice base (AhoCorasick) built (2267.56 ms)
+Expression base (TokTrie) built with FlatDFA<32, 32> config (411.79 ms)
 Lattice 'Why ' created (0.07 ms), memory usage: 128 bytes
-Expression 'monday|tuesday|wednesday|thursday|friday' created (3.27 ms), memory usage: 1304 bytes
-Lattice '?' created (0.03 ms), memory usage: 80 bytes
+Expression 'monday|tuesday|wednesday|thursday|friday' created (3.22 ms), memory usage: 787 bytes
+Lattice '?' created (0.02 ms), memory usage: 80 bytes
+Number of nodes: 4
 Routes: `Why` `Wh` `W` `W`
-> Wh
-Current: Wh
-Routes: `y` `y`
-> y
+> Why
 Current: Why
 Routes: ` ` ` `
 >  
 Current: Why 
-Routes: `monday` `w` `wed` `fri` `fr` `mond` `frid` `thur` `t` `tu` `m` `th` `w` `m` `mo` `f` `mon` `f` `friday` `we` `t` `thu`
-> monday
+Number of nodes: 17
+Routes: `f` `m` `t` `w` `th` `we` `fr` `mo` `mon` `tu` `mond` `thur` `wed` `fri` `thu` `frid` `friday` `monday` `t` `m` `f` `w`
+> mond
+Current: Why mond
+Routes: `a` `ay` `a`
+> ay
 Current: Why monday
+Number of nodes: 1
 Routes: `?` `?`
 > ?
 Current: Why monday?
@@ -66,47 +69,7 @@ The combination of AOT index building with TokTrie - Derivre: faster build time,
 
 ### 7th - Performance comparisons between `FastHashDFA` vs. `DoubleHashDFA` vs. `FlatDFA`
 
-The benchmarks demonstrate a space-time trade-off where the flat structures achieves the fastest performance for scanning and hash structures for lookups; while hybrid solutions are the fastest, they require the largest memory allocation. Ultimately, the `DoubleHashDFA` (the implementation `outlines-core` uses) proves to be a good universal solution, average in both lookups and scans, but only suffering (worst case) 2x memory usage compared to `FlatDFA` which is the most compact, but having a slow lookup algorithm due to its linearity (optimized by binary tree search on a CSR data structure, but still lacking the jump capabilities of hash functions).
-
-The heavily optimized `FastHashDFA` tries to combine both of the two worlds and outperforms other candidates in lookup and scan speeds, but suffers a memory explosion after 15k links.
-
-```
-Nodes: 200 | Links: 25 - 75
-
-Lookup: 5.99ms (2.04x FlatDFA / 3.23x DoubleHashDFA)
-Scan: 36.94ms (0.99x FlatDFA / 4.35x DoubleHashDFA)
-Memory: 170% of FlatDFA / 92% of DoubleHashDFA
-
-Nodes: 200 | Links: 50 - 150
-
-Lookup: 6.19ms (2.17x FlatDFA / 3.23x DoubleHashDFA)
-Scan: 67.48ms (0.99x FlatDFA / 4.35x DoubleHashDFA)
-Memory: 195% of FlatDFA / 110% of DoubleHashDFA
-
-Nodes: 2,000 | Links: 50 - 1,000
-
-Lookup: 14.62ms (1.75x FlatDFA / 2.04x DoubleHashDFA)
-Scan: 337.53ms (1.00x FlatDFA / 4.17x DoubleHashDFA)
-Memory: 190% of FlatDFA / 111% of DoubleHashDFA
-
-Nodes: 2,000 | Links: 500 - 1,500
-
-Lookup: 18.73ms (1.69x FlatDFA / 1.72x DoubleHashDFA)
-Scan: 641.35ms (1.00x FlatDFA / 4.17x DoubleHashDFA)
-Memory: 201% of FlatDFA / 119% of DoubleHashDFA
-
-Nodes: 2,000 | Links: 5,000 - 15,000
-
-Lookup: 25.75ms (2.63x FlatDFA / 1.54x DoubleHashDFA)
-Scan: 6.39s (1.00x FlatDFA / 4.17x DoubleHashDFA)
-Memory: 191% of FlatDFA / 121% of DoubleHashDFA
-
-Nodes: 2,000 | Links: 25,000 - 75,000
-
-Lookup: 35.28ms (2.94x FlatDFA / 1.27x DoubleHashDFA)
-Scan: 31.81s (1.00x FlatDFA / 4.17x DoubleHashDFA)
-Memory: 293% of FlatDFA / 167% of DoubleHashDFA
-```
+The benchmarks demonstrate a space-time trade-off where the flat structures achieves the fastest performance for scanning and hash structures for lookups; while hybrid solutions are the fastest, they require the largest memory allocation. Ultimately, the `DoubleHashDFA` (the implementation `outlines-core` uses) proves to be a good universal solution, average in both lookups and scans, but only suffering (worst case) 2x memory usage compared to `FlatDFA` which is the most compact, but having a slow lookup algorithm due to its linearity (optimized by binary tree search on a CSR data structure, but still lacking the jump capabilities of hash functions). The heavily optimized `FastHashDFA` tries to combine both of the two worlds and outperforms other candidates in lookup and scan speeds, but suffers a high memory usage.
 
 ## License
 
