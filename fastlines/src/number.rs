@@ -54,3 +54,12 @@ impl Number for u64 {
     #[inline(always)] fn to_usize(self) -> usize { self as usize }
     #[inline(always)] fn wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
 }
+
+impl Number for u128 {
+    const GOLDEN_RATIO: Self = 0x9E3779B97F4A7C15F39CC0605CEDC835;
+
+    #[inline(always)] fn max_value() -> Self { u128::MAX }
+    #[inline(always)] fn from_usize(v: usize) -> Self { v as Self }
+    #[inline(always)] fn to_usize(self) -> usize { self as usize }
+    #[inline(always)] fn wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
+}

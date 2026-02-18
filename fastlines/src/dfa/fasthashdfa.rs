@@ -152,6 +152,7 @@ enum Headers<T> {
     U16(Vec<Header<u16, T>>),
     U32(Vec<Header<u32, T>>),
     U64(Vec<Header<u64, T>>),
+    U128(Vec<Header<u128, T>>),
 }
 
 pub struct FastHashDFA<N, T> {
@@ -291,7 +292,7 @@ where N: Number, T: Number {
             } else if max_offset <= u64::MAX as usize {
                 Headers::U64(convert(&metas))
             } else {
-                unreachable!()
+                Headers::U128(convert(&metas))
             }
         };
 
@@ -335,6 +336,7 @@ where N: Number, T: Number {
             Headers::U16(h) => self._next(h, src, transition),
             Headers::U32(h) => self._next(h, src, transition),
             Headers::U64(h) => self._next(h, src, transition),
+            Headers::U128(h) => self._next(h, src, transition),
         }
     }
 
@@ -344,6 +346,7 @@ where N: Number, T: Number {
             Headers::U16(h) => self._transitions(h, src),
             Headers::U32(h) => self._transitions(h, src),
             Headers::U64(h) => self._transitions(h, src),
+            Headers::U128(h) => self._transitions(h, src),
         }
     }
 
@@ -359,6 +362,7 @@ where N: Number, T: Number {
             Headers::U16(h) => h.capacity() * std::mem::size_of::<Header<u16, T>>(),
             Headers::U32(h) => h.capacity() * std::mem::size_of::<Header<u32, T>>(),
             Headers::U64(h) => h.capacity() * std::mem::size_of::<Header<u64, T>>(),
+            Headers::U128(h) => h.capacity() * std::mem::size_of::<Header<u128, T>>(),
         };
         mem += self.tokens.capacity() * std::mem::size_of::<T>();
         mem += self.targets.capacity() * std::mem::size_of::<N>();
