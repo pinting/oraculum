@@ -129,7 +129,7 @@ DFA_CONFIGS: list[tuple[str, int]] = [
     ("FlatDFA", fl.FLAT_DFA),
 ]
 
-NUM_ROUNDS = 10
+NUM_ROUNDS = 100
 NUM_SCAN_ITERS = 50
 NUM_LOOKUP_ITERS = 200
 
