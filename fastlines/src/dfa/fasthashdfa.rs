@@ -27,7 +27,7 @@ impl SectionUnit {
         }
     }
 
-    fn byte_size(&self) -> usize {
+    fn bytes(&self) -> usize {
         match self {
             Self::U8 => 1,
             Self::U16 => 2,
@@ -257,7 +257,7 @@ where N: Number, T: Number {
             let section_mask = section_size - 1;
 
             let unit = SectionUnit::from_section_size(section_size);
-            let bytes = section_size * unit.byte_size();
+            let bytes = section_size * unit.bytes();
             let slots = (bytes + 7) / 8;
             let index_offset = slots_count;
 
