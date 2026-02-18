@@ -28,7 +28,7 @@ def main() -> None:
         print(f"Lattice base (AhoCorasick) built ({(t1 - t0) * 1000:.2f} ms)")
 
         t0 = time.perf_counter()
-        toktrie_base: fl.TokTrie = fl.TokTrie(vocabulary, fl.FAST_HASH_DFA, 32, 32)
+        toktrie_base: fl.TokTrie = fl.TokTrie(vocabulary, fl.PGM_DFA, 32, 32)
         t1 = time.perf_counter()
 
         print(f"Expression base (TokTrie) built with FastHashDFA<32, 32> config ({(t1 - t0) * 1000:.2f} ms)")
