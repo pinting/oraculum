@@ -8,6 +8,7 @@ use crate::pyvocabulary::{PyVocabulary, VocabularyUnit};
 use crate::dfa::fasthashdfa::FastHashDFA;
 use crate::dfa::doublehashdfa::DoubleHashDFA;
 use crate::dfa::flatdfa::FlatDFA;
+use crate::dfa::pgmdfa::PgmDFA;
 use crate::index::index::Index;
 use crate::index::expression::Expression;
 use crate::number::Number;
@@ -43,6 +44,16 @@ pub enum ExpressionUnit {
     FlatU16U64(Arc<Expression<u16, u64, FlatDFA<u16, u64>>>),
     FlatU32U64(Arc<Expression<u32, u64, FlatDFA<u32, u64>>>),
     FlatU64U64(Arc<Expression<u64, u64, FlatDFA<u64, u64>>>),
+    
+    PGMU16U16(Arc<Expression<u16, u16, PgmDFA<u16, u16>>>),
+    PGMU32U16(Arc<Expression<u32, u16, PgmDFA<u32, u16>>>),
+    PGMU64U16(Arc<Expression<u64, u16, PgmDFA<u64, u16>>>),
+    PGMU16U32(Arc<Expression<u16, u32, PgmDFA<u16, u32>>>),
+    PGMU32U32(Arc<Expression<u32, u32, PgmDFA<u32, u32>>>),
+    PGMU64U32(Arc<Expression<u64, u32, PgmDFA<u64, u32>>>),
+    PGMU16U64(Arc<Expression<u16, u64, PgmDFA<u16, u64>>>),
+    PGMU32U64(Arc<Expression<u32, u64, PgmDFA<u32, u64>>>),
+    PGMU64U64(Arc<Expression<u64, u64, PgmDFA<u64, u64>>>),
 }
 
 impl ExpressionUnit {
@@ -63,6 +74,10 @@ impl ExpressionUnit {
             Self::FlatU16U16(e) => call_start!(e), Self::FlatU32U16(e) => call_start!(e), Self::FlatU64U16(e) => call_start!(e),
             Self::FlatU16U32(e) => call_start!(e), Self::FlatU32U32(e) => call_start!(e), Self::FlatU64U32(e) => call_start!(e),
             Self::FlatU16U64(e) => call_start!(e), Self::FlatU32U64(e) => call_start!(e), Self::FlatU64U64(e) => call_start!(e),
+
+            Self::PGMU16U16(e) => call_start!(e), Self::PGMU32U16(e) => call_start!(e), Self::PGMU64U16(e) => call_start!(e),
+            Self::PGMU16U32(e) => call_start!(e), Self::PGMU32U32(e) => call_start!(e), Self::PGMU64U32(e) => call_start!(e),
+            Self::PGMU16U64(e) => call_start!(e), Self::PGMU32U64(e) => call_start!(e), Self::PGMU64U64(e) => call_start!(e),
         }
     }
 
@@ -86,6 +101,10 @@ impl ExpressionUnit {
             Self::FlatU16U16(e) => call_next!(e, u16, u16), Self::FlatU32U16(e) => call_next!(e, u32, u16), Self::FlatU64U16(e) => call_next!(e, u64, u16),
             Self::FlatU16U32(e) => call_next!(e, u16, u32), Self::FlatU32U32(e) => call_next!(e, u32, u32), Self::FlatU64U32(e) => call_next!(e, u64, u32),
             Self::FlatU16U64(e) => call_next!(e, u16, u64), Self::FlatU32U64(e) => call_next!(e, u32, u64), Self::FlatU64U64(e) => call_next!(e, u64, u64),
+
+            Self::PGMU16U16(e) => call_next!(e, u16, u16), Self::PGMU32U16(e) => call_next!(e, u32, u16), Self::PGMU64U16(e) => call_next!(e, u64, u16),
+            Self::PGMU16U32(e) => call_next!(e, u16, u32), Self::PGMU32U32(e) => call_next!(e, u32, u32), Self::PGMU64U32(e) => call_next!(e, u64, u32),
+            Self::PGMU16U64(e) => call_next!(e, u16, u64), Self::PGMU32U64(e) => call_next!(e, u32, u64), Self::PGMU64U64(e) => call_next!(e, u64, u64),
         }
     }
 
@@ -106,6 +125,10 @@ impl ExpressionUnit {
             Self::FlatU16U16(e) => call_mem!(e), Self::FlatU32U16(e) => call_mem!(e), Self::FlatU64U16(e) => call_mem!(e),
             Self::FlatU16U32(e) => call_mem!(e), Self::FlatU32U32(e) => call_mem!(e), Self::FlatU64U32(e) => call_mem!(e),
             Self::FlatU16U64(e) => call_mem!(e), Self::FlatU32U64(e) => call_mem!(e), Self::FlatU64U64(e) => call_mem!(e),
+
+            Self::PGMU16U16(e) => call_mem!(e), Self::PGMU32U16(e) => call_mem!(e), Self::PGMU64U16(e) => call_mem!(e),
+            Self::PGMU16U32(e) => call_mem!(e), Self::PGMU32U32(e) => call_mem!(e), Self::PGMU64U32(e) => call_mem!(e),
+            Self::PGMU16U64(e) => call_mem!(e), Self::PGMU32U64(e) => call_mem!(e), Self::PGMU64U64(e) => call_mem!(e),
         }
     }
 
@@ -131,6 +154,10 @@ impl ExpressionUnit {
             Self::FlatU16U16(e) => call_trans!(e, u16), Self::FlatU32U16(e) => call_trans!(e, u32), Self::FlatU64U16(e) => call_trans!(e, u64),
             Self::FlatU16U32(e) => call_trans!(e, u16), Self::FlatU32U32(e) => call_trans!(e, u32), Self::FlatU64U32(e) => call_trans!(e, u64),
             Self::FlatU16U64(e) => call_trans!(e, u16), Self::FlatU32U64(e) => call_trans!(e, u32), Self::FlatU64U64(e) => call_trans!(e, u64),
+
+            Self::PGMU16U16(e) => call_trans!(e, u16), Self::PGMU32U16(e) => call_trans!(e, u32), Self::PGMU64U16(e) => call_trans!(e, u64),
+            Self::PGMU16U32(e) => call_trans!(e, u16), Self::PGMU32U32(e) => call_trans!(e, u32), Self::PGMU64U32(e) => call_trans!(e, u64),
+            Self::PGMU16U64(e) => call_trans!(e, u16), Self::PGMU32U64(e) => call_trans!(e, u32), Self::PGMU64U64(e) => call_trans!(e, u64),
         }
     }
 }
@@ -227,6 +254,19 @@ impl PyExpression {
                 (2, 8) => make_exp!(FlatU16U64, u16, u64, FlatDFA, U64),
                 (4, 8) => make_exp!(FlatU32U64, u32, u64, FlatDFA, U64),
                 (8, 8) => make_exp!(FlatU64U64, u64, u64, FlatDFA, U64),
+                _ => {},
+            }
+        } else if d == 3 {
+            match (n, t) {
+                (2, 2) => make_exp!(PGMU16U16, u16, u16, PgmDFA, U16),
+                (4, 2) => make_exp!(PGMU32U16, u32, u16, PgmDFA, U16),
+                (8, 2) => make_exp!(PGMU64U16, u64, u16, PgmDFA, U16),
+                (2, 4) => make_exp!(PGMU16U32, u16, u32, PgmDFA, U32),
+                (4, 4) => make_exp!(PGMU32U32, u32, u32, PgmDFA, U32),
+                (8, 4) => make_exp!(PGMU64U32, u64, u32, PgmDFA, U32),
+                (2, 8) => make_exp!(PGMU16U64, u16, u64, PgmDFA, U64),
+                (4, 8) => make_exp!(PGMU32U64, u32, u64, PgmDFA, U64),
+                (8, 8) => make_exp!(PGMU64U64, u64, u64, PgmDFA, U64),
                 _ => {},
             }
         }
