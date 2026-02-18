@@ -9,6 +9,7 @@ enum Offsets {
     U16(Vec<u16>),
     U32(Vec<u32>),
     U64(Vec<u64>),
+    U128(Vec<u128>),
 }
 
 pub struct FlatDFA<N, T> {
@@ -111,7 +112,7 @@ where N: Number, T: Number {
             } else if max_offset <= u64::MAX as usize {
                 Offsets::U64(convert(raw))
             } else {
-                unreachable!()
+                Offsets::U128(convert(raw))
             }
         };
 
@@ -127,6 +128,7 @@ where N: Number, T: Number {
             Offsets::U16(o) => self.next_inner(o, src, transition),
             Offsets::U32(o) => self.next_inner(o, src, transition),
             Offsets::U64(o) => self.next_inner(o, src, transition),
+            Offsets::U128(o) => self.next_inner(o, src, transition),
         }
     }
 
@@ -136,6 +138,7 @@ where N: Number, T: Number {
             Offsets::U16(o) => self.transitions_inner(o, src),
             Offsets::U32(o) => self.transitions_inner(o, src),
             Offsets::U64(o) => self.transitions_inner(o, src),
+            Offsets::U128(o) => self.transitions_inner(o, src),
         }
     }
 
@@ -151,6 +154,7 @@ where N: Number, T: Number {
             Offsets::U16(o) => o.capacity() * std::mem::size_of::<u16>(),
             Offsets::U32(o) => o.capacity() * std::mem::size_of::<u32>(),
             Offsets::U64(o) => o.capacity() * std::mem::size_of::<u64>(),
+            Offsets::U128(o) => o.capacity() * std::mem::size_of::<u128>(),
         };
         mem += self.tokens.capacity() * std::mem::size_of::<T>();
         mem += self.targets.capacity() * std::mem::size_of::<N>();
