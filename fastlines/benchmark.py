@@ -127,7 +127,6 @@ DFA_CONFIGS: list[tuple[str, int]] = [
     ("FastHashDFA", fl.FAST_HASH_DFA),
     ("DoubleHashDFA", fl.DOUBLE_HASH_DFA),
     ("FlatDFA", fl.FLAT_DFA),
-    ("PgmDFA", fl.PGM_DFA),
 ]
 
 NUM_ROUNDS = 10
@@ -261,7 +260,7 @@ def main() -> None:
     total_cases = NUM_ROUNDS * len(PATTERNS)
 
     print(f"Vocabulary loaded (eos_id={eos_id})")
-    print("Building TokTrie bases for all 4 DFA types...")
+    print(f"Building TokTrie bases for all {len(DFA_CONFIGS)} DFA types...")
 
     toktries: dict[int, fl.TokTrie] = {}
 
