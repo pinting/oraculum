@@ -40,8 +40,8 @@ def main() -> None:
 
     raw_vocabulary: str = serialize_vocabulary(model)
     raw_vocabulary_bytes: bytes = raw_vocabulary.encode('utf-8')
-
-    result: int = oraculum.init_vocabulary(raw_vocabulary_bytes)
+    eos_id = 1
+    result: int = oraculum.init_vocabulary(raw_vocabulary_bytes, eos_id)
 
     if result != 0:
         print("Failed to initialize vocabulary!")
