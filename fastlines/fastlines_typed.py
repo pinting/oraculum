@@ -9,7 +9,6 @@ import fastlines as _fl
 FAST_HASH_DFA: Final[int] = _fl.FAST_HASH_DFA
 DOUBLE_HASH_DFA: Final[int] = _fl.DOUBLE_HASH_DFA
 FLAT_DFA: Final[int] = _fl.FLAT_DFA
-PGM_DFA: Final[int] = _fl.PGM_DFA
 
 AC_CONTIGUOUS_NFA: Final[int] = _fl.AC_CONTIGUOUS_NFA
 AC_NONCONTIGUOUS_NFA: Final[int] = _fl.AC_NONCONTIGUOUS_NFA

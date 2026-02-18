@@ -5,7 +5,6 @@ from numpy.typing import NDArray
 FAST_HASH_DFA: int
 DOUBLE_HASH_DFA: int
 FLAT_DFA: int
-PGM_DFA: int
 
 AC_CONTIGUOUS_NFA: int
 AC_NONCONTIGUOUS_NFA: int

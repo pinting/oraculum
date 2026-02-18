@@ -21,7 +21,6 @@ rustc-hash = "2.1.1"
 base64 = "0.22.1"
 aho-corasick = "1.1.4"
 derivre = "0.3"
-pgm_index = "0.3"
 toktrie = { git = "https://github.com/guidance-ai/llguidance.git", branch = "main" }
 pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
 numpy = { version = "0.22", optional = true }
