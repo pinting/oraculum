@@ -94,13 +94,11 @@ class TokTrie:
         dfa_type: int,
         n_size: int,
         t_size: int,
-        o_size: int
     ) -> None:
         n_bytes = _validate_bits(n_size, "n_size")
         t_bytes = _validate_bits(t_size, "t_size")
-        o_bytes = _validate_bits(o_size, "o_size")
 
-        self.unit = _fl.TokTrie.new(vocabulary.unit, dfa_type, n_bytes, t_bytes, o_bytes)
+        self.unit = _fl.TokTrie.new(vocabulary.unit, dfa_type, n_bytes, t_bytes)
 
 
 class Expression:
