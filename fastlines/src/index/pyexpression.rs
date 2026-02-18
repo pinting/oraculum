@@ -46,23 +46,23 @@ pub enum ExpressionUnit {
 }
 
 impl ExpressionUnit {
-    pub fn start(&self) -> u64 {
-        macro_rules! call_start {
-            ($e:expr) => { $e.start().to_usize() as u64 }
+    pub fn node_count(&self) -> u64 {
+        macro_rules! call_node_count {
+            ($e:expr) => { $e.node_count().to_usize() as u64 }
         }
 
         match self {
-            Self::FhU16U16(e) => call_start!(e), Self::FhU32U16(e) => call_start!(e), Self::FhU64U16(e) => call_start!(e),
-            Self::FhU16U32(e) => call_start!(e), Self::FhU32U32(e) => call_start!(e), Self::FhU64U32(e) => call_start!(e),
-            Self::FhU16U64(e) => call_start!(e), Self::FhU32U64(e) => call_start!(e), Self::FhU64U64(e) => call_start!(e),
+            Self::FhU16U16(e) => call_node_count!(e), Self::FhU32U16(e) => call_node_count!(e), Self::FhU64U16(e) => call_node_count!(e),
+            Self::FhU16U32(e) => call_node_count!(e), Self::FhU32U32(e) => call_node_count!(e), Self::FhU64U32(e) => call_node_count!(e),
+            Self::FhU16U64(e) => call_node_count!(e), Self::FhU32U64(e) => call_node_count!(e), Self::FhU64U64(e) => call_node_count!(e),
 
-            Self::DoubleU16U16(e) => call_start!(e), Self::DoubleU32U16(e) => call_start!(e), Self::DoubleU64U16(e) => call_start!(e),
-            Self::DoubleU16U32(e) => call_start!(e), Self::DoubleU32U32(e) => call_start!(e), Self::DoubleU64U32(e) => call_start!(e),
-            Self::DoubleU16U64(e) => call_start!(e), Self::DoubleU32U64(e) => call_start!(e), Self::DoubleU64U64(e) => call_start!(e),
+            Self::DoubleU16U16(e) => call_node_count!(e), Self::DoubleU32U16(e) => call_node_count!(e), Self::DoubleU64U16(e) => call_node_count!(e),
+            Self::DoubleU16U32(e) => call_node_count!(e), Self::DoubleU32U32(e) => call_node_count!(e), Self::DoubleU64U32(e) => call_node_count!(e),
+            Self::DoubleU16U64(e) => call_node_count!(e), Self::DoubleU32U64(e) => call_node_count!(e), Self::DoubleU64U64(e) => call_node_count!(e),
 
-            Self::FlatU16U16(e) => call_start!(e), Self::FlatU32U16(e) => call_start!(e), Self::FlatU64U16(e) => call_start!(e),
-            Self::FlatU16U32(e) => call_start!(e), Self::FlatU32U32(e) => call_start!(e), Self::FlatU64U32(e) => call_start!(e),
-            Self::FlatU16U64(e) => call_start!(e), Self::FlatU32U64(e) => call_start!(e), Self::FlatU64U64(e) => call_start!(e),
+            Self::FlatU16U16(e) => call_node_count!(e), Self::FlatU32U16(e) => call_node_count!(e), Self::FlatU64U16(e) => call_node_count!(e),
+            Self::FlatU16U32(e) => call_node_count!(e), Self::FlatU32U32(e) => call_node_count!(e), Self::FlatU64U32(e) => call_node_count!(e),
+            Self::FlatU16U64(e) => call_node_count!(e), Self::FlatU32U64(e) => call_node_count!(e), Self::FlatU64U64(e) => call_node_count!(e),
         }
     }
 
@@ -236,8 +236,8 @@ impl PyExpression {
         ))
     }
 
-    fn start(&self) -> u64 {
-        self.unit.start()
+    fn node_count(&self) -> u64 {
+        self.unit.node_count()
     }
 
     fn transitions<'py>(&self, py: Python<'py>, node_id: u64) -> PyResult<Bound<'py, PyArray1<u64>>> {

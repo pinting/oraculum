@@ -67,14 +67,14 @@ def main() -> None:
 
         current: str = ""
         eos_id: int = vocabulary.get_eos_id()
-        current_index_idx: int = 0
 
-        while current_index_idx < len(indexes):
-            idx_obj: fl.Lattice | fl.Expression = indexes[current_index_idx]
-            current_node: int = idx_obj.start()
+        for index in indexes:
+            print(f"Number of nodes: {index.node_count()}")
+
+            current_node: int = 0
 
             while True:
-                transitions: NDArray[np.uint64] = idx_obj.transitions(current_node)
+                transitions: NDArray[np.uint64] = index.transitions(current_node)
 
                 if transitions.size == 0:
                     break
@@ -127,14 +127,12 @@ def main() -> None:
 
                 print("Current:", current)
 
-                next_node: int | None = idx_obj.next(current_node, selected_token_id)
+                next_node: int | None = index.next(current_node, selected_token_id)
 
                 if next_node is not None:
                     current_node = next_node
                 else:
                     break
-
-            current_index_idx += 1
 
     except Exception as e:
         print(f"An error occurred: {e}", file=sys.stderr)

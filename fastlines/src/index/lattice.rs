@@ -77,8 +77,8 @@ where N: Number, T: Number {
 
 impl<N, T> Index<N, T> for Lattice<N, T>
 where N: Number, T: Number {
-    fn start(&self) -> N {
-        N::from_usize(0)
+    fn node_count(&self) -> N {
+        N::from_usize(self.length)
     }
 
     fn next(&self, node_id: N, token_id: T) -> Option<N> {

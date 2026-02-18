@@ -152,7 +152,7 @@ def benchmark_expression(
 
         return
 
-    start_node = expr.start()
+    start_node = 0
     transitions: NDArray[np.uint64] = np.array([], dtype=np.uint64)
 
     t0 = time.perf_counter()

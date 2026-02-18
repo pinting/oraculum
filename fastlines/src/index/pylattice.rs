@@ -60,8 +60,12 @@ impl PyLattice {
         PyLattice { unit }
     }
 
-    fn start(&self) -> u64 {
-        0
+    fn node_count(&self) -> u64 {
+        match &self.unit {
+            LatticeUnit::U16(l) => l.node_count() as u64,
+            LatticeUnit::U32(l) => l.node_count() as u64,
+            LatticeUnit::U64(l) => l.node_count() as u64,
+        }
     }
 
     fn transitions<'py>(&self, py: Python<'py>, node_id: u64) -> PyResult<Bound<'py, PyArray1<u64>>> {
