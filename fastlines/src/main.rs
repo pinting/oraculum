@@ -102,7 +102,7 @@ fn demo(
     let mut current = String::new();
 
     for (_, index) in indexes.iter().enumerate() {
-        let mut current_node = index.start();
+        let mut current_node = 0u16;
 
         loop {
             let transitions = match index.transitions(current_node) {

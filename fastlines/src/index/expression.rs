@@ -44,7 +44,7 @@ where
     D: DFA<N, T>,
 {
     dfa: D,
-    start_node: N,
+    node_count: N,
     eos_id: T,
 }
 
@@ -79,12 +79,10 @@ where
 
         // Initialize
         let start_state = rx.initial_state();
-        let start_node = N::from_usize(0);
-        
-        // Map between Derivre State IDs and "N" Node IDs
+
         let mut state_to_node: HashMap<StateID, N> = HashMap::default();
 
-        state_to_node.insert(start_state, start_node);
+        state_to_node.insert(start_state, N::from_usize(0));
 
         let mut queue = VecDeque::new();
 
@@ -161,9 +159,11 @@ where
 
         let dfa = D::new(transitions.clone(), next_node_id);
 
+        let node_count = N::from_usize(next_node_id);
+
         Some(Self {
             dfa,
-            start_node,
+            node_count,
             eos_id,
         })
     }
@@ -175,8 +175,8 @@ where
     T: Number,
     D: DFA<N, T>,
 {
-    fn start(&self) -> N {
-        self.start_node
+    fn node_count(&self) -> N {
+        self.node_count
     }
 
     #[inline(always)]

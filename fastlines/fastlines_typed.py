@@ -70,8 +70,8 @@ class Lattice:
     def __init__(self, input: str, vocabulary: Vocabulary, ac_base: AhoCorasick) -> None:
         self.unit = _fl.Lattice(input, vocabulary.unit, ac_base.unit)
 
-    def start(self) -> int:
-        return self.unit.start()
+    def node_count(self) -> int:
+        return self.unit.node_count()
 
     def transitions(self, node_id: int) -> NDArray[np.uint64]:
         return self.unit.transitions(node_id)
@@ -109,8 +109,8 @@ class Expression:
     def __init__(self, input: str, vocabulary: Vocabulary, toktrie_base: TokTrie) -> None:
         self.unit = _fl.Expression(input, vocabulary.unit, toktrie_base.unit)
 
-    def start(self) -> int:
-        return self.unit.start()
+    def node_count(self) -> int:
+        return self.unit.node_count()
 
     def transitions(self, node_id: int) -> NDArray[np.uint64]:
         return self.unit.transitions(node_id)
