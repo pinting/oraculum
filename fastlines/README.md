@@ -1,4 +1,4 @@
-# `fastlines`
+# fastlines
 
 Directed graph generator library for LLM token guidance. Translates regular expressions and constant strings to DFAs, inheriting the AOT data structure of `outlines-core` with further optimizations.
 
@@ -16,9 +16,38 @@ source .venv/bin/activate
 python main.py # Example application
 ```
 
+## Example
+
+```bash
+Vocabulary loaded (856.29 ms)
+Lattice base (AhoCorasick) built (2267.56 ms)
+Expression base (TokTrie) built with FlatDFA<32, 32> config (411.79 ms)
+Lattice 'Why ' created (0.07 ms), memory usage: 128 bytes
+Expression 'monday|tuesday|wednesday|thursday|friday' created (3.22 ms), memory usage: 787 bytes
+Lattice '?' created (0.02 ms), memory usage: 80 bytes
+Number of nodes: 4
+Routes: `Why` `Wh` `W` `W`
+> Why
+Current: Why
+Routes: ` ` ` `
+>  
+Current: Why 
+Number of nodes: 17
+Routes: `f` `m` `t` `w` `th` `we` `fr` `mo` `mon` `tu` `mond` `thur` `wed` `fri` `thu` `frid` `friday` `monday` `t` `m` `f` `w`
+> mond
+Current: Why mond
+Routes: `a` `ay` `a`
+> ay
+Current: Why monday
+Number of nodes: 1
+Routes: `?` `?`
+> ?
+Current: Why monday?
+```
+
 ## Benchmark
 
-```
+```bash
 Loading vocabulary...
 Vocabulary loaded (eos_id=1)
 Building TokTrie bases for all 3 DFA types...

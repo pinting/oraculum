@@ -1,41 +1,16 @@
-# oraculum
+# seer
 
 Text to SQL LLM enforcement research.
 
 **Warning:** This is a proof of concept & work in progress project, currently at the experimenting stage!
 
-## `fastlines`
+## seer
 
-`fastlines` is a directed graph generator library, the conclusion of Experiment 1-7. It can translate either regular expressions or constant strings to DFAs. It inherits the AOT data structure of `outlines-core`, but utilizes optimizations demonstrated in `llguidance` along with custom data structure (still researched!) found in Experiment 7.
+`seer` an SQL syntax graph generator framework based on the `fastlines` library!
 
-Setup and use according to `fastlines/README.md`!
+## fastlines
 
-```bash
-Vocabulary loaded (856.29 ms)
-Lattice base (AhoCorasick) built (2267.56 ms)
-Expression base (TokTrie) built with FlatDFA<32, 32> config (411.79 ms)
-Lattice 'Why ' created (0.07 ms), memory usage: 128 bytes
-Expression 'monday|tuesday|wednesday|thursday|friday' created (3.22 ms), memory usage: 787 bytes
-Lattice '?' created (0.02 ms), memory usage: 80 bytes
-Number of nodes: 4
-Routes: `Why` `Wh` `W` `W`
-> Why
-Current: Why
-Routes: ` ` ` `
->  
-Current: Why 
-Number of nodes: 17
-Routes: `f` `m` `t` `w` `th` `we` `fr` `mo` `mon` `tu` `mond` `thur` `wed` `fri` `thu` `frid` `friday` `monday` `t` `m` `f` `w`
-> mond
-Current: Why mond
-Routes: `a` `ay` `a`
-> ay
-Current: Why monday
-Number of nodes: 1
-Routes: `?` `?`
-> ?
-Current: Why monday?
-```
+`fastlines` is a directed graph generator library, the conclusion of Experiment 1-7. It can translate either regular expressions or constant strings to DFAs.
 
 ## Experiments
 

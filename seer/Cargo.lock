@@ -317,15 +317,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
-name = "oraculum"
-version = "0.1.0"
-dependencies = [
- "fastlines",
- "numpy",
- "pyo3",
-]
-
-[[package]]
 name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -483,6 +474,17 @@ name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
+
+[[package]]
+name = "seer"
+version = "0.1.0"
+dependencies = [
+ "aho-corasick",
+ "fastlines",
+ "numpy",
+ "pyo3",
+ "toktrie",
+]
 
 [[package]]
 name = "semver"
