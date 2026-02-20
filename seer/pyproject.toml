@@ -3,9 +3,9 @@ requires = ["maturin>=1.4,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "oraculum"
+name = "seer"
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
