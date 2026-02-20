@@ -1,4 +1,4 @@
-# seer
+# oraculum
 
 Text to SQL LLM enforcement research.
 
