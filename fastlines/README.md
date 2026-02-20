@@ -1,6 +1,6 @@
 # `fastlines`
 
-Directed graph generator library for LLM token guidance. Translates regular expressions and constant strings to DFAs, inheriting the AOT data structure of `outlines-core` with optimizations from `llguidance` and a custom `FastHashDFA` found in Experiment 7.
+Directed graph generator library for LLM token guidance. Translates regular expressions and constant strings to DFAs, inheriting the AOT data structure of `outlines-core` with further optimizations.
 
 **Lattices** convert constant strings into DAGs using the Aho-Corasick algorithm with extremely fast construction.
 
