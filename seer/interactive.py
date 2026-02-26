@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 import seer
-from core import set_schema, schema, VOCABULARY_PATH, EOS_ID, load_vocabulary, init_engine
+from core import set_schema, get_schema, VOCABULARY_PATH, EOS_ID, load_vocabulary, init_engine
 
 set_schema("""
 CREATE TABLE users (
@@ -47,7 +47,7 @@ def main() -> None:
     try:
         raw_vocabulary: bytes = load_vocabulary(VOCABULARY_PATH)
 
-        init_engine(raw_vocabulary, EOS_ID, schema)
+        init_engine(raw_vocabulary, EOS_ID, get_schema())
 
         current: str = ""
 
