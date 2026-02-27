@@ -1,0 +1,8 @@
+[package]
+name = "experiment-8-namespaces"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+boolean_expression = "0.4.4"
+rustc-hash = "2.1"
