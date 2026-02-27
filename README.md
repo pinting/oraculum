@@ -46,6 +46,10 @@ The combination of AOT index building with TokTrie - Derivre: faster build time,
 
 The benchmarks demonstrate a space-time trade-off where the flat structures achieves the fastest performance for scanning and hash structures for lookups; while hybrid solutions are the fastest, they require the largest memory allocation. Ultimately, the `DoubleHashDFA` (the implementation `outlines-core` uses) proves to be a good universal solution, average in both lookups and scans, but only suffering (worst case) 2x memory usage compared to `FlatDFA` which is the most compact, but having a slow lookup algorithm due to its linearity (optimized by binary tree search on a CSR data structure, but still lacking the jump capabilities of hash functions). The heavily optimized `FastHashDFA` tries to combine both of the two worlds and outperforms other candidates in lookup and scan speeds, but suffers a high memory usage.
 
+### 8th - Namespace resolution
+
+Selecting fields from tables and dynamically restricting field space and enforcing tables (solving a logic equation when conflicting)!
+
 ## License
 
 This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
