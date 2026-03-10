@@ -48,7 +48,7 @@ The benchmarks demonstrate a space-time trade-off where the flat structures achi
 
 ### 8th - Namespace resolution
 
-Selecting fields from tables and dynamically restricting field space and enforcing tables (solving a logic equation when conflicting).
+Selecting fields from tables and dynamically restricting field space as the selection goes by, then enforcing tables that satisfy the previous field selections. Supporting both a global namespace and many individual "alias" namespaces. Using boolean algebra under the hood.
 
 ## License
 
