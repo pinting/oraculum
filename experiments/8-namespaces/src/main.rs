@@ -1,21 +1,9 @@
 mod context;
 mod many_resolver;
 mod one_resolver;
-
 use std::collections::HashMap;
 
 use context::Context;
-
-fn read_line() -> Option<String> {
-    let mut line = String::new();
-    let n = std::io::stdin().read_line(&mut line).unwrap();
-
-    if n == 0 {
-        return None;
-    }
-
-    Some(line.trim().to_string())
-}
 
 fn make_tables() -> HashMap<String, Vec<String>> {
     HashMap::from([
@@ -29,73 +17,32 @@ fn make_tables() -> HashMap<String, Vec<String>> {
 fn main() {
     let mut ctx = Context::new(make_tables());
 
-    loop {
-        println!("Namespace (empty = global):");
+    println!("Context: {}", ctx);
+    println!("Fields: {}", ctx.get_fields().join(", "));
+    println!("Selecting `` `tl_key`");
 
-        let namespace = match read_line() {
-            Some(ns) => ns,
-            None => break,
-        };
+    ctx.set_current_namespace("");
+    ctx.use_field("tl_key");
 
-        let fields = ctx.get_fields(&namespace);
+    println!("Context: {}", ctx);
+    println!("Fields: {}", ctx.get_fields().join(", "));
+    println!("Selecting `foo` `tl_key`");
 
-        if fields.is_empty() {
-            println!("No fields available");
+    ctx.set_current_namespace("foo");
+    ctx.use_field("tl_key");
 
-            continue;
-        }
+    println!("Context: {}", ctx);
+    println!("Table left AS foo");
 
-        println!("Fields: {}", fields.join(", "));
-        println!("Select field (empty = done):");
+    ctx.use_table("foo", "left");
 
-        let field = match read_line() {
-            Some(f) if !f.is_empty() => f,
-            _ => break,
-        };
+    println!("Context: {}", ctx);
+    println!("Table top");
 
-        match ctx.use_field(&namespace, field) {
-            None => println!("Unknown field"),
-            Some(false) => println!("Unsatisfiable"),
-            Some(true) => {}
-        }
-    }
+    ctx.use_table("", "top");
 
-    loop {
-        let required = ctx.get_required_tables();
+    let ctx = ctx.clone();
 
-        if required.is_empty() {
-            break;
-        }
-
-        for (namespace, tables) in &required {
-            let label = if namespace.is_empty() { "global" } else { namespace.as_str() };
-
-            println!("{}: {}", label, tables.join(", "));
-        }
-
-        println!("Namespace (empty = global):");
-
-        let namespace = match read_line() {
-            Some(ns) => ns,
-            None => break,
-        };
-
-        println!("Select table:");
-
-        let table = match read_line() {
-            Some(t) if !t.is_empty() => t,
-            _ => break,
-        };
-
-        match ctx.use_table(&namespace, &table) {
-            None => println!("Invalid table"),
-            Some(_) => {}
-        }
-    }
-
-    if ctx.is_satisfied() {
-        println!("Satisfied!");
-    } else {
-        println!("Not satisfied.");
-    }
+    println!("Context: {}", ctx);
+    println!("Satisifed: {}", ctx.is_satisfied());
 }

@@ -19,5 +19,5 @@ class LogitsProcessor:
 
         return scores + self._mask
 
-    def feed_token(self, token_id: int) -> int:
+    def feed(self, token_id: int) -> int:
         return seer.feed(token_id)

@@ -11,7 +11,7 @@ mod vocabulary;
 
 use crate::dfa::flatdfa::FlatDFA;
 use crate::index::lattice::Lattice;
-use crate::index::index::Index;
+use crate::index::index::BaseIndex;
 use crate::index::expression::Expression;
 use crate::number::Number;
 use crate::vocabulary::Vocabulary;
@@ -47,13 +47,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Expression base (TokTrie) built in {:?}", now.elapsed());
 
-    let mut indexes: Vec<Box<dyn Index<u32, u32>>> = Vec::new();
+    let mut indexes: Vec<Box<dyn BaseIndex<u32, u32>>> = Vec::new();
 
     println!("Creating indexes...");
 
     let now = Instant::now();
     let input = "Why ";
-    let index = Lattice::new(input, vocabulary.clone(), &ac);
+    let index: Lattice::<u32, u32> = match Lattice::new(input, vocabulary.clone(), &ac) {
+        Some(idx) => idx,
+        None => {
+            return Err(format!("Failed to create Lattice index with '{}'", input).into());
+        }
+    };
 
     indexes.push(Box::new(index));
 
@@ -66,9 +71,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         vocabulary.clone(),
         &toktrie,
     ) {
-        Some(re) => re,
+        Some(idx) => idx,
         None => {
-            return Err(format!("Failed to create Expression index with data '{}'", input).into());
+            return Err(format!("Failed to create Expression index with '{}'", input).into());
         }
     };
 
@@ -78,14 +83,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     
     let now = Instant::now();
     let input = "?";
-    let index = Lattice::new(input, vocabulary.clone(), &ac);
+    let index: Lattice::<u32, u32> = match Lattice::new(input, vocabulary.clone(), &ac) {
+        Some(idx) => idx,
+        None => {
+            return Err(format!("Failed to create Lattice index with '{}'", input).into());
+        }
+    };
 
     indexes.push(Box::new(index));
 
     println!("Lattice '{}' created in {:?}", input, now.elapsed());
 
     for index in &indexes {
-        println!("{} memory usage: {} bytes", index.name(), index.memory_usage());
+        println!("Memory usage: {} bytes", index.memory_usage());
     }
 
     if let Err(e) = demo(&indexes, vocabulary.clone()) {
@@ -96,7 +106,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn demo(
-    indexes: &[Box<dyn Index<u32, u32>>],
+    indexes: &[Box<dyn BaseIndex<u32, u32>>],
     vocabulary: Arc<Vocabulary<u32>>,
 ) -> Result<(), Box<dyn Error>> {
     let mut current = String::new();

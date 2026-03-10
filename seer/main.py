@@ -49,7 +49,6 @@ def main() -> None:
 
     vocab_size: int = model.n_vocab()
     processor: LogitsProcessor = LogitsProcessor(vocab_size)
-    logits_processor: LogitsProcessorList = LogitsProcessorList([processor])
 
     prompt: str = f"{get_schema()}\n\n{PROMPT}"
     prompt_tokens: list[int] = model.tokenize(prompt.encode("utf-8"))
@@ -60,9 +59,16 @@ def main() -> None:
         prompt_tokens,
         top_p=0.9,
         temp=0.7,
-        logits_processor=logits_processor,
+        logits_processor=LogitsProcessorList([processor]),
     ):
-        result: int = processor.feed_token(token_id)
+        token: bytes = model.detokenize([token_id])
+
+        print(token_id, token)
+
+        if len(token) == 0:
+            break
+
+        result: int = processor.feed(token_id)
 
         if result != 0:
             break

@@ -21,7 +21,7 @@ pub struct FlatDFA<N, T> {
 impl<N, T> FlatDFA<N, T>
 where N: Number, T: Number {
     #[inline(always)]
-    fn next_inner<O: Number>(&self, offsets: &[O], src: N, transition: T) -> Option<N> {
+    fn _next<O: Number>(&self, offsets: &[O], src: N, transition: T) -> Option<N> {
         let node = src.to_usize();
 
         if node + 1 >= offsets.len() {
@@ -42,7 +42,7 @@ where N: Number, T: Number {
             .map(|i| self.targets[start + i])
     }
 
-    fn transitions_inner<O: Number>(&self, offsets: &[O], src: N) -> Option<Cow<'_, [T]>> {
+    fn _transitions<O: Number>(&self, offsets: &[O], src: N) -> Option<Cow<'_, [T]>> {
         let node = src.to_usize();
 
         if node + 1 >= offsets.len() {
@@ -124,26 +124,22 @@ where N: Number, T: Number {
     #[inline(always)]
     fn next(&self, src: N, transition: T) -> Option<N> {
         match &self.offsets {
-            Offsets::U8(o) => self.next_inner(o, src, transition),
-            Offsets::U16(o) => self.next_inner(o, src, transition),
-            Offsets::U32(o) => self.next_inner(o, src, transition),
-            Offsets::U64(o) => self.next_inner(o, src, transition),
-            Offsets::U128(o) => self.next_inner(o, src, transition),
+            Offsets::U8(o) => self._next(o, src, transition),
+            Offsets::U16(o) => self._next(o, src, transition),
+            Offsets::U32(o) => self._next(o, src, transition),
+            Offsets::U64(o) => self._next(o, src, transition),
+            Offsets::U128(o) => self._next(o, src, transition),
         }
     }
 
     fn transitions<'a>(&'a self, src: N) -> Option<Cow<'a, [T]>> {
         match &self.offsets {
-            Offsets::U8(o) => self.transitions_inner(o, src),
-            Offsets::U16(o) => self.transitions_inner(o, src),
-            Offsets::U32(o) => self.transitions_inner(o, src),
-            Offsets::U64(o) => self.transitions_inner(o, src),
-            Offsets::U128(o) => self.transitions_inner(o, src),
+            Offsets::U8(o) => self._transitions(o, src),
+            Offsets::U16(o) => self._transitions(o, src),
+            Offsets::U32(o) => self._transitions(o, src),
+            Offsets::U64(o) => self._transitions(o, src),
+            Offsets::U128(o) => self._transitions(o, src),
         }
-    }
-
-    fn name(&self) -> &str {
-        "FlatDFA"
     }
 
     fn memory_usage(&self) -> usize {

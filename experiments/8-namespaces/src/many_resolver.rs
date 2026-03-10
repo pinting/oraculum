@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
-
 use boolean_expression::{BDDFunc, BDD, BDD_ONE, BDD_ZERO};
 
+#[derive(Clone)]
 pub struct ManyResolver<T: Eq + Hash + Ord + Clone + Debug, F: Eq + Hash + Clone + Debug> {
     bdd: BDD<T>,
     constraints: HashMap<F, BDDFunc>,
@@ -70,20 +70,22 @@ impl<T: Eq + Hash + Ord + Clone + Debug, F: Eq + Hash + Clone + Debug> ManyResol
         self.fields = fields;
     }
 
-    pub fn use_table(&mut self, table: &T) -> Option<bool> {
+    pub fn use_table(&mut self, table: &T) -> Option<()> {
         if !self.bdd.labels().contains(table) {
             return None;
         }
 
-        let next = self.bdd.restrict(self.current, table.clone(), true);
+        let mut bdd: BDD<T> = self.bdd.clone();
+        let next = bdd.restrict(self.current, table.clone(), true);
 
         if next == BDD_ZERO {
             return None;
         }
 
+        self.bdd = bdd;
         self.current = next;
 
-        Some(self.is_satisfied())
+        Some(())
     }
 
     pub fn get_fields(&self) -> &[F] {
@@ -105,14 +107,16 @@ impl<T: Eq + Hash + Ord + Clone + Debug, F: Eq + Hash + Clone + Debug> ManyResol
         Some(true)
     }
 
-    pub fn get_required_tables(&mut self) -> Vec<T> {
+    pub fn get_required_tables(&self) -> Vec<T> {
         if self.is_satisfied() {
             return vec![];
         }
 
-        self.bdd.labels().into_iter().filter(|label| {
-            let pos = self.bdd.restrict(self.current, label.clone(), true);
-            let neg = self.bdd.restrict(self.current, label.clone(), false);
+        let mut bdd: BDD<T> = self.bdd.clone();
+
+        bdd.labels().into_iter().filter(|label| {
+            let pos = bdd.restrict(self.current, label.clone(), true);
+            let neg = bdd.restrict(self.current, label.clone(), false);
 
             pos != neg && pos != BDD_ZERO
         }).collect()

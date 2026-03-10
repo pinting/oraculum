@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
 
+#[derive(Clone)]
 pub struct OneResolver<T: Eq + Hash + Ord + Clone + Debug, F: Eq + Hash + Ord + Clone + Debug> {
     tables_by_field: HashMap<F, HashSet<T>>,
     candidates: HashSet<T>,
@@ -24,15 +25,15 @@ impl<T: Eq + Hash + Ord + Clone + Debug, F: Eq + Hash + Ord + Clone + Debug> One
             }
         }
 
-        let mut guesser = Self {
+        let mut resolver = Self {
             tables_by_field,
             candidates,
             fields: Vec::new(),
         };
 
-        guesser.refresh();
+        resolver.refresh();
 
-        guesser
+        resolver
     }
 
     fn refresh(&mut self) {
@@ -64,27 +65,21 @@ impl<T: Eq + Hash + Ord + Clone + Debug, F: Eq + Hash + Ord + Clone + Debug> One
         Some(true)
     }
 
-    pub fn use_table(&mut self, table: &T) -> Option<bool> {
+    pub fn use_table(&mut self, table: &T) -> Option<()> {
         if !self.candidates.contains(table) {
             return None;
         }
 
-        self.candidates.retain(|t| t == table);
+        self.candidates.clear();
 
-        self.refresh();
-
-        Some(self.is_satisfied())
+        Some(())
     }
 
-    pub fn get_required_tables(&mut self) -> Vec<T> {
-        if self.is_satisfied() {
-            return vec![];
-        }
-
+    pub fn get_required_tables(&self) -> Vec<T> {
         self.candidates.iter().cloned().collect()
     }
 
     pub fn is_satisfied(&self) -> bool {
-        self.candidates.len() == 1
+        self.candidates.len() == 0
     }
 }
