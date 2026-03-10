@@ -51,6 +51,7 @@ The Python bindings fix both `N` (node index) and `T` (token ID) types to `u32` 
 ```python
 import fastlines_typed as fl
 
+# EOS token ID = 1
 vocabulary = fl.Vocabulary.from_file_path("vocabulary.tiktoken", 1)
 
 ac_base = fl.AhoCorasick(vocabulary)

@@ -12,9 +12,10 @@ cargo run
 
 ### Constraining a llama.cpp model
 
-Requires [Rust](https://rustup.rs) and [UV](https://docs.astral.sh/uv/getting-started/installation).
+Requires [Rust](https://rustup.rs), [UV](https://docs.astral.sh/uv/getting-started/installation) and [gemma-3-4b-it-Q8_0](https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF) model.
 
 ```bash
+# Model at path ../models/gemma-3-4b-it-Q8_0.gguf
 make build
 source .venv/bin/activate
 python main.py
