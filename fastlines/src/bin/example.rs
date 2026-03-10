@@ -4,46 +4,25 @@ use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::Instant;
 
-mod number;
-mod dfa;
-mod index;
-mod vocabulary;
-
-use crate::dfa::flatdfa::FlatDFA;
-use crate::index::lattice::Lattice;
-use crate::index::index::BaseIndex;
-use crate::index::expression::Expression;
-use crate::number::Number;
-use crate::vocabulary::Vocabulary;
+use fastlines::{FlatDFA, Lattice, BaseIndex, Expression, Number, Vocabulary};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let now = Instant::now();
-    let vocabulary = match Vocabulary::from_file_path("../vocabulary.tiktoken", 1u32) {
-        Some(vocab) => Arc::new(vocab),
-        None => {
-            return Err("Failed to create vocabulary".into());
-        }
-    };
+    let vocabulary = Vocabulary::from_file_path("../vocabulary.tiktoken", 1u32)
+        .map(Arc::new)
+        .ok_or("Failed to create vocabulary")?;
 
     println!("Vocabulary loaded in {:?}", now.elapsed());
 
     let now = Instant::now();
-    let ac = match Lattice::<u32, u32>::base(AhoCorasickKind::ContiguousNFA, vocabulary.clone()) {
-        Some(base) => base,
-        None => {
-            return Err("Failed to build AhoCorasick base".into());
-        }
-    };
+    let ac = Lattice::<u32, u32>::base(AhoCorasickKind::ContiguousNFA, vocabulary.clone())
+        .ok_or("Failed to build AhoCorasick base")?;
 
     println!("Lattice base (AhoCorasick) built in {:?}", now.elapsed());
 
     let now = Instant::now();
-    let toktrie = match Expression::<u32, u32, FlatDFA<u32, u32>>::base(vocabulary.clone()) {
-        Some(base) => base,
-        None => {
-            return Err("Failed to build TokTrie base".into());
-        }
-    };
+    let toktrie = Expression::<u32, u32, FlatDFA<u32, u32>>::base(vocabulary.clone())
+        .ok_or("Failed to build TokTrie base")?;
 
     println!("Expression base (TokTrie) built in {:?}", now.elapsed());
 
@@ -53,12 +32,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let now = Instant::now();
     let input = "Why ";
-    let index: Lattice::<u32, u32> = match Lattice::new(input, vocabulary.clone(), &ac) {
-        Some(idx) => idx,
-        None => {
-            return Err(format!("Failed to create Lattice index with '{}'", input).into());
-        }
-    };
+    let index = Lattice::<u32, u32>::new(input, vocabulary.clone(), &ac)
+        .ok_or_else(|| format!("Failed to create Lattice index with '{}'", input))?;
 
     indexes.push(Box::new(index));
 
@@ -66,29 +41,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let now = Instant::now();
     let input = "monday|tuesday|wednesday|thursday|friday";
-    let index: Expression<u32, u32, FlatDFA<u32, u32>> = match Expression::new(
-        input,
-        vocabulary.clone(),
-        &toktrie,
-    ) {
-        Some(idx) => idx,
-        None => {
-            return Err(format!("Failed to create Expression index with '{}'", input).into());
-        }
-    };
+    let index = Expression::<u32, u32, FlatDFA<u32, u32>>::new(input, vocabulary.clone(), &toktrie)
+        .ok_or_else(|| format!("Failed to create Expression index with '{}'", input))?;
 
     indexes.push(Box::new(index));
-    
+
     println!("Expression '{}' created in {:?}", input, now.elapsed());
-    
+
     let now = Instant::now();
     let input = "?";
-    let index: Lattice::<u32, u32> = match Lattice::new(input, vocabulary.clone(), &ac) {
-        Some(idx) => idx,
-        None => {
-            return Err(format!("Failed to create Lattice index with '{}'", input).into());
-        }
-    };
+    let index = Lattice::<u32, u32>::new(input, vocabulary.clone(), &ac)
+        .ok_or_else(|| format!("Failed to create Lattice index with '{}'", input))?;
 
     indexes.push(Box::new(index));
 
@@ -98,17 +61,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Memory usage: {} bytes", index.memory_usage());
     }
 
-    if let Err(e) = demo(&indexes, vocabulary.clone()) {
-        return Err(e);
-    }
-
-    Ok(())
-}
-
-fn demo(
-    indexes: &[Box<dyn BaseIndex<u32, u32>>],
-    vocabulary: Arc<Vocabulary<u32>>,
-) -> Result<(), Box<dyn Error>> {
     let mut current = String::new();
 
     for (_, index) in indexes.iter().enumerate() {
@@ -134,7 +86,7 @@ fn demo(
                 .collect();
 
             print!("Routes: ");
-            
+
             for (_, token_str) in &routes {
                 print!("`{}` ", token_str);
             }

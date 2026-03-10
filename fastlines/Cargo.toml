@@ -7,10 +7,6 @@ edition = "2021"
 name = "fastlines"
 crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "fastlines"
-required-features = []
-
 [features]
 default = []
 pyo3 = ["dep:pyo3", "dep:numpy"]

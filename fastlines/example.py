@@ -11,7 +11,7 @@ def main() -> None:
     try:
         try:
             t0: float = time.perf_counter()
-            vocabulary: fl.Vocabulary = fl.Vocabulary.from_file_path("../vocabulary.tiktoken", 1, 32)
+            vocabulary: fl.Vocabulary = fl.Vocabulary.from_file_path("../vocabulary.tiktoken", 1)
             t1: float = time.perf_counter()
 
         except Exception:
@@ -22,16 +22,16 @@ def main() -> None:
         print(f"Vocabulary loaded ({(t1 - t0) * 1000:.2f} ms)")
 
         t0 = time.perf_counter()
-        ac_base: fl.AhoCorasick = fl.AhoCorasick(vocabulary, fl.AC_CONTIGUOUS_NFA)
+        ac_base: fl.AhoCorasick = fl.AhoCorasick(vocabulary)
         t1 = time.perf_counter()
 
         print(f"Lattice base (AhoCorasick) built ({(t1 - t0) * 1000:.2f} ms)")
 
         t0 = time.perf_counter()
-        toktrie_base: fl.TokTrie = fl.TokTrie(vocabulary, fl.FLAT_DFA, 32, 32)
+        toktrie_base: fl.TokTrie = fl.TokTrie(vocabulary)
         t1 = time.perf_counter()
 
-        print(f"Expression base (TokTrie) built with FlatDFA<32, 32> config ({(t1 - t0) * 1000:.2f} ms)")
+        print(f"Expression base (TokTrie) built ({(t1 - t0) * 1000:.2f} ms)")
 
         indexes: list[fl.Lattice | fl.Expression] = []
 

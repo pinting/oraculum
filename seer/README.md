@@ -2,7 +2,7 @@
 
 ## Setup
 
-**Interactive mode**
+### Interactive mode
 
 Only requires [Rust](https://rustup.rs).
 
@@ -10,7 +10,7 @@ Only requires [Rust](https://rustup.rs).
 cargo run
 ```
 
-**Constraining a llama.cpp model**
+### Constraining a llama.cpp model
 
 Requires [Rust](https://rustup.rs) and [UV](https://docs.astral.sh/uv/getting-started/installation).
 

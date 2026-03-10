@@ -1,45 +1,22 @@
 from __future__ import annotations
 
-from typing import Final
 import numpy as np
 from numpy.typing import NDArray
 
 import fastlines as _fl
-
-FAST_HASH_DFA: Final[int] = _fl.FAST_HASH_DFA
-DOUBLE_HASH_DFA: Final[int] = _fl.DOUBLE_HASH_DFA
-FLAT_DFA: Final[int] = _fl.FLAT_DFA
-
-AC_CONTIGUOUS_NFA: Final[int] = _fl.AC_CONTIGUOUS_NFA
-AC_NONCONTIGUOUS_NFA: Final[int] = _fl.AC_NONCONTIGUOUS_NFA
-AC_DFA: Final[int] = _fl.AC_DFA
-
-VALID_BITS: Final[set[int]] = {16, 32, 64}
-
-
-def _validate_bits(bits: int, name: str) -> int:
-    if bits not in VALID_BITS:
-        raise ValueError(f"{name} must be one of {VALID_BITS}, got {bits}")
-
-    return bits // 8
-
 
 class Vocabulary:
     __slots__ = ("unit",)
 
     unit: _fl.Vocabulary
 
-    def __init__(self, data: bytes, eos_id: int, t_size: int) -> None:
-        t_bytes = _validate_bits(t_size, "t_size")
-
-        self.unit = _fl.Vocabulary(data, eos_id, t_bytes)
+    def __init__(self, data: bytes, eos_id: int) -> None:
+        self.unit = _fl.Vocabulary(data, eos_id)
 
     @classmethod
-    def from_file_path(cls, file_path: str, eos_id: int, t_size: int) -> Vocabulary:
-        t_bytes = _validate_bits(t_size, "t_size")
-
+    def from_file_path(cls, file_path: str, eos_id: int) -> Vocabulary:
         instance = cls.__new__(cls)
-        instance.unit = _fl.Vocabulary.from_file_path(file_path, eos_id, t_bytes)
+        instance.unit = _fl.Vocabulary.from_file_path(file_path, eos_id)
 
         return instance
 
@@ -52,14 +29,26 @@ class Vocabulary:
     def get_eos_id(self) -> int:
         return self.unit.get_eos_id()
 
+    def get_tokens(self) -> list[str]:
+        return self.unit.get_tokens()
+
+    def get_ids(self) -> list[int]:
+        return self.unit.get_ids()
+
+    def get_token_by_idx(self, idx: int) -> str | None:
+        return self.unit.get_token_by_idx(idx)
+
+    def get_id_by_idx(self, idx: int) -> int | None:
+        return self.unit.get_id_by_idx(idx)
+
 
 class AhoCorasick:
     __slots__ = ("unit",)
 
     unit: _fl.AhoCorasick
 
-    def __init__(self, vocabulary: Vocabulary, kind: int) -> None:
-        self.unit = _fl.AhoCorasick.new(vocabulary.unit, kind)
+    def __init__(self, vocabulary: Vocabulary) -> None:
+        self.unit = _fl.AhoCorasick.new(vocabulary.unit)
 
 
 class Lattice:
@@ -79,6 +68,9 @@ class Lattice:
     def next(self, node_id: int, token_id: int) -> int | None:
         return self.unit.next(node_id, token_id)
 
+    def accepting(self, node_id: int) -> bool | None:
+        return self.unit.accepting(node_id)
+
     def memory_usage(self) -> int:
         return self.unit.memory_usage()
 
@@ -88,17 +80,8 @@ class TokTrie:
 
     unit: _fl.TokTrie
 
-    def __init__(
-        self,
-        vocabulary: Vocabulary,
-        dfa_type: int,
-        n_size: int,
-        t_size: int,
-    ) -> None:
-        n_bytes = _validate_bits(n_size, "n_size")
-        t_bytes = _validate_bits(t_size, "t_size")
-
-        self.unit = _fl.TokTrie.new(vocabulary.unit, dfa_type, n_bytes, t_bytes)
+    def __init__(self, vocabulary: Vocabulary) -> None:
+        self.unit = _fl.TokTrie.new(vocabulary.unit)
 
 
 class Expression:
@@ -117,6 +100,9 @@ class Expression:
 
     def next(self, node_id: int, token_id: int) -> int | None:
         return self.unit.next(node_id, token_id)
+
+    def accepting(self, node_id: int) -> bool | None:
+        return self.unit.accepting(node_id)
 
     def memory_usage(self) -> int:
         return self.unit.memory_usage()
