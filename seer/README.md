@@ -2,15 +2,22 @@
 
 ## Setup
 
-Have [Rust](https://rustup.rs) and [UV](https://docs.astral.sh/uv/getting-started/installation) installed!
+**Interactive mode**
+
+Only requires [Rust](https://rustup.rs).
 
 ```bash
-# Main project
+cargo run
+```
 
-uv venv --python 3.13
+**Constraining a llama.cpp model**
+
+Requires [Rust](https://rustup.rs) and [UV](https://docs.astral.sh/uv/getting-started/installation).
+
+```bash
+make build
 source .venv/bin/activate
-make install
-make run
+python main.py
 ```
 
 ## License

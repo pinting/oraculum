@@ -5,7 +5,7 @@ export PATH := $(CURDIR)/$(VENV)/bin:$(PATH)
 export VIRTUAL_ENV := $(CURDIR)/$(VENV)
 
 .ONESHELL:
-.PHONY: prerequisites build clean fastlines
+.PHONY: prerequisites build clean
 
 prerequisites:
 	@command -v uv > /dev/null || (echo "Error: uv is not installed!" && exit 1)
@@ -27,11 +27,8 @@ prerequisites:
 
 build: prerequisites
 	uv pip install -r requirements.txt
-	maturin develop
+	maturin develop --features pyo3
 
 clean:
 	cargo clean
-	rm -rf *.egg-info/ dist/ build/
-
-fastlines:
-	$(MAKE) -C ../fastlines build
+	rm -rf *.so *.egg-info/ dist/ build/
