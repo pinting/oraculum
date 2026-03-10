@@ -6,89 +6,104 @@ Directed graph generator library for LLM token guidance. Translates regular expr
 
 **Expressions** convert regular expressions into DFAs using TokTrie with derivative automata.
 
+```
+Vocabulary loaded in 106.719618ms
+Lattice base (AhoCorasick) built in 341.108908ms
+Expression base (TokTrie) built in 160.463326ms
+Creating indexes...
+Lattice 'Why ' created in 17.18µs
+Expression 'monday|tuesday|wednesday|thursday|friday' created in 286.292µs
+Lattice '?' created in 2.31µs
+Memory usage: 128 bytes
+Memory usage: 787 bytes
+Memory usage: 80 bytes
+Routes: `Why` `Wh` `W` `W` 
+> Why
+Current: Why
+Routes: ` ` ` ` 
+>  
+Current: Why 
+Routes: `f` `m` `t` `w` `th` `we` `fr` `mo` `mon` `tu` `mond` `thur` `wed` `fri` `thu` `frid` `friday` `monday` `t` `m` `f` `w` 
+> mon
+Current: Why mon
+Routes: `d` `day` `da` `d` 
+> day
+Current: Why monday
+Routes: `?` `?` 
+> ?
+Current: Why monday?
+```
+
 ## Setup
+
+### Python API
 
 Requires [Rust](https://rustup.rs) and [UV](https://docs.astral.sh/uv/getting-started/installation).
 
 ```bash
 make build
 source .venv/bin/activate
-python main.py
+python example.py
 ```
 
-## Example
+The Python bindings fix both `N` (node index) and `T` (token ID) types to `u32` and use `FlatDFA` as the default DFA backend. The library can be rebuilt with different `N` / `T` / `D` configurations, but (at the moment) the source code needs to be modified for it (in the top of `pyvocabulary.rs` / `pyexpression.rs` / `pylattice.rs`).
+
+```python
+import fastlines_typed as fl
+
+vocabulary = fl.Vocabulary.from_file_path("vocabulary.tiktoken", 1)
+
+ac_base = fl.AhoCorasick(vocabulary)
+lattice = fl.Lattice("hello", vocabulary, ac_base)
+
+toktrie = fl.TokTrie(vocabulary)
+expression = fl.Expression("mon|tue|wed", vocabulary, toktrie)
+```
+
+See the `example.py` for API details!
+
+### Rust API
+
+Only requires [Rust](https://rustup.rs).
 
 ```bash
-Vocabulary loaded (856.29 ms)
-Lattice base (AhoCorasick) built (2267.56 ms)
-Expression base (TokTrie) built with FlatDFA<32, 32> config (411.79 ms)
-Lattice 'Why ' created (0.07 ms), memory usage: 128 bytes
-Expression 'monday|tuesday|wednesday|thursday|friday' created (3.22 ms), memory usage: 787 bytes
-Lattice '?' created (0.02 ms), memory usage: 80 bytes
-Number of nodes: 4
-Routes: `Why` `Wh` `W` `W`
-> Why
-Current: Why
-Routes: ` ` ` `
->  
-Current: Why 
-Number of nodes: 17
-Routes: `f` `m` `t` `w` `th` `we` `fr` `mo` `mon` `tu` `mond` `thur` `wed` `fri` `thu` `frid` `friday` `monday` `t` `m` `f` `w`
-> mond
-Current: Why mond
-Routes: `a` `ay` `a`
-> ay
-Current: Why monday
-Number of nodes: 1
-Routes: `?` `?`
-> ?
-Current: Why monday?
+cargo run --bin example
 ```
+
+See the `example.rs` for API details!
 
 ## Benchmark
 
 ```bash
-Loading vocabulary...
-Vocabulary loaded (eos_id=1)
-Building TokTrie bases for all 3 DFA types...
-  FastHashDFA TokTrie built in 412.9 ms
-  DoubleHashDFA TokTrie built in 373.4 ms
-  FlatDFA TokTrie built in 374.9 ms
+cargo run --bin benchmark --release
+```
 
-Running benchmark: 100 patterns x 3 DFA types x 100 rounds
-Cases per DFA type: 10000 (total_cases % 100 == 0)
-Scan iterations per case: 50
-Lookup iterations per case: 200
-
-[10000/10000] Round 100/100 - Pattern: (inter|intra|extra|ultra|super|hyper)(nation|state
-
-Benchmark complete!
-
+```
 LOOKUP LEADERBOARD:
 --------------------------------
 DFA Type                Avg (us)
 --------------------------------
-#1 FastHashDFA             0.988
-#2 FlatDFA                 1.055
-#3 DoubleHashDFA           1.120
+#1 FastHashDFA             0.001
+#2 DoubleHashDFA           0.003
+#3 FlatDFA                 0.005
 --------------------------------
 
 SCAN LEADERBOARD:
 --------------------------------
 DFA Type                Avg (us)
 --------------------------------
-#1 FastHashDFA            21.800
-#2 FlatDFA                22.466
-#3 DoubleHashDFA          77.816
+#1 FlatDFA                 0.235
+#2 FastHashDFA             0.237
+#3 DoubleHashDFA           4.787
 --------------------------------
 
 BUILD LEADERBOARD:
 --------------------------------
 DFA Type                Avg (ms)
 --------------------------------
-#1 DoubleHashDFA          16.379
-#2 FastHashDFA            19.187
-#3 FlatDFA                24.214
+#1 DoubleHashDFA           1.698
+#2 FastHashDFA             1.983
+#3 FlatDFA                 2.011
 --------------------------------
 
 MEMORY LEADERBOARD:

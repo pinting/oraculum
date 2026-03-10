@@ -68,7 +68,7 @@ where N: Number, T: Number {
         Some(Self {
             offsets,
             targets,
-            vocabulary: vocabulary.clone(),
+            vocabulary,
             length: constant.len()
         })
     }
