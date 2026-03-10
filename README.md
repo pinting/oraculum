@@ -48,7 +48,7 @@ The benchmarks demonstrate a space-time trade-off where the flat structures achi
 
 ### 8th - Namespace resolution
 
-Selecting fields from tables and dynamically restricting field space and enforcing tables (solving a logic equation when conflicting)!
+Selecting fields from tables and dynamically restricting field space and enforcing tables (solving a logic equation when conflicting).
 
 ## License
 
