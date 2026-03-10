@@ -7,9 +7,15 @@ edition = "2021"
 name = "seer"
 crate-type = ["cdylib"]
 
+[[bin]]
+name = "seer"
+required-features = []
+
 [dependencies]
 fastlines = { path = "../fastlines" }
 aho-corasick = "1.1.4"
+boolean_expression = "0.4.4"
+rustc-hash = "2.1"
 toktrie = { git = "https://github.com/guidance-ai/llguidance.git", branch = "main" }
 numpy = "0.22"
 pyo3 = { version = "0.22", features = ["extension-module"] }

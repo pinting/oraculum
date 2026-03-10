@@ -11,7 +11,7 @@ use toktrie::{
 };
 
 use crate::dfa::dfa::DFA;
-use crate::index::index::Index;
+use crate::index::index::{BaseIndex, Accepting};
 use crate::number::Number;
 use crate::vocabulary::Vocabulary;
 
@@ -80,16 +80,18 @@ where
         // Initialize
         let start_state = rx.initial_state();
 
+        let mut next_node_id = 0;
         let mut state_to_node: HashMap<StateID, N> = HashMap::default();
 
-        state_to_node.insert(start_state, N::from_usize(0));
+        state_to_node.insert(start_state, N::from_usize(next_node_id));
+
+        next_node_id += 1;
 
         let mut queue = VecDeque::new();
 
         queue.push_back(start_state);
 
         let mut transitions: HashMap<N, HashMap<T, N>> = HashMap::default();
-        let mut next_node_id = 1;
 
         // Explore the lazy generated graph of Derivre
         while let Some(current_state) = queue.pop_front() {
@@ -169,7 +171,7 @@ where
     }
 }
 
-impl<N, T, D> Index<N, T> for Expression<N, T, D>
+impl<N, T, D> BaseIndex<N, T> for Expression<N, T, D>
 where
     N: Number,
     T: Number,
@@ -181,19 +183,23 @@ where
 
     #[inline(always)]
     fn next(&self, node_id: N, token_id: T) -> Option<N> {
-        if token_id == self.eos_id {
-            return None;
-        }
-
         self.dfa.next(node_id, token_id)
     }
     
+    #[inline(always)]
     fn transitions<'a>(&'a self, node_id: N) -> Option<Cow<'a, [T]>> {
         self.dfa.transitions(node_id)
     }
+    
+    #[inline(always)]
+    fn accepting(&self, node_id: N) -> Accepting {
+        if self.next(node_id, self.eos_id).is_none() {
+            return Accepting::No
+        }
 
-    fn name(&self) -> &str {
-        "Expression"
+        let is_more = self.transitions(node_id).map_or(false, |t| t.len() > 1);
+
+        Accepting::Yes(is_more)
     }
 
     fn memory_usage(&self) -> usize {

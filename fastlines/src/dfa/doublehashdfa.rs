@@ -30,10 +30,6 @@ where N: Number, T: Number {
         Some(Cow::Owned(result))
     }
 
-    fn name(&self) -> &str {
-        "DoubleHashDFA"
-    }
-
     fn memory_usage(&self) -> usize {
         let mut mem = std::mem::size_of::<Self>();
 

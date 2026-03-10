@@ -17,6 +17,7 @@ pub use crate::dfa::dfa::DFA;
 pub use crate::dfa::fasthashdfa::FastHashDFA;
 pub use crate::dfa::doublehashdfa::DoubleHashDFA;
 pub use crate::dfa::flatdfa::FlatDFA;
+pub use crate::index::index::Accepting;
 pub use crate::index::index::Index;
 pub use crate::index::lattice::Lattice;
 pub use crate::index::expression::Expression;

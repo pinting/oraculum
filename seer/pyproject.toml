@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "seer"
 version = "0.1.0"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

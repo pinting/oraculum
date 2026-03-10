@@ -350,10 +350,6 @@ where N: Number, T: Number {
         }
     }
 
-    fn name(&self) -> &str {
-        "FastHashDFA"
-    }
-
     fn memory_usage(&self) -> usize {
         let mut mem = std::mem::size_of::<Self>();
 

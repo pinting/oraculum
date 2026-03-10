@@ -1,7 +1,7 @@
 use aho_corasick::{AhoCorasick, AhoCorasickKind};
 use std::{borrow::Cow, sync::Arc};
 
-use crate::{index::index::Index, number::Number, vocabulary::Vocabulary};
+use crate::{index::index::{BaseIndex, Accepting}, number::Number, vocabulary::Vocabulary};
 
 pub struct Lattice<N, T> {
     offsets: Vec<N>,
@@ -22,7 +22,7 @@ where N: Number, T: Number {
             .ok()
     }
 
-    pub fn new(constant: &str, vocabulary: Arc<Vocabulary<T>>, ac: &AhoCorasick) -> Self {
+    pub fn new(constant: &str, vocabulary: Arc<Vocabulary<T>>, ac: &AhoCorasick) -> Option<Self> {
         let length = constant.len();
 
         let mut heads = vec![N::max_value(); length + 1];
@@ -65,28 +65,37 @@ where N: Number, T: Number {
             }
         }
         
-        Self {
+        Some(Self {
             offsets,
             targets,
             vocabulary: vocabulary.clone(),
             length: constant.len()
-        }
+        })
     }
 }
 
 
-impl<N, T> Index<N, T> for Lattice<N, T>
+impl<N, T> BaseIndex<N, T> for Lattice<N, T>
 where N: Number, T: Number {
     fn node_count(&self) -> N {
         N::from_usize(self.length)
     }
 
     fn next(&self, node_id: N, token_id: T) -> Option<N> {
-        self.vocabulary
-            .get_token_by_id(token_id)
-            .map(|t| node_id.to_usize() + t.len())
-            .filter(|&next| next <= self.length)
-            .map(N::from_usize)
+        let transitions = self.transitions(node_id)?;
+
+        if !transitions.iter().any(|&t| t == token_id) {
+            return None;
+        }
+
+        let token = self.vocabulary.get_token_by_id(token_id)?;
+        let next = node_id.to_usize() + token.len();
+
+        if next > self.length {
+            return None;
+        }
+
+        Some(N::from_usize(next))
     }
 
     fn transitions<'a>(&'a self, node_id: N) -> Option<std::borrow::Cow<'a, [T]>> {
@@ -102,11 +111,16 @@ where N: Number, T: Number {
 
         self.targets.get(start..end).map(Cow::Borrowed)
     }
+    
+    #[inline(always)]
+    fn accepting(&self, node_id: N) -> Accepting {
+        if self.transitions(node_id).is_some() {
+            return Accepting::No;
+        }
 
-    fn name(&self) -> &str {
-        "Lattice"
+        Accepting::Yes(false)
     }
-
+    
     fn memory_usage(&self) -> usize {
         let mut mem = std::mem::size_of::<Self>();
 

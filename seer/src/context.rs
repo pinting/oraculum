@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fmt;
-
 use rustc_hash::FxHashMap;
 
 use crate::many_resolver::ManyResolver;
