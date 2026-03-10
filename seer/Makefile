@@ -1,35 +1,37 @@
-VENV := .venv/bin
+VENV := .venv
+PYTHON := $(VENV)/bin/python
 
-export PATH := $(CURDIR)/$(VENV):$(PATH)
-export VIRTUAL_ENV := $(CURDIR)/.venv
+export PATH := $(CURDIR)/$(VENV)/bin:$(PATH)
+export VIRTUAL_ENV := $(CURDIR)/$(VENV)
 
-.PHONY: build develop install clean run interactive test fastlines
+.ONESHELL:
+.PHONY: prerequisites build clean fastlines
 
-build:
-	maturin build --release
+prerequisites:
+	@command -v uv > /dev/null || (echo "Error: uv is not installed!" && exit 1)
+	@VERSION=$$(python3 -c \
+		"import tomllib; \
+		print(tomllib.load(open('pyproject.toml','rb'))['project']['requires-python'].lstrip('>= '))")
 
-develop:
-	maturin develop
+	if [ ! -d "$(VENV)" ]; then
+		echo "Creating venv with Python $$VERSION..."
+		uv venv "$(VENV)" --python "$$VERSION"
+	else
+		ACTUAL_VERSION=$$($(PYTHON) -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 
-install:
+		if [ "$$ACTUAL_VERSION" != "$$VERSION" ]; then
+			echo "Error: .venv Python version mismatch"
+			exit 1
+		fi
+	fi
+
+build: prerequisites
 	uv pip install -r requirements.txt
 	maturin develop
 
 clean:
 	cargo clean
-	rm -rf target/
-	rm -rf *.egg-info/
-	rm -rf dist/
-	rm -rf build/
-
-run:
-	python main.py
-
-interactive:
-	python interactive.py
-
-test:
-	python -c "import seer; print('Module seer loaded successfully!')"
+	rm -rf *.egg-info/ dist/ build/
 
 fastlines:
-	cd ../fastlines && ./setup.sh
+	$(MAKE) -C ../fastlines build

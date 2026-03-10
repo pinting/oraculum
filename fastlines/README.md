@@ -8,12 +8,12 @@ Directed graph generator library for LLM token guidance. Translates regular expr
 
 ## Setup
 
-Requires [uv](https://github.com/astral-sh/uv).
+Requires [Rust](https://rustup.rs) and [UV](https://docs.astral.sh/uv/getting-started/installation).
 
 ```bash
-./setup.sh
+make build
 source .venv/bin/activate
-python main.py # Example application
+python main.py
 ```
 
 ## Example
