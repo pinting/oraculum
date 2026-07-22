@@ -6,7 +6,7 @@ class Fields:
         self.root = Root(schema)
         self.scopes = Scopes(schema)
         self.schema = schema
-        self.selected_fields: list[str] = []
+        self.selected: list[str] = []
 
     def use_field(self, scope: str, field: str):
         if not scope:
@@ -14,7 +14,7 @@ class Fields:
         else:
             res = self.scopes.use_field(scope, field)
         
-        self.selected_fields.append(f"{scope}.{field}" if scope else field)
+        self.selected.append(f"{scope}.{field}" if scope else field)
         return res
 
     def get_all_fields(self) -> set[str]:
@@ -31,10 +31,23 @@ class Fields:
 
         fields = self.scopes.get_fields(scope)
 
-        if fields is not None:
-            return fields
+        if fields is None:
+            # Scope does not exists, a new needs to be created
+            # which can have any of the available fields
+            return self.get_all_fields()
 
-        return self.get_all_fields()
+        return fields
+
+    def get_excluded_fields(self, scope: str = None) -> set[str]:
+        if not scope:
+            return self.root.get_excluded_fields()
+
+        fields = self.scopes.get_excluded_fields(scope)
+
+        if fields is None:
+            return set()
+
+        return fields
 
     def get_required_tables(self) -> set[str]:
         return self.root.get_required_tables() | self.scopes.get_required_tables()
@@ -53,10 +66,10 @@ class Fields:
         return self.root.is_satisfied() and self.scopes.is_satisfied()
 
     def __str__(self) -> str:
-        s_str = self.is_satisfied()
-        f_str = ', '.join(self.selected_fields)
-        
         return (
-            f"Satisfied = {s_str}\n"
-            f"Fields    = {f_str}"
+            f"Satisfied = {self.is_satisfied()}\n"
+            f"Fields    = {', '.join(self.selected)}\n"
+            f"Excluded  = {', '.join(sorted(self.get_excluded_fields()))}\n"
+            f"Root      = {self.root}\n"
+            f"Scopes    = {self.scopes}"
         )

@@ -53,5 +53,14 @@ class Scope:
     def get_excluded_tables(self) -> set[str]:
         return self.tables - self.candidates
 
+    def get_excluded_fields(self) -> set[str]:
+        return set(self.tables_by_field.keys()) - self.fields
+
     def is_satisfied(self) -> bool:
         return len(self.candidates) == 0
+
+    def __str__(self) -> str:
+        if not self.candidates:
+            return "1"
+        
+        return " ^ ".join(sorted(self.candidates))
