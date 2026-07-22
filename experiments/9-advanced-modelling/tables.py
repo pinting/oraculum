@@ -4,7 +4,7 @@ from fields import Fields
 class Tables:
     def __init__(self, fields: Fields):
         self.fields = fields
-        self.selected_tables: list[str] = []
+        self.selected: list[str] = []
         
         nodes: list[str] = list(set(fields.schema.keys()) | fields.get_required_tables())
         edges: list[tuple[str, str]] = []
@@ -32,7 +32,7 @@ class Tables:
         self.fields.use_table(table)
 
         self.head = table
-        self.selected_tables.append(table)
+        self.selected.append(table)
 
     def get_joinable_neighbors(self) -> set[str]:
         if self.head is None:
@@ -55,10 +55,10 @@ class Tables:
             self.fields.use_table(table)
             
         self.graph.merge_vertices([self.head, table])
-        self.selected_tables.append(table)
+        self.selected[-1] = f"{self.selected[-1]} JOIN {table}"
 
     def __str__(self) -> str:
         return (
             f"{self.fields}\n"
-            f"Tables = {', '.join(self.selected_tables)}"
+            f"Tables    = {', '.join(self.selected)}"
         )

@@ -84,6 +84,11 @@ class Root:
         
         return result
 
+    def get_excluded_fields(self) -> set[str]:
+        return {
+            f for f, c in self.constraints.items() if self.current * c == 0
+        }
+
     def is_satisfied(self) -> bool:
         if len(self.current.variables()) == 0:
             return False
@@ -91,3 +96,23 @@ class Root:
         subs = {var: 0 for var in self.vars.values()}
         
         return self.current.subs(subs) == 1
+
+    def __str__(self) -> str:
+        poly_str = str(self.current)
+        if poly_str == '0':
+            return 'False'
+        if poly_str == '1':
+            return 'True'
+
+        import re
+        s = poly_str.replace('+', '^').replace('*', '&')
+        s = re.sub(r'\b1\b', 'True', s)
+        s = re.sub(r'\b0\b', 'False', s)
+
+        from sympy.parsing.sympy_parser import parse_expr
+        from sympy import simplify_logic
+
+        expr = parse_expr(s)
+        simplified = simplify_logic(expr, form='dnf')
+        
+        return str(simplified)

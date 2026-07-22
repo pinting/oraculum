@@ -17,6 +17,12 @@ class Scopes:
         
         return None
 
+    def get_excluded_fields(self, scope: str) -> set[str] | None:
+        if scope in self.scopes:
+            return self.scopes[scope].get_excluded_fields()
+        
+        return None
+
     def get_required_tables(self) -> set[str]:
         result = set()
 
@@ -51,3 +57,9 @@ class Scopes:
                 return False
                 
         return True
+
+    def __str__(self) -> str:
+        if not self.scopes:
+            return ""
+        
+        return "; ".join(f"{name} = {scope}" for name, scope in sorted(self.scopes.items()))
