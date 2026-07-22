@@ -1,66 +1,166 @@
 #!/usr/bin/env sage
 
+import sys
+import tty
+import termios
+
 from fields import Fields
 from tables import Tables
 
-tables = {
-    "i": ["ki", "q", "kie", "fi"],
-    "j": ["ji", "q", "fj"],
-    "k": ["kk", "q", "fk"],
-    "a": ["kab", "q", "fa"],
-    "b": ["kab", "kbc", "fb"],
-    "c": ["kbc", "kcd", "fc"],
-    "d": ["kcd", "kde", "fd"],
-    "e": ["kde", "kie", "fe"],
-}
+def getch():
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(sys.stdin.fileno())
+        ch = sys.stdin.read(1)
+        if ch == '\x1b':
+            ch += sys.stdin.read(2)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
 
-fields = Fields(tables)
+def clear():
+    sys.stdout.write('\033[H\033[J')
+    sys.stdout.flush()
 
-def step(namespace: str, field: str):
-    print(f"SELECT {f'{namespace}.' if namespace else ''}{field}")
+def select_option(prompt, options):
+    if not options:
+        return None
     
-    fields.use_field(namespace, field)
+    current = 0
+
+    print(prompt)
+
+    for _ in options:
+        print()
     
-    print(f"{fields}")
+    while True:
+        sys.stdout.write(f"\033[{len(options)}A")
+        
+        for idx, opt in enumerate(options):
+            if idx == current:
+                sys.stdout.write(f"\r\033[K> {opt}\n")
+            else:
+                sys.stdout.write(f"\r\033[K  {opt}\n")
+                
+        sys.stdout.flush()
+        
+        key = getch()
+        if key == '\x1b[A': # Up
+            current = max(0, current - 1)
+        elif key == '\x1b[B': # Down
+            current = min(len(options) - 1, current + 1)
+        elif key == '\r' or key == '\n':
+            return options[current]
+        elif key == '\x03': # Ctrl+C
+            raise KeyboardInterrupt()
 
-print(f"{fields}")
+def pause():
+    input("Press Enter to continue...")
 
-steps = [
-    ("", "fa"),   # . = A
-    ("", "kbc"),  # . = A AND (B XOR C)
-    ("", "fb"),   # . = (A AND (B XOR C)) AND B = A AND B AND NOT(C)
-    ("", "kde"),  # . = A AND B AND NOT(C) AND (D XOR E)
-    ("x", "kcd"), # . = A AND B AND NOT(C) AND (D XOR E); x = C XOR E
-]
+def main():
+    tables = {
+        "i": ["ki", "q", "kie", "fi"],
+        "j": ["kj", "q", "fj"],
+        "k": ["kk", "q", "fk"],
+        "a": ["kab", "q", "fa"],
+        "b": ["kab", "kbc", "fb"],
+        "c": ["kbc", "kcd", "fc"],
+        "d": ["kcd", "kde", "fd"],
+        "e": ["kde", "kie", "fe"],
+    }
 
-for namespace, field in steps:
-    step(namespace, field)
+    fields = Fields(tables)
 
-relations = Tables(fields)
+    first_field = True
 
-print(f"Required: {relations.get_required_tables()}")
+    while True:
+        clear()
+        print(f"\n{fields}\n")
+        
+        namespaces = list(fields.scopes.scopes.keys())
+        
+        options = []
 
-relations.use_table('a')
+        if not first_field:
+            options.append("[Done]")
+            
+        options.extend(["."] + namespaces + ["[New]"])
+        
+        choice = select_option("NAMESPACE", options)
 
-print(f"Joinable: {relations.get_joinable_neighbors()}")
+        if choice == "[Done]":
+            break
+        elif choice == ".":
+            namespace = ""
+        elif choice == "[New]":
+            namespace = input("Define: ").strip()
+        else:
+            namespace = choice
+            
+        options = sorted(fields.get_fields(namespace))
 
-relations.join_node('b')
+        if not options:
+            print(f"\nNo available fields on namespace!")
+            pause()
 
-print(f"Joinable: {relations.get_joinable_neighbors()}")
+            continue
+        
+        field = select_option(f"\nSELECT", options)
+        
+        try:
+            fields.use_field(namespace, field)
+        except Exception as e:
+            print(f"\nError: {e}")
+            pause()
+                
+        first_field = False
 
-relations.join_node('c x')
+    tables = Tables(fields)
 
-print(f"Joinable: {relations.get_joinable_neighbors()}")
-print(f"Required: {relations.get_required_tables()}")
+    while True:
+        clear()
+        print(f"\n{tables}\n")
+        
+        if fields.is_satisfied():
+            break
+        
+        options = sorted(tables.get_required_tables())
+        choice = select_option("FROM", options)
+        
+        try:
+            tables.use_table(choice)
+        except Exception as e:
+            print(f"\nError: {e}")
+            pause()
 
-relations.use_table('e')
+            continue
 
-print(f"Joinable: {relations.get_joinable_neighbors()}")
-print(f"Required: {relations.get_required_tables()}")
+        while True:
+            clear()
+            print(f"\n{tables}\n")
+            
+            joinable = tables.get_joinable_neighbors()
 
-relations.join_node('i')
+            if not joinable:
+                print("No joinable tables available.")
 
-print(f"Joinable: {relations.get_joinable_neighbors()}")
-print(f"Required: {relations.get_required_tables()}")
+                break
+            
+            options = ["[Done]"] + sorted(joinable)
+            choice = select_option("JOIN", options)
+            
+            if choice == "[Done]":
+                break
+                
+            try:
+                tables.join_table(choice)
+            except Exception as e:
+                print(f"\nError: {e}")
+                pause()
 
-print(f"{fields}")
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nExiting...")
