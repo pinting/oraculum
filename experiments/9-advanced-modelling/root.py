@@ -1,6 +1,6 @@
 from sage.all import BooleanPolynomialRing
 
-class ManyResolver:
+class Root:
     def __init__(self, tables: dict[str, list[str]]):
         all_tables = sorted(tables.keys())
         tables_by_field: dict[str, set[str]] = {}

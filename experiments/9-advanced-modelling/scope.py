@@ -1,4 +1,4 @@
-class OneResolver:
+class Scope:
     def __init__(self, tables: dict[str, list[str]]):
         self.tables_by_field: dict[str, set[str]] = {}
         self.candidates: set[str] = set()
@@ -42,6 +42,9 @@ class OneResolver:
         if name not in self.candidates:
             raise Exception(f"Table is not a candidate")
         
+        # Important nuance: all candidates (including the used table) is cleared
+        # so get_excluded_tables() function will return every table excluded
+        # which is a distinct behaviour compared to Root! 
         self.candidates.clear()
 
     def get_required_tables(self) -> set[str]:
