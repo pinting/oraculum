@@ -1,4 +1,7 @@
 from sage.all import BooleanPolynomialRing
+from sympy.parsing.sympy_parser import parse_expr
+from sympy import simplify_logic
+import re
 
 class Root:
     def __init__(self, tables: dict[str, list[str]]):
@@ -16,12 +19,24 @@ class Root:
                 tables_by_field.setdefault(field, set()).add(table)
 
         for field, field_tables in tables_by_field.items():
+            # Build mutual exclusivity for each constrain 
             terminals = [self.vars[t] for t in sorted(field_tables)]
+            constraint = self.ring(0)
 
-            self.constraints[field] = sum(terminals, self.ring(0))
+            for i, vi in enumerate(terminals):
+                term = vi
+
+                for j, vj in enumerate(terminals):
+                    if i != j:
+                        term *= (self.ring(1) + vj)
+                
+                constraint += term
+
+            self.constraints[field] = constraint
 
         self.current = self.ring(1)
         self.fields: set[str] = set()
+        self.used_tables: set[str] = set()
         
         self.refresh_fields()
 
@@ -61,6 +76,7 @@ class Root:
 
         self.current = next_expr
 
+        self.used_tables.add(name)
         self.refresh_fields()
 
     def get_required_tables(self) -> set[str]:
@@ -76,7 +92,7 @@ class Root:
         return result
 
     def get_excluded_tables(self) -> set[str]:
-        result = set()
+        result = self.used_tables
 
         for t, var in self.vars.items():
             if self.current.subs({var: 1}) == 0:
@@ -98,21 +114,18 @@ class Root:
         return self.current.subs(subs) == 1
 
     def __str__(self) -> str:
-        poly_str = str(self.current)
-        if poly_str == '0':
-            return 'False'
-        if poly_str == '1':
-            return 'True'
+        expr = str(self.current)
 
-        import re
-        s = poly_str.replace('+', '^').replace('*', '&')
-        s = re.sub(r'\b1\b', 'True', s)
-        s = re.sub(r'\b0\b', 'False', s)
+        if expr == "0":
+            return "False"
+        if expr == "1":
+            return "True"
 
-        from sympy.parsing.sympy_parser import parse_expr
-        from sympy import simplify_logic
+        expr = expr.replace("+", "^").replace("*", "&")
+        expr = re.sub(r"\b1\b", "True", expr)
+        expr = re.sub(r"\b0\b", "False", expr)
 
-        expr = parse_expr(s)
-        simplified = simplify_logic(expr, form='dnf')
+        expr = parse_expr(expr)
+        simplified = simplify_logic(expr, form="dnf")
         
         return str(simplified)

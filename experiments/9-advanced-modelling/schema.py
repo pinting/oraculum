@@ -96,40 +96,4 @@ def parse_schema(sql: str) -> Schema:
             
     return schema
 
-if __name__ == "__main__":
-    sql = """
-    CREATE TABLE users (
-        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-        first_name VARCHAR(255) NOT NULL,
-        last_name VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL
-    );
 
-    CREATE TABLE posts (
-        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        title VARCHAR(255) NOT NULL,
-        body TEXT NOT NULL
-    );
-
-    CREATE TABLE comments (
-        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        post_id BIGINT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-        title VARCHAR(255) NOT NULL,
-        body TEXT NOT NULL
-    );
-    """
-    
-    schema = parse_schema(sql)
-
-    for table_name, table in schema.tables.items():
-        print(f"Table: {table_name}")
-        print(f"Primary Key: {table.primary_key}")
-        print(f"Unique Fields: {table.unique}")
-
-        for field_name, f in table.fields.items():
-            print(f"  - {field_name}: {f.type.name}{f'({f.type.length})' if f.type.length else ''} "
-                  f"(Nullable={f.is_nullable}, Unique={f.is_unique}, PK={f.is_primary_key}, Ref={f.reference})")
-        
-        print()

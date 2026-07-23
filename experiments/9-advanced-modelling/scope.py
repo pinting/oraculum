@@ -42,9 +42,6 @@ class Scope:
         if name not in self.candidates:
             raise Exception(f"Table is not a candidate")
         
-        # Important nuance: all candidates (including the used table) is cleared
-        # so get_excluded_tables() function will return every table excluded
-        # which is a distinct behaviour compared to Root! 
         self.candidates.clear()
 
     def get_required_tables(self) -> set[str]:

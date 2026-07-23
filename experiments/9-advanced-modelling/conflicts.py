@@ -1,27 +1,31 @@
 from root import Root
 from scopes import Scopes
+from schema import Schema
 
-class Fields:
-    def __init__(self, schema: dict[str, list[str]]):
-        self.root = Root(schema)
-        self.scopes = Scopes(schema)
+class Conflicts:
+    def __init__(self, schema: Schema):
+        schema_dict = {
+            t_name: list(t.fields.keys())
+            for t_name, t in schema.tables.items()
+        }
+        self.root = Root(schema_dict)
+        self.scopes = Scopes(schema_dict)
         self.schema = schema
-        self.selected: list[str] = []
+        self.used_fields: list[str] = []
 
     def use_field(self, scope: str, field: str):
         if not scope:
-            res = self.root.use_field(field)
+            self.root.use_field(field)
         else:
-            res = self.scopes.use_field(scope, field)
+            self.scopes.use_field(scope, field)
         
-        self.selected.append(f"{scope}.{field}" if scope else field)
-        return res
+        self.used_fields.append(f"{scope}.{field}" if scope else field)
 
     def get_all_fields(self) -> set[str]:
         fields = set()
 
-        for v in self.schema.values():
-            fields.update(v)
+        for t in self.schema.tables.values():
+            fields.update(t.fields.keys())
         
         return fields
 
@@ -60,6 +64,7 @@ class Fields:
 
         if not scope:
             return self.root.use_table(name)
+        
         return self.scopes.use_table(scope, name)
 
     def is_satisfied(self) -> bool:
@@ -67,9 +72,10 @@ class Fields:
 
     def __str__(self) -> str:
         return (
-            f"Satisfied = {self.is_satisfied()}\n"
-            f"Fields    = {', '.join(self.selected)}\n"
-            f"Excluded  = {', '.join(sorted(self.get_excluded_fields()))}\n"
-            f"Root      = {self.root}\n"
-            f"Scopes    = {self.scopes}"
+            f"Satisfied        = {self.is_satisfied()}\n"
+            f"Selected fields  = {', '.join(self.used_fields)}\n"
+            f"Excluded fields  = {', '.join(sorted(self.get_excluded_fields()))}\n"
+            f"Root tables      = {self.root}\n"
+            f"Scopes tables    = {self.scopes}\n"
+            f"Excluded tables  = {', '.join(sorted(self.get_excluded_tables()))}"
         )
