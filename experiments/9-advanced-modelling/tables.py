@@ -17,7 +17,7 @@ class Tables:
                     edges.append((n1, n2))
 
         self.graph = Graph(edges)
-
+        
         self.head = None
 
     def get_required_tables(self):
