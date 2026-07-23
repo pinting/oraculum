@@ -4,24 +4,46 @@ import sys
 import tty
 import termios
 
-from fields import Fields
-from tables import Tables
+from conflicts import Conflicts
+from relationships import Relationships
+from schema import parse_schema
+
+SCHEMA = """
+    CREATE TABLE users (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        first_name VARCHAR(255) NOT NULL,
+        last_name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL
+    );
+
+    CREATE TABLE posts (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title VARCHAR(255) NOT NULL,
+        body TEXT NOT NULL
+    );
+
+    CREATE TABLE comments (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        post_id BIGINT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+        title VARCHAR(255) NOT NULL,
+        body TEXT NOT NULL
+    );
+"""
 
 def getch():
     fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
+    prev_attr = termios.tcgetattr(fd)
+
     try:
         tty.setraw(sys.stdin.fileno())
         ch = sys.stdin.read(1)
-        if ch == '\x1b':
+        if ch == "\x1b":
             ch += sys.stdin.read(2)
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        termios.tcsetattr(fd, termios.TCSADRAIN, prev_attr)
     return ch
-
-def clear():
-    sys.stdout.write('\033[H\033[J')
-    sys.stdout.flush()
 
 def select_option(prompt, options):
     if not options:
@@ -46,39 +68,29 @@ def select_option(prompt, options):
         sys.stdout.flush()
         
         key = getch()
-        if key == '\x1b[A': # Up
+
+        if key == "\x1b[A": # Up
             current = max(0, current - 1)
-        elif key == '\x1b[B': # Down
+        elif key == "\x1b[B": # Down
             current = min(len(options) - 1, current + 1)
-        elif key == '\r' or key == '\n':
+        elif key == "\r" or key == "\n":
             return options[current]
-        elif key == '\x03': # Ctrl+C
+        elif key == "\x03": # Ctrl+C
             raise KeyboardInterrupt()
 
 def pause():
     input("Press Enter to continue...")
 
 def main():
-    tables = {
-        "i": ["ki", "q", "kie", "fi"],
-        "j": ["kj", "q", "fj"],
-        "k": ["kk", "q", "fk"],
-        "a": ["kab", "q", "fa"],
-        "b": ["kab", "kbc", "fb"],
-        "c": ["kbc", "kcd", "fc"],
-        "d": ["kcd", "kde", "fd"],
-        "e": ["kde", "kie", "fe"],
-    }
-
-    fields = Fields(tables)
+    schema = parse_schema(SCHEMA)
+    conflicts = Conflicts(schema)
 
     first_field = True
 
     while True:
-        clear()
-        print(f"\n{fields}\n")
+        print(f"\n{conflicts}\n")
         
-        namespaces = list(fields.scopes.scopes.keys())
+        namespaces = list(conflicts.scopes.scopes.keys())
         
         options = []
 
@@ -98,7 +110,7 @@ def main():
         else:
             namespace = choice
             
-        options = sorted(fields.get_fields(namespace))
+        options = sorted(conflicts.get_fields(namespace))
 
         if not options:
             print(f"\nNo available fields on namespace!")
@@ -109,27 +121,26 @@ def main():
         field = select_option(f"\nSELECT", options)
         
         try:
-            fields.use_field(namespace, field)
+            conflicts.use_field(namespace, field)
         except Exception as e:
             print(f"\nError: {e}")
             pause()
                 
         first_field = False
 
-    tables = Tables(fields)
+    relationships = Relationships(conflicts, schema)
 
     while True:
-        clear()
-        print(f"\n{tables}\n")
+        print(f"\n{relationships}\n")
         
-        if fields.is_satisfied():
+        if conflicts.is_satisfied():
             break
         
-        options = sorted(tables.get_required_tables())
+        options = sorted(relationships.get_required_tables())
         choice = select_option("FROM", options)
         
         try:
-            tables.use_table(choice)
+            relationships.use_table(choice)
         except Exception as e:
             print(f"\nError: {e}")
             pause()
@@ -137,24 +148,23 @@ def main():
             continue
 
         while True:
-            clear()
-            print(f"\n{tables}\n")
+            print(f"\n{relationships}\n")
             
-            joinable = tables.get_joinable_neighbors()
+            joinable = relationships.get_joinable_neighbors()
 
             if not joinable:
                 print("No joinable tables available.")
 
                 break
             
-            options = ["[Done]"] + sorted(joinable)
+            options = ["[Done]"] + sorted(joinable, key=lambda n: n.table)
             choice = select_option("JOIN", options)
             
             if choice == "[Done]":
                 break
                 
             try:
-                tables.join_table(choice)
+                relationships.join_table(choice)
             except Exception as e:
                 print(f"\nError: {e}")
                 pause()
