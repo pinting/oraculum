@@ -12,8 +12,8 @@ resolver. From then on the division of labour is:
 * the **kernel** owns the indexes and the heads, advances every head over each
   token across its worker pool, and builds the indexes the next heads need;
 * **seer** owns the modelling. When a head reaches the end of its index the
-  kernel calls `Engine.resolve` with the head's payload -- the `Node` it was
-  spawned from -- and whatever it matched. That is enough to find the right
+  kernel calls `Engine.resolve` with the head's payload - the `Node` it was
+  spawned from - and whatever it matched. That is enough to find the right
   `Context`, apply the selector to it, run the thunk, and answer with the
   drafts of the indexes that may follow.
 
@@ -39,15 +39,15 @@ Selector = Callable[[Context, str], Context] | None
 ThunkFn = Callable[[Context], list["Node"]]
 
 # One head as the kernel reports it: `id`, `index_id`, `node`, `rule`,
-# `matched` and `payload`. Snapshots, not handles -- the live state stays in
+# `matched` and `payload`. Snapshots, not handles - the live state stays in
 # the kernel.
 Head = kl.Head
 
 class Thunk:
     """A node generator: terminal, ready, or deferred until first use.
 
-    `deferred` exists so the graph can be recursive -- `joins()` and
-    `fields()` refer to themselves -- without building it eagerly. The
+    `deferred` exists so the graph can be recursive - `joins()` and
+    `fields()` refer to themselves - without building it eagerly. The
     resolved function is memoised.
     """
 
@@ -177,7 +177,7 @@ class Engine:
         selector runs on a copy of the node's context, so the branches of the
         graph never see each other's selections.
 
-        `None` means the end of the graph; a list -- possibly empty -- names the
+        `None` means the end of the graph; a list - possibly empty - names the
         indexes that may come next.
         """
 

@@ -5,7 +5,7 @@ node takes to answer with its whole route set, how long one transition lookup
 costs, and how much memory the index then holds.
 
 This does not run as it stands. It asks for a DFA layout per round and for
-TokTrie tuning parameters, and the bindings expose neither -- the layout is a
+TokTrie tuning parameters, and the bindings expose neither - the layout is a
 type parameter, fixed to `FlatDFA` when the extension is compiled. Comparing
 layouts is therefore only possible from Rust, which is what
 `src/bin/benchmark.rs` is for.

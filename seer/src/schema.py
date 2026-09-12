@@ -1,7 +1,7 @@
 """SQL schema model and parsing.
 
 `CREATE TABLE` statements are parsed with `sqlglot`. Columns keep their type,
-nullability, uniqueness and -- the part the rest of the modelling depends on --
+nullability, uniqueness and - the part the rest of the modelling depends on -
 their foreign key `Reference`, which is what `relationships.py` builds the join
 graph from.
 
@@ -23,8 +23,8 @@ import sqlglot.expressions as exp
 # Only the keywords the generated language can actually emit have to be here
 # for the grammar to stay unambiguous; the rest are listed because an alias
 # that shadows a SQL keyword is a bad alias whether or not seer would trip
-# over it. Both cases are excluded at the point of use -- SQL keywords are
-# case insensitive -- but mixed case spellings are not, since no vocabulary
+# over it. Both cases are excluded at the point of use - SQL keywords are
+# case insensitive - but mixed case spellings are not, since no vocabulary
 # token produces them at the start of an identifier in practice.
 RESERVED: frozenset[str] = frozenset({
     "ALL", "AND", "AS", "ASC", "BETWEEN", "BY", "CASE", "CROSS", "DESC",

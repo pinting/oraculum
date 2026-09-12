@@ -3,8 +3,8 @@
 //! Indexes carry no position: a `Lattice` is a table of token edges per byte
 //! offset and an `Expression` is a DFA, and both are immutable once built,
 //! which is what lets the factory share one of them between every head that
-//! needs it. The walk over an index -- where it currently stands and which
-//! tokens it has consumed -- is the memory, and there is one per head.
+//! needs it. The walk over an index - where it currently stands and which
+//! tokens it has consumed - is the memory, and there is one per head.
 //!
 //! For a flat index the memory is a single node id. For a group it is one
 //! sub-memory per member, because a group decides whether it accepts by asking
@@ -27,7 +27,7 @@ use crate::number::Number;
 /// Number of exclusions below which a group is fed on the calling thread.
 ///
 /// One `next` over a lattice is a handful of comparisons, so dispatching a
-/// task per member only pays once a group has many of them -- which is exactly
+/// task per member only pays once a group has many of them - which is exactly
 /// the shape alias resolution produces, one exclusion per reserved word, table
 /// and field.
 pub const GROUP_PARALLEL_THRESHOLD: usize = 16;
@@ -161,7 +161,7 @@ where
     /// An exclusion is anchored at the start of the word, so once it has
     /// rejected a token it can never match again and there is nothing left to
     /// ask it. Dropping it matters because the groups this was built for are
-    /// wide -- one exclusion per reserved word, table and field -- and nearly
+    /// wide - one exclusion per reserved word, table and field - and nearly
     /// all of them die on the first token, leaving a handful to walk for the
     /// rest of the head's life.
     fn prune(&mut self) {

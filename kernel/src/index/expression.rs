@@ -6,8 +6,8 @@
 //! TokTrie which whole tokens that state would accept. Every such token becomes
 //! one edge, and every state an edge leads to becomes a node.
 //!
-//! That exploration is what makes building an index expensive -- it is the
-//! whole reachable automaton, not a lazy slice of it -- which is why the result
+//! That exploration is what makes building an index expensive - it is the
+//! whole reachable automaton, not a lazy slice of it - which is why the result
 //! is packed into a `DFA` layout that makes the lookups afterwards cheap, and
 //! why the factory goes to some trouble never to build one twice.
 //!

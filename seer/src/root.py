@@ -59,7 +59,7 @@ class Root:
         self._refresh_fields()
 
     def _mutual_exclusion(self, tables: Sequence[str]) -> Any:
-        """`SUM_i t_i * PRODUCT_(j != i) (1 + t_j)` -- exactly one table is on."""
+        """`SUM_i t_i * PRODUCT_(j != i) (1 + t_j)` - exactly one table is on."""
 
         terminals: list[Any] = [self._vars[table] for table in tables]
         constraint: Any = self._ring(0)

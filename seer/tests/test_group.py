@@ -2,7 +2,7 @@
 
 A group is one inclusion minus any number of exclusions. It is fed like any
 other index, and it accepts exactly when the inclusion accepts and no exclusion
-does -- so while an exclusion still spells what has been matched, the group
+does - so while an exclusion still spells what has been matched, the group
 refuses to end and generation has to continue.
 
 `graph.alias` is the reason the type exists: an alias is the identifier pattern

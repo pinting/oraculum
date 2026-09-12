@@ -2,7 +2,7 @@
 //!
 //! A head is one index the runner is currently walking: a `Memory` over a
 //! shared index, the tokens it has consumed, and whatever the caller attached
-//! to it. The payload is opaque to the kernel -- for the Python library it is
+//! to it. The payload is opaque to the kernel - for the Python library it is
 //! the graph node that produced the head, which is how a notification finds its
 //! way back to the right context.
 

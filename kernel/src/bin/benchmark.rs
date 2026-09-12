@@ -7,7 +7,7 @@
 //! route set, the time to build the index, and the memory it then holds.
 //!
 //! Lookup and scan are the ones that decide it, because both run on every token
-//! fed -- a scan per live head to offer the routes, then a lookup per head to
+//! fed - a scan per live head to offer the routes, then a lookup per head to
 //! advance it. The layout is a type parameter, so this has to be a Rust binary:
 //! the Python extension is compiled against one layout and cannot compare them.
 

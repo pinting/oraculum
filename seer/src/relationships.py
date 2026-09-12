@@ -1,8 +1,8 @@
 """FROM / JOIN resolution over the foreign key graph.
 
 Once `conflicts.py` knows which tables the query needs, they have to be
-connected by foreign keys. Nodes are table names -- including aliased variants
-such as `"comments c"` -- and edges are the foreign keys between them, carrying
+connected by foreign keys. Nodes are table names - including aliased variants
+such as `"comments c"` - and edges are the foreign keys between them, carrying
 the column pair the `ON` clause is written from.
 
 Joining merges the neighbour into the head via SageMath's `merge_vertices`, so

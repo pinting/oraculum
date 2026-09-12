@@ -1,4 +1,4 @@
-//! kernel -- token indexes, and the machinery for walking many of them at once.
+//! kernel - token indexes, and the machinery for walking many of them at once.
 //!
 //! An *index* is a language over vocabulary tokens. A `Lattice` spells one
 //! constant string, an `Expression` a regular expression, and a `Group` is one
@@ -15,7 +15,7 @@
 //! That last question is the whole interface to the language being generated:
 //! the crate builds no grammar, keeps no graph, and never looks inside a
 //! payload. The `pyo3` feature adds the Python bindings, which fix the node and
-//! token widths and the transition layout -- see `pyfactory`.
+//! token widths and the transition layout - see `pyfactory`.
 
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;

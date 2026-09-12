@@ -1,4 +1,4 @@
-"""`Relationships` -- the foreign key join graph.
+"""`Relationships` - the foreign key join graph.
 
 `JoinGraph` is the vocabulary of this module over SageMath's `Graph`, so these
 cover both the edges built from a schema and what merging a neighbour into the

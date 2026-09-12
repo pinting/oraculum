@@ -4,11 +4,11 @@
 
 ## Architecture
 
-Two things have to be true of every statement the system produces. It has to be **grammatical** — a well formed `SELECT`. And it has to be **meaningful** — a query the schema can actually answer. Both are enforced one token at a time, while the model is writing, so neither is ever checked after the fact.
+Two things have to be true of every statement the system produces. It has to be **grammatical** - a well formed `SELECT`. And it has to be **meaningful** - a query the schema can actually answer. Both are enforced one token at a time, while the model is writing, so neither is ever checked after the fact.
 
-### 1. Tokens, not characters
+### 1. Tokens - characters, words, pieces of text
 
-A grammar talks about text: the word `SELECT`, a comma, an identifier. A language model does not emit text. It emits **tokens** drawn from a fixed vocabulary and the same text can arrive many ways.
+A grammar talks about text: the word `SELECT`, a comma, an identifier. A language model emits **tokens** drawn from a fixed vocabulary, and the same text can arrive many ways.
 
 ```mermaid
 graph LR
@@ -41,17 +41,17 @@ To compare the two you have to turn a token sequence back into text, which just 
 c(v_1 v_2 \cdots v_k) \;=\; v_1 v_2 \cdots v_k
 ```
 
-Gluing is associative, $c(xy) = c(x)\,c(y)$, which is the only sense in which the vocabulary is a homomorphism.
+Gluing carries concatenation of tokens to concatenation of text, $c(xy) = c(x)\,c(y)$, which is the only sense in which the vocabulary is a homomorphism.
 
-So what has to be enforced is not the set $L$ of legal texts but the set of token sequences that glue into it:
+So what has to be enforced is the set of token sequences that glue into the set $L$ of legal texts:
 
 ```math
 c^{-1}(L) \;=\; \{\, w \in V^{*} \;:\; c(w) \in L \,\}
 ```
 
-— every way of spelling something in $L$ with this vocabulary. For $L = \{\texttt{"users"}\}$ that is the handful of chops above; for an infinite $L$ it is infinite.
+That is every way of spelling something in $L$ with this vocabulary. For $L = \{\texttt{"users"}\}$ that is the handful of chops above; for an infinite $L$ it is infinite.
 
-$c$ is many-to-one, so $c^{-1}(L)$ is always larger than $L$ and can never be listed; it has to be a machine. And regular languages survive inverse homomorphism, so whenever $L$ is regular that machine is a finite automaton over $V$. It is what `kernel` calls an **index** and sections 2 to 4 are three ways of building one.
+$c$ is many-to-one wherever it is defined at all, so for any $L$ this vocabulary can spell, $c^{-1}(L)$ is larger than $L$ and can never be listed; it has to be a machine. And regular languages survive inverse homomorphism, so whenever $L$ is regular that machine is a finite automaton over $V$. It is what `kernel` calls an **index** and sections 2 to 4 are three ways of building one.
 
 ```
 NOTE: What an index is from outside
@@ -69,24 +69,27 @@ why one automaton can sit behind every active index using it.
 
 ### 2. Constants: a graph over the gaps in a string
 
-Take the constant `users`. Put a node at every position in it — before the `u`, between each pair of letters, after the `s`. Six nodes for five characters. Then draw an edge from $i$ to $j$ whenever some vocabulary token spells exactly the characters between them.
+Take the constant `users`. Put a node at every position in it - before the `u`, between each pair of letters, after the `s`. Six nodes for five characters, because `users` is ASCII: positions are byte offsets, so a multi-byte character spans several nodes rather than one. Then draw an edge from $i$ to $j$ whenever some vocabulary token spells exactly the characters between them.
 
 A **path from 0 to 5 is one way of spelling `users`** and every way appears as a path. So this graph *is* $c^{-1}(\{\texttt{users}\})$, drawn out. It is acyclic because every edge moves right and it has one accepting node, the last one.
 
 The encoding follows from the picture. Group the edges by their source node and two facts let most of the data disappear:
 
-- the label already determines the target, since $j = i + |v|$, so no target needs storing;
-- node $i$ is accepting exactly when it has no outgoing edges, so no accepting flag is needed either.
+- the label already determines the target, since $j = i + |v|$ with $|v|$ the token's length in bytes, so no target needs storing;
+- node $i$ is accepting exactly when $i$ is the last node, so the position *is* the accepting flag and none needs storing either.
 
-What is left is the out-edge labels, grouped by source — two arrays. Finding the edges in the first place is one **Aho-Corasick** pass: a single automaton holding all 255,386 tokens as patterns, built once per vocabulary, which reports every token occurring anywhere in `users` in one sweep.
+The second one turns on reaching the end of the constant, which is a stronger condition than having no outgoing edges: a byte offset in the middle of a multi-byte character has none either, and it must not accept.
+
+What is left is the out-edge labels, grouped by source - two arrays. Finding the edges in the first place is one **Aho-Corasick** pass: a single automaton holding all 255,386 tokens as patterns, built once per vocabulary, which reports every token occurring anywhere in `users` in one sweep.
 
 ```
 NOTE: What a lattice answers
 
 Ask it which tokens leave position i and it hands back a slice of an
 array it already holds - no allocation, no search. That is the only
-question it needs to answer: the target is i plus the token's length and
-"no tokens leave here" already means accepting, so neither is stored.
+question it needs to answer: the target is i plus the token's length in
+bytes, and reaching the end of the constant is what accepting means, so
+neither is stored.
 
 The Aho-Corasick automaton that found the edges is not part of it. It is
 built once per vocabulary, read while the arrays are filled and shared by
@@ -95,7 +98,7 @@ every lattice afterwards.
 
 ### 3. Regular expressions: a state is the regex that is left
 
-A constant has a graph you can draw. A regular expression does not, so its automaton has to be discovered — and the trick is to let **the states be regular expressions themselves**.
+A constant has a graph you can draw. A regular expression's automaton has to be discovered instead, and the trick is to let **the states be regular expressions themselves**.
 
 The *derivative* of a regex $r$ by a character $b$, written $\partial_b r$, is exactly what remains of the regex after stripping off just the **first, single character** $b$:
 
@@ -103,7 +106,7 @@ The *derivative* of a regex $r$ by a character $b$, written $\partial_b r$, is e
 \partial_b r \;=\; \{\, w \;:\; bw \in L(r) \,\}
 ```
 
-Because a regular expression only has a finite number of distinct derivatives, every derivative naturally loops back on itself to become a state in a finite automaton.
+Counted up to similarity - treating union as associative, commutative and idempotent - a regular expression has only finitely many distinct derivatives. So the derivatives close into the state set of a finite automaton.
 
 Take the SQL identifier pattern `[a-zA-Z_][a-zA-Z0-9_]*`. Reading a `u` consumes the first character class and leaves the starred tail. Reading another letter from the starred tail leaves the exact same starred tail again:
 
@@ -113,12 +116,12 @@ Take the SQL identifier pattern `[a-zA-Z_][a-zA-Z0-9_]*`. Reading a `u` consumes
   d_s(d_u(r))= [a-zA-Z0-9_]* -> The same regex, no new state
 ```
 
-Two distinct derivatives means exactly **two states** — which is what the built automaton reports. Brzozowski's theorem guarantees this always terminates: a regex has only finitely many distinct derivatives, so the states run out. `derivre` computes them lazily, materialising a state the first time it is reached.
+Two live derivatives means exactly **two states** - which is what the built automaton reports. There is a third, $\emptyset$, reached by starting with a digit; it is the dead state and nothing stores it. Brzozowski's theorem guarantees the search terminates: up to similarity the derivatives are finite in number, so the states run out. `derivre` computes them lazily, materialising a state the first time it is reached.
 
 That gives an automaton over *characters*. One more step turns it into one over tokens: to take a token $v$, walk all of its characters at once.
 
 ```math
-\delta(q, v) \;=\; \partial_{v}\,q \quad\text{— read every character of } v \text{ in turn}
+\delta(q, v) \;=\; \partial_{v}\,q \quad\text{- read every character of } v \text{ in turn}
 ```
 
 Done naively that is 255,386 walks per state. Instead the vocabulary is held as a **trie** and the walk descends it once: the moment a character kills the branch, every token below that prefix is dead too and the whole subtree is skipped.
@@ -130,20 +133,20 @@ The automata that come out are tiny in states and enormous in edges:
 [ \n\t]+                   2 states                                     1,628 bytes
 ```
 
-**An index costs its edge count, not its state count.**
+**An index costs its edge count.**
 
 ### 4. Difference without a product
 
-An alias is any identifier that is not something else — not a keyword, not a table name, not a field name. That is a set difference:
+An alias is any identifier that is not something else - not a keyword, not a table name, not a field name. That is a set difference:
 
 ```math
 L(G) \;=\; L(\mathrm{inc}) \;\setminus\; \bigl( L(\mathrm{exc}_1) \cup \cdots \cup L(\mathrm{exc}_k) \bigr)
 ```
 
-Regular languages are closed under difference, so an automaton for this exists: the product of the inclusion with the complement of each exclusion. Its states are the product of theirs:
+Regular languages are closed under difference, so an automaton for this exists: the product of the inclusion with the complement of each exclusion. Its states are bounded by the product of theirs:
 
 ```math
-|Q_{\mathrm{inc}}| \times |Q_{\mathrm{exc}_1}| \times \cdots \times |Q_{\mathrm{exc}_k}|
+|Q_G| \;\le\; |Q_{\mathrm{inc}}| \times |Q_{\mathrm{exc}_1}| \times \cdots \times |Q_{\mathrm{exc}_k}|
 ```
 
 On a three-table schema $k$ is 85 and it grows with the schema, so that product is never built. Instead the members stay separate automata, all of them are fed the same token and the difference is taken **when the word is asked whether it may end** rather than in the state space:
@@ -155,7 +158,7 @@ F_G &= F_{\mathrm{inc}} \setminus \bigl( F_1 \cup \cdots \cup F_k \bigr) && \tex
 \end{aligned}
 ```
 
-The asymmetry is the point and it is what the situation actually calls for. An exclusion must never restrict the *next* token, because a longer word escapes it — `users` is excluded but `users2` is fine. An exclusion only ever removes the right to **stop**. So a group whose inclusion accepts while some exclusion also accepts is *blocked*: it does not report itself finished and it withholds the terminating token, forcing generation onward.
+The asymmetry is what the situation calls for. An exclusion must never restrict the *next* token, because a longer word escapes it - `users` is excluded but `users2` is fine. An exclusion only ever removes the right to **stop**. So a group whose inclusion accepts while some exclusion also accepts is *blocked*: it withholds the terminating token and stays unfinished, forcing generation onward.
 
 ```
 u        include accepts, no exclusion does            -> accepted
@@ -165,7 +168,7 @@ users2   the `users` exclusion died on the `2`         -> accepted
 
 One fact keeps this cheap. Every member is anchored at the start of the word, so an exclusion that rejects a token can never match again. Exclusion liveness only ever decreases, dead members are dropped and against a real vocabulary nearly all 85 die on the first token.
 
-The trade is explicit: $O\bigl(\sum_i |Q_i|\bigr)$ of state per active alias, instead of $O\bigl(\prod_i |Q_i|\bigr)$ of automaton per schema.
+The trade is explicit. The member automata cost $O\bigl(\sum_i |Q_i|\bigr)$ once and every head shares them; an active alias adds only $O(k)$ on top of that - one node id per member still standing, which the dropping drives towards $O(1)$. The alternative is $O\bigl(\prod_i |Q_i|\bigr)$ of automaton, per schema, up front.
 
 ### 5. The graph: lazy determinization of an automaton nobody can build
 
@@ -198,7 +201,7 @@ graph TD
 
 If it were just this static structure, the language could be compiled ahead of time into one massive DFA. 
 
-But it isn't static. Whether the statement may legally transition to the accepting `;` state or must open another table entry is not a property of the grammar — it is a question about what has *already been selected*. A node like `LATTICE: field` doesn't range over every field in the schema; it ranges only over the fields that are *still selectable in the current latent state*. 
+But it isn't static. Whether the statement may legally transition to the accepting `;` state or must open another table entry depends on what has *already been selected*. A node like `LATTICE: field` ranges over the fields that are *still selectable in the current latent state*. 
 
 Every node evaluates a Boolean function over the latent context (the constraints on tables, aliases, and selected fields). 
 
@@ -212,9 +215,9 @@ Because of this, the determinized machine is built lazily while it is walked. A 
 \end{aligned}
 ```
 
-$\mathrm{routes}$ evaluates the transition function over the live frontier — effectively performing the subset construction one token at a time instead of tabulating it in advance. $\mathrm{expand}$ resolves the fixpoint: whenever a head reaches the end of its index, it yields its continuation $k_i$, applying it to the updated state $\mathit{ctx}_i$, spawning the next set of required indexes until nothing new appears.
+$\mathrm{routes}$ evaluates the transition function over the live frontier - effectively performing the subset construction one token at a time instead of tabulating it in advance. $\mathrm{expand}$ resolves the fixpoint: whenever a head reaches the end of its index, it yields its continuation $k_i$, applying it to the updated state $\mathit{ctx}_i$, spawning the next set of required indexes until nothing new appears.
 
-For a fixed schema the reachable configurations are technically finite, so the DFA does theoretically exist. But with $n$ tables carrying $2^{2^n}$ boolean functions, plus alias resolutions and join graphs, it is strictly unbuildable. Lazy determinization is the only way through.
+For a fixed schema the reachable configurations are technically finite, so the DFA does theoretically exist. But with $n$ tables carrying $2^{2^n}$ boolean functions, plus alias resolutions and join graphs, it is strictly unbuildable, so the determinization stays lazy.
 
 ```
 NOTE: The layers that meet at a head
@@ -222,13 +225,13 @@ NOTE: The layers that meet at a head
 A head is one active index and three layers stack at it. Underneath is
 the automaton: immutable, positionless, shared by every head walking it.
 Over that sits a single walk, private to this head, shaped like the
-automaton -- a node id for a flat index, or one sub-walk per member for a
+automaton - a node id for a flat index, or one sub-walk per member for a
 group. Over that sits a payload the kernel stores and never opens.
 
 From outside, the loop is: spawn a head with an index and a payload, feed
 tokens and when the head reaches the end of its automaton you are handed
 your payload back together with the text it matched. Looking up which
-grammar rule that was, narrowing the state, producing the next indexes --
+grammar rule that was, narrowing the state, producing the next indexes -
 all of that happens on the Python side and is invisible here.
 
 The payload is what makes a branch a branch. It carries the state this
@@ -263,7 +266,7 @@ A field $f$ that lives in the tables $T(f)$ says *exactly one of those is where 
 \end{aligned}
 ```
 
-For two tables, "exactly one" *is* XOR. For three it is not and the reason is worth seeing: $a + b + c$ over $\mathbb{F}_2$ is the **parity** function — it is $1$ when an odd number of tables are on. That is right for one table and wrong for three. The $abc$ term is there to cancel the all-three case and nothing else, since it is $0$ everywhere else.
+For two tables, "exactly one" *is* XOR. For three it is not: $a + b + c$ over $\mathbb{F}_2$ is the **parity** function - it is $1$ when an odd number of tables are on. That is right for one table and wrong for three. The $abc$ term is there to cancel the all-three case and nothing else, since it is $0$ everywhere else.
 
 The pattern that falls out is clean. $C(f)$ is the sum of **every odd-sized subset** of $T(f)$:
 
@@ -271,7 +274,7 @@ The pattern that falls out is clean. $C(f)$ is the sum of **every odd-sized subs
 C(f) \;=\; \sum_{\substack{S \subseteq T(f) \\ |S| \text{ odd}}} \;\; \prod_{i \in S} t_i
 ```
 
-and it is exactly-one for a one-line reason: if $k$ tables are on, the terms that survive are the odd-sized subsets of those $k$ and there are $2^{k-1}$ of them — even for every $k \ge 2$, so they cancel and $1$ only when $k = 1$.
+and it is exactly-one for a one-line reason: if $m$ tables are on, the terms that survive are the odd-sized subsets of those $m$, and for $m \ge 1$ there are $2^{m-1}$ of them - even for every $m \ge 2$, so they cancel. The sum is $1$ only when $m = 1$, and empty, hence $0$, when $m = 0$.
 
 Selecting a field multiplies its constraint into a running product, which is AND:
 
@@ -284,14 +287,16 @@ $P$ is the latent state: the function that is $1$ on exactly those FROM clauses 
 ```math
 \begin{aligned}
 P = 0 \quad&\Longleftrightarrow\quad \text{the selection is contradictory} \\
-P|_{t = 1} = 0 \quad&\Longleftrightarrow\quad \text{table } t \text{ is excluded} \\
+P|_{t = 1} = 0 \quad&\Longleftrightarrow\quad \text{table } t \text{ contradicts the selection} \\
 P|_{t_1 = \cdots = t_n = 0} = 1 \quad&\Longleftrightarrow\quad \text{nothing is outstanding: the query is satisfied} \\
 P \cdot C(f) = 0 \quad&\Longleftrightarrow\quad \text{field } f \text{ is excluded} \\
-\bigl\{\, t : P|_{t = 1} \neq 0 \,\bigr\} \quad&=\quad \text{the tables still able to satisfy it}
+\bigl\{\, t \in \mathrm{vars}(P) \;:\; P|_{t = 1} \neq 0 \,\bigr\} \quad&=\quad \text{the tables still able to satisfy it}
 \end{aligned}
 ```
 
-Idempotence earns its keep. Selecting `body` and then `user_id`, both living in exactly `{comments, posts}`, leaves $P = c + p$ unchanged, because $(c+p)^2 = c+p$ — the second field adds no information and the algebra says so with no special case. Naming a table is substitution: setting $u = 1$ discharges every constraint mentioning it and once all of them are discharged $P$ collapses to $1$.
+Two of those lines need care. The last one ranges over the variables $P$ still mentions rather than over every table: a table $P$ has stopped depending on is *compatible* with the selection but not *required* by it, and only what $P$ still depends on belongs in the FROM clause. Selecting `email` leaves $P = u$, and it is `users` alone that is outstanding - `posts` and `comments` pass the $P|_{t=1} \neq 0$ test but appear nowhere in $P$. The second line has the mirror image of the same subtlety: a table already named has been substituted away and no longer appears in $P$, so the test can never flag it again, and the excluded set carries the used tables alongside.
+
+Idempotence earns its keep. Selecting `body` and then `user_id`, both living in exactly `{comments, posts}`, leaves $P = c + p$ unchanged, because $(c+p)^2 = c+p$ - the second field adds no information and the algebra says so with no special case. Naming a table is substitution: setting $u = 1$ discharges the demand of every constraint mentioning it. What is left is rarely the constant $1$ - selecting `body` and then naming `posts` leaves $P = c + 1$, which goes on forbidding `comments` - but its value at the origin is $1$, and that evaluation is what satisfaction tests.
 
 ```
 NOTE: Why copying a Context is cheap
@@ -301,7 +306,7 @@ and the per-field constraint polynomials are built once per schema and
 never change, so a copy just rebinds them; the running product and the
 field sets are values, so they need no copying at all.
 
-The join graph is the exception, since contraction mutates it -- it is
+The join graph is the exception, since contraction mutates it - it is
 genuinely duplicated per branch and only after the FROM keyword has
 built it. Underneath the running product sits PolyBoRi's decision
 diagram, which is where the 0.25 us multiply comes from.
@@ -315,11 +320,11 @@ An alias denotes **exactly one** table and cannot be two things at once, which r
 \mathit{cand} \;\leftarrow\; \mathit{cand} \,\cap\, T(f)
 ```
 
-with $\mathit{cand} = \emptyset$ meaning contradiction. `Scopes` is the registry of them, reporting an aliased table as the qualified node `"users u"` so that `users` and `users u` stay distinguishable downstream. `Conflicts` is the facade over both halves.
+A selection that would empty $\mathit{cand}$ is refused outright and leaves it untouched, so $\emptyset$ never means contradiction: it is what naming the table produces, and it is exactly the condition for the scope being satisfied. `Scopes` is the registry of them, reporting an aliased table as the qualified node `"users u"` so that `users` and `users u` stay distinguishable downstream. `Conflicts` is the facade over both halves.
 
 #### 6c. The FROM clause: graph contraction
 
-Once the fields are chosen, the required tables have to be **connected**. `Relationships` builds a multigraph whose vertices are the tables — plus aliased nodes like `"users u"` — and whose edges are the foreign keys, each labelled with the column pair it joins on.
+Once the fields are chosen, the required tables have to be **connected**. `Relationships` builds a multigraph whose vertices are the tables - plus aliased nodes like `"users u"` - and whose edges are the foreign keys, each labelled with the column pair it joins on.
 
 One FROM entry is a connected piece being grown from a head vertex $h$. Joining a neighbour $x$ is **vertex contraction**:
 
@@ -327,23 +332,22 @@ One FROM entry is a connected piece being grown from a head vertex $h$. Joining 
 \mathrm{join}(h, x) : \qquad G \;\leftarrow\; G \,/\, \{h, x\}
 ```
 
-Contraction is the right operation because it reproduces SQL's own rule: after a join the pair behaves as one relation, every column of either is reachable and the merged vertex inherits both neighbourhoods — so a table two foreign keys away only becomes joinable once the table between them has been joined in.
+Contraction is the right operation because it reproduces SQL's own rule: after a join the pair behaves as one relation, every column of either is reachable and the merged vertex inherits both neighbourhoods - so a table two foreign keys away only becomes joinable once the table between them has been joined in.
 
-The `ON` columns are never guessed. They are the label on the edge, so choosing the target determines them.
+The `ON` columns are the label on the edge, so choosing the target determines them.
 
 ```
 NOTE: What the join graph answers
 
 Ask it what can be joined onto the current entry and you get back, per
 edge, the neighbouring table together with the two columns the ON clause
-needs. Those are read off the edge label, never searched for. The label
-is stored undirected and oriented when asked, so the head's column always
-comes out first.
+needs. Those are read off the edge label. The label is stored undirected
+and oriented when asked, so the head's column always comes out first.
 
 It is a multigraph deliberately: two tables joined by two different
-foreign keys are two alternatives, not a duplicate to collapse. The head
-is a single vertex name, so growing one FROM entry is a sequence of
-contractions into it.
+foreign keys are two alternatives, and both stay. The head is a single
+vertex name, so growing one FROM entry is a sequence of contractions
+into it.
 ```
 
 ## Experiments
@@ -386,9 +390,9 @@ Selecting fields from tables and dynamically restricting field space as the sele
 
 Written in Rust with the `boolean_expression` crate. Two resolver types sit behind a unified `Context`:
 
-- **`ManyResolver`** (global namespace) — builds a BDD over table variables. For each field it constructs the *exactly-one* constraint: the BDD function that is true when exactly one of the field's tables is on. Selecting a field ANDs its constraint into a running product; a field is offered only when its constraint ANDed with the current product is still satisfiable. Table resolution uses `restrict` (substituting a variable to `true`) and satisfaction checks evaluate the BDD with all variables `false`.
+- **`ManyResolver`** (global namespace) - builds a BDD over table variables. For each field it constructs the *exactly-one* constraint: the BDD function that is true when exactly one of the field's tables is on. Selecting a field ANDs its constraint into a running product; a field is offered only when its constraint ANDed with the current product is still satisfiable. Table resolution uses `restrict` (substituting a variable to `true`) and satisfaction checks evaluate the BDD with all variables `false`.
 
-- **`OneResolver`** (per-alias namespace) — uses plain set intersection instead of BDD algebra. An alias denotes a single table, so each field selection intersects the candidates with the field's table set. No cross-talk between aliases, no polynomial machinery needed.
+- **`OneResolver`** (per-alias namespace) - uses plain set intersection instead of BDD algebra. An alias denotes a single table, so each field selection intersects the candidates with the field's table set. No cross-talk between aliases, no polynomial machinery needed.
 
 `Context` keeps one `ManyResolver` for unqualified fields and an `FxHashMap` of `OneResolver`s keyed by alias name. Setting a namespace before selecting a field routes the selection to the right resolver. Required tables are the union of both halves and the query is satisfied when both the global BDD and every alias scope have been fully discharged. The whole `Context` is `Clone`, so branching is a value copy.
 

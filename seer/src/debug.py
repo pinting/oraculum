@@ -42,7 +42,7 @@ def is_enabled() -> bool:
 def trace(operation: str, state: Any) -> None:
     """Print `state` under a heading naming the operation that produced it.
 
-    `state` is rendered lazily, so nothing is formatted while tracing is off --
+    `state` is rendered lazily, so nothing is formatted while tracing is off -
     which matters because `Root.__str__` runs a sympy simplification.
     """
 
@@ -67,7 +67,7 @@ def traced(operation: Callable[..., str]):
     `operation` receives the same arguments as the method and returns the label
     for the heading, so a trace says what was applied and not merely which
     method ran. It is evaluated *before* the call, because a method may consume
-    the state the label describes -- `use_field` clears the open namespace.
+    the state the label describes - `use_field` clears the open namespace.
     """
 
     def decorate(method):

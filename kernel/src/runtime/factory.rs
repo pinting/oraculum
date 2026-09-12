@@ -8,8 +8,8 @@
 //!   for it, and however many of them ask at the same moment;
 //! * a head is cheap, because it borrows a shared index instead of owning one.
 //!
-//! Building is the expensive half of generation -- an `Expression` over the
-//! identifier pattern costs milliseconds against a real vocabulary -- so
+//! Building is the expensive half of generation - an `Expression` over the
+//! identifier pattern costs milliseconds against a real vocabulary - so
 //! `create_many` fans a batch out over the worker pool, and a draft that is
 //! already being built is waited on rather than built a second time.
 
@@ -39,7 +39,7 @@ pub type IndexId = u64;
 /// one index from another and nothing else. A group is drafted from the ids of
 /// its members rather than their drafts: the members are built first, which
 /// keeps the key small and lets a group be composed out of indexes that already
-/// exist -- including other groups.
+/// exist - including other groups.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Draft {
     Lattice(String),

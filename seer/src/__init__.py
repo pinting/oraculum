@@ -1,4 +1,4 @@
-"""seer -- an SQL syntax graph generator framework built on the `kernel` library.
+"""seer - an SQL syntax graph generator framework built on the `kernel` library.
 
 seer owns the modelling and the syntax graph; `kernel` owns the indexes, the
 active heads walking them and the worker pool that drives them. The split runs

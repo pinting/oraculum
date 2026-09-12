@@ -23,7 +23,7 @@ make live        # main.py --live, model driven
 make distclean   # also removes .venv, to recreate it
 ```
 
-### Interactive mode -- `main.py`
+### Interactive mode - `main.py`
 
 Needs only the vocabulary file. One vocabulary token per line, so a word may
 take several turns.
@@ -36,7 +36,7 @@ python main.py --schema my.sql
 python main.py --no-debug      # without the state blocks
 ```
 
-### Model driven mode -- `main.py --live`
+### Model driven mode - `main.py --live`
 
 Additionally requires `llama-cpp-python` and the
 [gemma-3-4b-it-Q8_0](https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF)

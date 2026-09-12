@@ -1,13 +1,13 @@
 //! The token table every index is built against.
 //!
-//! Loaded from the tiktoken format -- one `<base64 token> <id>` per line -- and
+//! Loaded from the tiktoken format - one `<base64 token> <id>` per line - and
 //! kept as the three lookups the rest of the crate needs: id to token, for
 //! reporting what a head matched; token to id, for accepting input; and
 //! position to id, because the two base structures enumerate the vocabulary in
 //! order and report their hits by position rather than by id.
 //!
-//! The EOS token is dropped on load. Indexes use it as their own terminator --
-//! an accepting `Expression` node offers it as a self loop -- so it must not
+//! The EOS token is dropped on load. Indexes use it as their own terminator -
+//! an accepting `Expression` node offers it as a self loop - so it must not
 //! also be matchable as text.
 
 use std::io::{BufReader, BufRead};
