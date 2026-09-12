@@ -21,9 +21,9 @@ from src.schema import Schema, parse_schema
 VOCABULARY_PATH: Path = Path(__file__).parent.parent.parent / "vocabulary.tiktoken"
 EOS_ID: int = 1
 
-# The schema of `experiments/9-advanced-modelling`: `id` is ambiguous across
-# all three tables, `title` and `body` across two, and the foreign keys form a
-# users <- posts <- comments chain with comments also pointing at users.
+# `id` is ambiguous across all three tables, `title` and `body` across two, and
+# the foreign keys form a users <- posts <- comments chain with comments also
+# pointing at users.
 SCHEMA: str = """
 CREATE TABLE users (
     id BIGINT PRIMARY KEY,

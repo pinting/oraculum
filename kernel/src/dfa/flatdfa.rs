@@ -1,3 +1,14 @@
+//! The transitions of every node in two flat arrays, searched by bisection.
+//!
+//! One offset per node says where its slice of those arrays begins, and the
+//! tokens within a slice are sorted, so a lookup is a binary search over a
+//! handful of contiguous entries with no hashing and no pointer chasing. The
+//! token slice a node offers is already laid out, so `transitions` lends it.
+//!
+//! The offsets are narrowed to the smallest unsigned type that can address the
+//! table, which is what `Offsets` is for: most indexes hold few enough
+//! transitions to be addressed by a `u8`.
+
 use std::borrow::Cow;
 use rustc_hash::{FxHashMap as HashMap};
 

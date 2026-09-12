@@ -1,8 +1,5 @@
 """Unqualified field resolution.
 
-Port of `experiments/9-advanced-modelling/root.py`, replacing
-`seer/src/many_resolver.rs`.
-
 The table space is a Boolean polynomial ring `GF(2)[t1, ..., tn]` from
 SageMath, one variable per table. A field living in tables `{t1..tk}`
 contributes the mutual exclusion polynomial
@@ -15,10 +12,10 @@ others are off", and the sum admits exactly one. A running product
 contradictory, substituting `t = 1` asks whether a table is viable, and
 evaluating with every variable at zero asks whether the query is settled.
 
-Two adaptations for the token driven engine, both explained in the README:
-selections report failure with a bool rather than raising, and `copy()` gives
-each branch of the syntax graph its own `current` while sharing the ring, the
-variables and the constraint table, which are immutable once built.
+Two properties the token driven engine depends on, both explained in the
+README: selections report failure with a bool rather than raising, and `copy()`
+gives each branch of the syntax graph its own `current` while sharing the ring,
+the variables and the constraint table, which are immutable once built.
 """
 
 from __future__ import annotations

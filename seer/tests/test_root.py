@@ -1,8 +1,8 @@
 """`Root` -- the GF(2) mutual exclusion resolver.
 
-Port of the `Root` of `experiments/9-advanced-modelling`, on the same SageMath
-`BooleanPolynomialRing`. `tests/test_experiment_parity.py` checks the port's
-wrapper against the original step for step.
+The running product over SageMath's `BooleanPolynomialRing`: selecting a field
+multiplies its mutual exclusion constraint in, and the questions the FROM
+clause asks are substitutions into what that product became.
 """
 
 from __future__ import annotations
@@ -103,8 +103,8 @@ class TestRoot:
     def test_redundant_table_is_allowed(self) -> None:
         """A table no field needs does not contradict anything on its own.
 
-        The experiment behaves the same way; it is the syntax graph that never
-        offers such a table, because it only ever lists the required ones.
+        It is the syntax graph that never offers such a table, because it only
+        ever lists the required ones.
         """
 
         root: Root = Root(TABLES)

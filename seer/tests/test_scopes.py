@@ -141,8 +141,11 @@ class TestScopes:
         assert scopes.is_satisfied()
 
     def test_failed_first_field_leaves_no_scope(self) -> None:
-        """The experiment registers the scope before narrowing it, so a failed
-        first field leaves an empty scope behind that requires every table."""
+        """A scope is only registered once its first field has narrowed it.
+
+        Registering first would leave an empty scope behind on failure, and an
+        empty scope requires every table in the schema.
+        """
 
         scopes: Scopes = Scopes(TABLES)
 

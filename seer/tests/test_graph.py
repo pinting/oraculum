@@ -3,8 +3,8 @@
     SELECT <fields> FROM <entry> [, <entry>]* ;
     <entry> := <table> [AS <alias>] [<join type> <table> [AS <alias>] ON a = b]*
 
-Rejection is the interesting half: it is what the modelling of
-`experiments/9-advanced-modelling` buys over a plain grammar.
+Rejection is the interesting half: it is what the modelling buys over a plain
+grammar, which would accept any table after FROM and any column before it.
 """
 
 from __future__ import annotations

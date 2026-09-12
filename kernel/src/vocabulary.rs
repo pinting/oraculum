@@ -1,3 +1,15 @@
+//! The token table every index is built against.
+//!
+//! Loaded from the tiktoken format -- one `<base64 token> <id>` per line -- and
+//! kept as the three lookups the rest of the crate needs: id to token, for
+//! reporting what a head matched; token to id, for accepting input; and
+//! position to id, because the two base structures enumerate the vocabulary in
+//! order and report their hits by position rather than by id.
+//!
+//! The EOS token is dropped on load. Indexes use it as their own terminator --
+//! an accepting `Expression` node offers it as a self loop -- so it must not
+//! also be matchable as text.
+
 use std::io::{BufReader, BufRead};
 use std::fs::File;
 use std::sync::Arc;
@@ -71,8 +83,8 @@ impl<T> Vocabulary<T> where T: Number {
         Some(vocabulary)
     }
 
-    // EOS = 1 for pre-trained Gemma 3 model
-    // EOS = 106 for instruction-tuned Gemma 3 model
+    /// `eos_id` for the models this was built against: 1 for the pre-trained
+    /// Gemma 3 vocabulary, 106 for the instruction-tuned one.
     pub fn new(data: &[u8], eos_id: T) -> Option<Self> {
         let mut vocabulary = Self {
             token_to_id: HashMap::default(),

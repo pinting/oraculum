@@ -1,3 +1,22 @@
+//! A regular expression, as a DFA over vocabulary tokens.
+//!
+//! Derivre gives a DFA over *bytes*, generated lazily by Brzozowski
+//! derivatives. What a generator needs is a DFA over *tokens*, so this explores
+//! the byte automaton breadth first and, at each state it reaches, asks a
+//! TokTrie which whole tokens that state would accept. Every such token becomes
+//! one edge, and every state an edge leads to becomes a node.
+//!
+//! That exploration is what makes building an index expensive -- it is the
+//! whole reachable automaton, not a lazy slice of it -- which is why the result
+//! is packed into a `DFA` layout that makes the lookups afterwards cheap, and
+//! why the factory goes to some trouble never to build one twice.
+//!
+//! An accepting state gets the EOS token as a self loop, so acceptance is
+//! answered by the same table as everything else.
+//!
+//! `base` builds the TokTrie. Like the Aho-Corasick base it depends on nothing
+//! but the vocabulary, so it is built once and shared.
+
 use derivre::{Regex, RegexBuilder, StateID};
 use toktrie::TokRxInfo;
 use std::cell::{RefCell};
@@ -72,12 +91,10 @@ where
     ) -> Option<Self> {
         let eos_id = vocabulary.get_eos_id();
 
-        // Build the regular expression engine
         let mut rb = RegexBuilder::new();
         let exp = rb.mk_regex(expression).ok()?;
         let mut rx = rb.into_regex(exp);
 
-        // Initialize
         let start_state = rx.initial_state();
 
         let mut next_node_id = 0;
@@ -93,14 +110,15 @@ where
 
         let mut transitions: HashMap<N, HashMap<T, N>> = HashMap::default();
 
-        // Explore the lazy generated graph of Derivre
+        // Derivre generates its automaton lazily, so a state only exists once
+        // it has been asked for; this walk is what forces the whole of it.
         while let Some(current_state) = queue.pop_front() {
             let current_node = *state_to_node.get(&current_state).unwrap();
 
             if rx.is_accepting(current_state) {
-                // Self-loop for EOS: this is needed so the transitions()
-                // give back the terminating token ID when an accepting state
-                // is reached
+                // A self loop on EOS, so that `transitions` offers the
+                // terminating token at an accepting state and `accepting` can
+                // be answered by the same table as everything else.
                 transitions
                     .entry(current_node)
                     .or_default()

@@ -1,3 +1,12 @@
+//! `Expression` and its TokTrie base, exposed to Python.
+//!
+//! For callers that want to own an index outright and walk it themselves, node
+//! id in hand. `Factory` is the other way round, where the index stays in the
+//! kernel and only its id comes back.
+//!
+//! The base is its own class because it is the expensive half and is shared by
+//! every expression built from it.
+
 use pyo3::prelude::*;
 use numpy::{PyArray1, PyArrayMethods};
 use toktrie::TokTrie;

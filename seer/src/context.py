@@ -1,28 +1,22 @@
 """Generation state shared by the nodes of the syntax graph.
 
-This is `seer/src/context.rs` rebuilt around the modelling entities of
-`experiments/9-advanced-modelling`. Where the Rust `Context` held a
-`ManyResolver` plus a map of `OneResolver`s and could only answer "which tables
-are still required", this one owns a `Conflicts` and a `Relationships` and
-tracks the query through both phases the experiment models:
+A context owns a `Conflicts` and a `Relationships`, and tracks the query
+through the two phases a SELECT is resolved in:
 
 1. **fields** -- `Conflicts` narrows the table space as fields are selected,
    qualified by an alias or not.
 2. **FROM / JOIN** -- `Relationships` walks the foreign key graph to connect
    the tables `Conflicts` ended up requiring.
 
-The experiment runs those phases as two separate menu loops with a hard
-boundary between them. seer has the same boundary, but it falls on a token: the
-`FROM` keyword. `enter_from()` is what the selector on that keyword calls, and
-it is where the join graph is built, because only then is the required table set
-final.
+The boundary between them falls on a token: the `FROM` keyword. `enter_from()`
+is what the selector on that keyword calls, and it is where the join graph is
+built, because only then is the required table set final.
 
 Everything a thunk asks is ordered and side effect free, and everything a
 selector applies happens on a `copy()`, so branches never see each other.
 
-Every operation that modifies a context traces the whole resolver state, the
-way the experiment's TUI reprints it after each menu choice. See `debug.py`;
-tracing is off until a driver enables it.
+Every operation that modifies a context traces the whole resolver state. See
+`debug.py`; tracing is off until a driver enables it.
 """
 
 from __future__ import annotations
@@ -229,10 +223,10 @@ class Context:
         return self._conflicts.is_satisfied()
 
     def __str__(self) -> str:
-        """The state block the experiment's TUI reprints after every choice.
+        """The state block `debug.py` prints after every modifying operation.
 
-        `Conflicts.__str__` supplies the first six lines; the last is what the
-        experiment's `Relationships.__str__` appended once phase two began.
+        `Conflicts.__str__` supplies the first six lines; the last is the FROM
+        clause as `Relationships` has it so far, empty until phase two begins.
         """
 
         references: str = "" if self._relationships is None else str(self._relationships)

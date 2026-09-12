@@ -1,14 +1,13 @@
 """Debug tracing for `Context`.
 
-`experiments/9-advanced-modelling` prints the whole resolver state after every
-menu choice, which is what makes its two loops readable. seer has no menu, so
-the equivalent is to print the same block after every operation that modifies a
-`Context`.
+What makes a resolver readable is seeing the whole state after every step, so
+every operation that modifies a `Context` prints one block: a heading naming
+what was applied, then the state it produced.
 
-Tracing is off by default, so importing the library stays silent; the drivers
-turn it on. It is cheap to leave on: selectors only run when a cursor reaches an
-accepting state, so a whole statement produces a handful of blocks rather than
-one per speculative expansion.
+Tracing is off by default, so importing the library stays silent; the driver
+turns it on. It is cheap to leave on: selectors only run when a cursor reaches
+an accepting state, so a whole statement produces a handful of blocks rather
+than one per speculative expansion.
 """
 
 from __future__ import annotations

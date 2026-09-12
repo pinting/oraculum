@@ -1,3 +1,8 @@
+//! `Vocabulary`, exposed to Python.
+//!
+//! Token ids cross the boundary as `u64` whatever width the kernel was built
+//! with, so the Python surface does not change when `T` does.
+
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 use std::sync::Arc;

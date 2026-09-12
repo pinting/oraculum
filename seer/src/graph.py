@@ -1,13 +1,7 @@
 """The SQL SELECT syntax graph.
 
-`seer/src/graph.rs` rebuilt on the modelling of
-`experiments/9-advanced-modelling`. The Rust graph could only emit a flat table
-list:
-
-    SELECT <fields> FROM <tables>;
-
-The experiment resolves the FROM clause by walking the foreign key graph
-instead, so the language grows a JOIN:
+The language, which resolves its FROM clause by walking the foreign key graph
+rather than by listing tables flat:
 
     SELECT <fields> FROM <entry> [, <entry>]* ;
     <entry>  := <table> [AS <alias>] [<join>]*
@@ -15,12 +9,12 @@ instead, so the language grows a JOIN:
     <fields> := <field ref> [, <field ref>]*
     <field ref> := <field> | <alias>.<field>
 
-The two menu loops of the experiment's TUI map onto the graph directly. Its
-outer FROM loop is `from_entry` plus `finish`, its inner JOIN loop is `joins`,
-and the phase boundary between them is the `FROM` keyword, whose selector calls
-`Context.enter_from` to build the join graph.
+Two loops shape the FROM clause: the outer one over entries is `from_entry`
+plus `finish`, the inner one over joins is `joins`. The phase boundary ahead of
+them is the `FROM` keyword, whose selector calls `Context.enter_from` to build
+the join graph.
 
-Every combinator still returns a `Thunk`, so nodes only exist once a context is
+Every combinator returns a `Thunk`, so nodes only exist once a context is
 pushed through them, which is what lets the alternatives depend on what has
 already been selected.
 """

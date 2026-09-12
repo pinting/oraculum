@@ -1,3 +1,14 @@
+//! The integer types an index is addressed with.
+//!
+//! Node ids (`N`) and token ids (`T`) are generic over this trait rather than
+//! fixed, because the two are sized independently: a token id has to span the
+//! whole vocabulary, while most indexes hold a few hundred nodes. Narrowing the
+//! node side shrinks every transition table in the crate, and the layouts in
+//! `dfa` narrow their offsets further still, per index.
+//!
+//! `GOLDEN_RATIO` is the multiplier `FastHashDFA` scatters token ids with; why
+//! that constant is at the bottom of that module.
+
 use std::ops::{Add, AddAssign, BitAnd, Div, Mul, Sub};
 use std::fmt::Debug;
 use std::hash::Hash;

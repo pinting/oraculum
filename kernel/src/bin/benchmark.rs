@@ -1,3 +1,16 @@
+//! Which `DFA` layout to build `Expression` on.
+//!
+//!     cargo run --release --bin benchmark
+//!
+//! Builds every pattern below on each layout in turn and reports four boards:
+//! the time to look one transition up, the time to ask a node for its whole
+//! route set, the time to build the index, and the memory it then holds.
+//!
+//! Lookup and scan are the ones that decide it, because both run on every token
+//! fed -- a scan per live head to offer the routes, then a lookup per head to
+//! advance it. The layout is a type parameter, so this has to be a Rust binary:
+//! the Python extension is compiled against one layout and cannot compare them.
+
 use std::sync::Arc;
 use std::time::Instant;
 

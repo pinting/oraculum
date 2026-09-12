@@ -1,7 +1,7 @@
 """`Context` -- the generation state built on `Conflicts` and `Relationships`.
 
-Covers both phases the experiment models and the boundary between them, plus
-the copy-on-write cloning the engine depends on.
+Covers both phases and the boundary between them, plus the copy-on-write
+cloning the engine depends on.
 """
 
 from __future__ import annotations
@@ -219,9 +219,9 @@ class TestCopy:
         assert ctx.relationships is None
 
 class TestDisplay:
-    """`Context.__str__` is the state block the experiment's TUI reprints."""
+    """`Context.__str__` is the state block `debug.py` prints."""
 
-    def test_block_has_the_experiment_layout(self, schema: Schema) -> None:
+    def test_block_has_every_line(self, schema: Schema) -> None:
         ctx: Context = Context(schema)
 
         ctx.use_field("email")

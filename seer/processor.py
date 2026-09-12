@@ -1,9 +1,10 @@
 """llama.cpp logits processor.
 
-Port of `seer/processor.py`. The Rust build reached into the `seer` extension
-module for `routes` / `feed`; the port reaches into `core` instead, which holds
-the same state.
+Masks every token the syntax graph would reject, so sampling can only land on a
+legal one: the scores of the tokens `Engine.routes` offers are left alone and
+everything else is driven to `-inf`.
 
+The engine comes from `core`, which is the module state the driver sets up.
 Passing an `Engine` explicitly bypasses `core` and drives that engine directly,
 which is what the tests do.
 """
@@ -44,10 +45,10 @@ class LogitsProcessor:
         return scores + self._mask
 
     def feed(self, token_id: int) -> int:
-        """Consume a sampled token. Returns 0 on success, as in the Rust API.
+        """Consume a sampled token: 0 when it was accepted, 1 when it was not.
 
-        Unlike `seer/src/lib.rs`, which discarded the engine's own result, a
-        token the graph rejects is reported as 1 so the generation loop stops.
+        A rejected token is reported rather than swallowed, so the generation
+        loop stops instead of sampling on against an engine with no live heads.
         """
 
         if self._engine is None:

@@ -1,3 +1,11 @@
+//! The head pool, exposed to Python.
+//!
+//! The interesting half is the resolver bridge. A feed runs with the GIL
+//! dropped, so each notification takes it back, calls into Python and lets it
+//! go again. A callback that raises must not unwind through Rust, so the error
+//! is parked, the runner is told to stop asking, and it is re-raised once the
+//! feed has returned.
+
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;

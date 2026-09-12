@@ -1,3 +1,14 @@
+//! Indexes from Rust, owned and walked by hand.
+//!
+//!     cargo run --bin example
+//!
+//! The static half of the API: build a `Lattice` and an `Expression` directly
+//! and walk each by node id, reading a token at a time from stdin. No factory,
+//! no head pool and no graph -- the three indexes are simply walked in turn,
+//! which is enough to see what an index is before anything is layered on it.
+//!
+//! `runner.rs` is the dynamic half.
+
 use aho_corasick::AhoCorasickKind;
 use std::error::Error;
 use std::io::{self, Write};
