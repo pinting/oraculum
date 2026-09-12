@@ -1,0 +1,290 @@
+# A group carries one `expect` and the queries it applies to, so the
+# expectation is written once per idea rather than once per line and the name
+# says what the idea was.
+#
+#   expect: completed    feeding the query one character at a time must reach
+#                        EOF with the statement completed
+#   expect: stuck        the feed must get stuck first - some character is one
+#                        the graph never offered
+#
+# Whitespace is load bearing here, so a query that has any at either end, or
+# that mixes tabs into it, is written double quoted with the escapes visible.
+# A query that runs over several lines is a `|-` block, which keeps every
+# newline but the last.
+
+- group: the root README's own examples
+  expect: completed
+  queries:
+    - SELECT email, first_name FROM users;
+    - SELECT u.email, u.first_name FROM users AS u;
+    - SELECT email, body FROM users, comments;
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id;
+    - SELECT email, title FROM users FULL JOIN posts ON users.id = posts.user_id;
+    - SELECT title, c.body FROM posts LEFT JOIN comments AS c ON posts.id = c.post_id;
+    - |-
+      SELECT email, title, c.body
+      FROM users
+      INNER JOIN posts ON users.id = posts.user_id
+      INNER JOIN comments AS c ON posts.id = c.post_id;
+    - SELECT email FROM users WHERE created_at IS NOT NULL;
+    - SELECT email FROM users WHERE first_name LIKE 'A%';
+    - |-
+      SELECT email, title
+      FROM users
+      INNER JOIN posts ON users.id = posts.user_id
+      WHERE created_at < published_at;
+    - SELECT email FROM users WHERE email = 'a' AND users.id > 1;
+    - SELECT email FROM users WHERE NOT email LIKE 'a%';
+    - SELECT email FROM users WHERE (email = 'a' OR email = 'b') AND NOT users.id = 1;
+
+- group: the projection
+  expect: completed
+  queries:
+    - SELECT email FROM users;
+    - SELECT first_name, last_name, email FROM users;
+    - SELECT title, body FROM posts;
+    - SELECT verified FROM users;
+    - SELECT published_at FROM posts;
+    # The same field twice says nothing new, and the algebra says so with no
+    # special case: its constraint is idempotent.
+    - SELECT email, email FROM users;
+    # The comma carries its own whitespace on both sides, so all four of these
+    # spellings are the one separator.
+    - SELECT email,first_name FROM users;
+    - SELECT email ,first_name FROM users;
+    - SELECT email , first_name FROM users;
+    - |-
+      SELECT email,
+      first_name FROM users;
+    - "SELECT email\t,\tfirst_name FROM users;"
+
+- group: whitespace, where it is free
+  expect: completed
+  queries:
+    - SELECT  email  FROM  users;
+    - "SELECT                 email FROM users;"
+    - "SELECT\temail\tFROM\tusers;"
+    - |-
+      SELECT
+      email
+      FROM
+      users;
+    - "SELECT \t\n email \n\t FROM \t\n users;"
+
+- group: aliases
+  expect: completed
+  queries:
+    - SELECT u.email FROM users AS u;
+    - SELECT u2.email FROM users AS u2;
+    - SELECT _u.email FROM users AS _u;
+    # `users` is a table name and so excluded, but the group only ever removes
+    # the right to stop - one more character and the identifier is free.
+    - SELECT users2.email FROM users AS users2;
+    - SELECT x.email, x.verified FROM users AS x;
+    - SELECT p.title, p.body FROM posts AS p;
+    - SELECT u.email, title FROM users AS u, posts;
+
+- group: the FROM clause
+  expect: completed
+  queries:
+    - SELECT email, title FROM users ,posts;
+    - |-
+      SELECT email, title FROM users
+      ,
+      posts;
+    - SELECT email, title FROM users LEFT JOIN posts ON users.id = posts.user_id;
+    - SELECT email, title FROM users RIGHT JOIN posts ON users.id = posts.user_id;
+    - SELECT email, body FROM users INNER JOIN comments ON users.id = comments.user_id;
+    - SELECT u.email, title FROM users AS u INNER JOIN posts ON u.id = posts.user_id;
+    # A join is offered for being a foreign key neighbour, not for being
+    # required: nothing here needs `comments` and the clause is still legal.
+    - SELECT email FROM users INNER JOIN comments ON users.id = comments.user_id;
+
+- group: the WHERE clause
+  expect: completed
+  queries:
+    # Numeric, against the literal pattern its class names.
+    - SELECT email FROM users WHERE users.id = 1;
+    - SELECT email FROM users WHERE users.id != -1;
+    - SELECT email FROM users WHERE users.id >= -1;
+    - SELECT email FROM users WHERE users.id <= 100;
+    - SELECT email FROM users WHERE users.id > 3.5;
+    # Text, which is the only class that may be matched against a pattern.
+    - SELECT email FROM users WHERE email LIKE '%keyword%';
+    - SELECT email FROM users WHERE email NOT LIKE '%a%';
+    - SELECT email FROM users WHERE email = '';
+    # Boolean and temporal.
+    - SELECT email FROM users WHERE verified = TRUE;
+    - SELECT email FROM users WHERE verified != FALSE;
+    - SELECT email FROM users WHERE created_at > '2024-01-31';
+    - SELECT email FROM users WHERE created_at = '2024-01-31 12:30:00';
+    # Only a column that can actually be null may be tested for it.
+    - SELECT email FROM users WHERE created_at IS NULL;
+    - SELECT title FROM posts WHERE published_at IS NOT NULL;
+    # A column may stand opposite another of its own class.
+    - SELECT title FROM posts WHERE title = body;
+    - SELECT email FROM users WHERE first_name = last_name;
+    # Connectives, negation and brackets.
+    - SELECT email FROM users WHERE verified = TRUE AND created_at IS NULL;
+    - SELECT email FROM users WHERE verified = TRUE OR verified = FALSE;
+    - SELECT email FROM users WHERE NOT verified = TRUE;
+    - SELECT email FROM users WHERE NOT (email = 'a');
+    - SELECT email FROM users WHERE ( email = 'a' );
+    - |-
+      SELECT email FROM users WHERE (
+      email = 'a'
+      );
+    - SELECT email FROM users WHERE (email = 'a' AND (users.id = 1 OR users.id = 2));
+    # Three brackets deep is the limit, and three is reachable.
+    - SELECT email FROM users WHERE ((email = 'a'));
+    - SELECT email FROM users WHERE (((email = 'a')));
+    # A filter may name a column the projection never asked for, and both
+    # sides of a join are in the one virtual table.
+    - SELECT u.email FROM users AS u WHERE u.verified = TRUE;
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id WHERE title LIKE 'a%';
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id WHERE users.id = posts.user_id;
+
+- group: whitespace, where it is not free
+  expect: stuck
+  queries:
+    # The terminator follows the clause directly; nothing separates them.
+    - SELECT email FROM users ;
+    # A keyword needs whitespace on the side it meets a name on.
+    - SELECTemail FROM users;
+    - SELECT emailFROM users;
+    - SELECT email FROM users WHEREverified = TRUE;
+    - SELECT email FROM usersWHERE verified = TRUE;
+    # A condition has whitespace on both sides of its operator, always.
+    - SELECT email FROM users WHERE users.id>1;
+    - SELECT email FROM users WHERE users.id >1;
+    - SELECT email FROM users WHERE users.id> 1;
+    - SELECT email,title FROM users INNER JOIN posts ON users.id=posts.user_id;
+    # The qualifying dot has none on either side.
+    - SELECT email FROM users WHERE users . id = 1;
+    - SELECT u . email FROM users AS u;
+    # Nothing precedes SELECT and nothing follows the semicolon.
+    - " SELECT email FROM users;"
+    - "SELECT email FROM users;\n"
+
+- group: aliases that are not in scope
+  expect: stuck
+  queries:
+    # An alias is introduced in the projection and nowhere else, so neither
+    # half of this pair can stand on its own.
+    - SELECT u.email FROM users;
+    - SELECT email FROM users AS u;
+    # A renamed source answers to its alias afterwards and to nothing else.
+    - SELECT u.email FROM users AS u WHERE users.verified = TRUE;
+    - SELECT u.email, title FROM users AS u INNER JOIN posts ON users.id = posts.user_id;
+    # A table name qualifies nothing until the FROM clause has placed it, and
+    # an alias may not be a name that already spells something.
+    - SELECT users.email FROM users;
+    - SELECT users.email FROM users AS users;
+    - SELECT SELECT.email FROM users AS SELECT;
+
+- group: joins the schema cannot answer
+  expect: stuck
+  queries:
+    # The ON columns are read off the foreign key, not chosen.
+    - SELECT email, title FROM users INNER JOIN posts ON posts.user_id = users.id;
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.id;
+    - SELECT email, body FROM users INNER JOIN comments ON users.id = comments.post_id;
+    # Four join types, and these are not among them.
+    - SELECT email, title FROM users JOIN posts ON users.id = posts.user_id;
+    - SELECT email, title FROM users CROSS JOIN posts ON users.id = posts.user_id;
+    # A join clause is not a join clause without its ON.
+    - SELECT email, title FROM users INNER JOIN posts users.id = posts.user_id;
+    - SELECT email FROM users INNER JOIN posts;
+
+- group: names the selection has ruled out
+  expect: stuck
+  queries:
+    # `body` lives on posts and comments, so it says exactly one of them is
+    # where it came from - naming both contradicts it.
+    - SELECT email, body FROM users, posts, comments;
+    - SELECT title, body FROM posts INNER JOIN comments ON posts.id = comments.post_id;
+    - SELECT email, body FROM users INNER JOIN comments ON users.id = comments.user_id FULL JOIN posts ON comments.post_id = posts.id;
+    # Inside a clause the rule is SQL's own: two nodes supply `id`, so the
+    # bare name is refused rather than resolved.
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id WHERE id = 1;
+
+- group: types that do not meet
+  expect: stuck
+  queries:
+    # Ordering belongs to the classes that have an order, matching to text
+    # alone, equality to all of them.
+    - SELECT email FROM users WHERE email < 5;
+    - SELECT email FROM users WHERE users.id LIKE 'a%';
+    - SELECT email FROM users WHERE verified > TRUE;
+    # Only a column that may be null may be tested for it, and a primary key
+    # never may, however it was declared.
+    - SELECT email FROM users WHERE users.id IS NULL;
+    - SELECT email FROM users WHERE email IS NULL;
+    # The other side has to be of the column's own class.
+    - SELECT email FROM users WHERE email = users.id;
+    - SELECT email FROM users WHERE users.id = '1';
+    # A literal has to spell the pattern its class names.
+    - SELECT email FROM users WHERE created_at > '2024';
+    - SELECT email FROM users WHERE verified = true;
+    # Comparing a column with itself says nothing, however it is spelled.
+    - SELECT email FROM users WHERE email = email;
+    - SELECT email FROM users WHERE email = users.email;
+
+- group: the WHERE clause, past what it offers
+  expect: stuck
+  queries:
+    # Three brackets deep is the limit; the fourth is never opened.
+    - SELECT email FROM users WHERE ((((email = 'a'))));
+    - SELECT email FROM users WHERE (email = 'a';
+    - SELECT email FROM users WHERE email = 'a');
+    # One NOT in front of a predicate, one connective between two.
+    - SELECT email FROM users WHERE NOT NOT verified = TRUE;
+    - SELECT email FROM users WHERE verified = TRUE AND OR verified = FALSE;
+
+- group: names the schema does not have
+  expect: stuck
+  queries:
+    - SELECT nickname FROM users;
+    - SELECT email FROM accounts;
+    - SELECT email FROM users WHERE nickname = 'a';
+
+- group: outside the subset
+  expect: stuck
+  queries:
+    # Every keyword is upper case.
+    - select email from users;
+    - Select Email From Users;
+    # The projection is columns, bare or qualified - nothing else.
+    - SELECT * FROM users;
+    - SELECT DISTINCT email FROM users;
+    - SELECT email AS e FROM users;
+    - SELECT COUNT(id) FROM users;
+    - SELECT 1 FROM users;
+    # No clause follows the WHERE clause.
+    - SELECT email FROM users GROUP BY email;
+    - SELECT email FROM users ORDER BY email;
+    - SELECT email FROM users LIMIT 10;
+    # A condition is one operator between two operands.
+    - SELECT email FROM users WHERE users.id IN (1, 2);
+    - SELECT email FROM users WHERE users.id BETWEEN 1 AND 2;
+    - SELECT email FROM users WHERE users.id = (SELECT id FROM posts);
+    # One statement, and it is a SELECT.
+    - SELECT email FROM users UNION SELECT email FROM users;
+    - INSERT INTO users VALUES (1);
+    - UPDATE users SET email = 'a';
+    - DELETE FROM users;
+
+- group: statements that never terminate
+  expect: stuck
+  queries:
+    # EOF with the statement unfinished is stuck too: the graph is still
+    # waiting, so what was fed was not a statement.
+    - SELECT email FROM users
+    - SELECT FROM users;
+    - SELECT email users;
+    - SELECT email FROM;
+    - SELECT email FROM users WHERE;
+    - SELECT email FROM users WHERE verified = TRUE AND;
+    # The terminator ends it, and nothing may follow.
+    - SELECT email FROM users;;
+    - SELECT email FROM users; SELECT email FROM users;

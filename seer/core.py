@@ -11,6 +11,8 @@ exception, because the initialisation steps are also called one at a time.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -21,31 +23,16 @@ from src import Engine, IndexFactory, Schema, parse_schema, root
 VOCABULARY_PATH: str = "../vocabulary.tiktoken"
 EOS_ID: int = 1
 
-SCHEMA: str = """
-CREATE TABLE users (
-    id BIGINT PRIMARY KEY,
-    first_name VARCHAR(255) NOT NULL,
-    last_name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    verified BOOLEAN,
-    created_at TIMESTAMP
-);
+# The schema the drivers fall back on, kept next to this file rather than
+# inline so the engine and the integration harness can be pointed at the same
+# text and `--schema` stays the only way a different one arrives.
+SCHEMA_PATH: Path = Path(__file__).parent / "schema.sql"
 
-CREATE TABLE posts (
-    id BIGINT PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id),
-    title VARCHAR(255) NOT NULL,
-    body TEXT NOT NULL,
-    published_at TIMESTAMP
-);
+def load_schema(path: Path | str = SCHEMA_PATH) -> str:
+    with open(path, "r", encoding="utf-8") as handle:
+        return handle.read()
 
-CREATE TABLE comments (
-    id BIGINT PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id),
-    post_id BIGINT NOT NULL REFERENCES posts(id),
-    body TEXT NOT NULL
-);
-"""
+SCHEMA: str = load_schema()
 
 schema: str = SCHEMA
 
