@@ -154,6 +154,8 @@ semicolon.
 
 Two things have to be true of every statement the system produces. It has to be **grammatical** - a well formed `SELECT`. And it has to be **meaningful** - a query the schema can actually answer. Both are enforced one token at a time, while the model is writing, so neither is ever checked after the fact.
 
+**A recording about running the engine in interactive mode.**
+
 ![Preview](preview.gif)
 
 ## Architecture
