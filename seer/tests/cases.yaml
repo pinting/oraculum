@@ -337,3 +337,300 @@
     # The terminator ends it, and nothing may follow.
     - SELECT email FROM users;;
     - SELECT email FROM users; SELECT email FROM users;
+
+- group: whitespace stretched as far as it goes
+  expect: completed
+  queries:
+    # Runs of whitespace far past anything a writer would type, in
+    # every position the grammar leaves free.
+    - "SELECT                email                FROM                users                ;"
+    - "SELECT\t\t\t\temail\t\t\t\tFROM\t\t\t\tusers\t\t\t\t;"
+    - "SELECT\n\n\n\nemail\n\n\n\nFROM\n\n\n\nusers\n\n\n\n;"
+    - "SELECT \t\n \t\n email \t\n \t\n FROM \t\n \t\n users \t\n \t\n ;"
+    - "SELECT email\n\t \n\t,\n\t \n\tfirst_name FROM users;"
+    - "SELECT email                ,                first_name FROM users;"
+    - "SELECT email, body FROM users                ,                comments;"
+    - "SELECT email, title FROM users\n\n\nINNER JOIN\n\n\nposts\n\n\nON\n\n\nusers.id\n\n\n=\n\n\nposts.user_id;"
+    - "SELECT u.email FROM users\t\tAS\t\tu;"
+    - "SELECT email FROM users\n\nWHERE\n\nverified\n\n=\n\nTRUE;"
+    - "SELECT email FROM users WHERE verified = TRUE\n\n\tAND\n\n\tcreated_at IS NULL;"
+    - "SELECT email FROM users WHERE email                LIKE                'a%';"
+
+- group: whitespace inside the brackets
+  expect: completed
+  queries:
+    # `(` carries the whitespace after it and `)` the whitespace before,
+    # so a bracket never needs an index that accepts the empty word.
+    - "SELECT email FROM users WHERE (\t\temail = 'a'\t\t);"
+    - "SELECT email FROM users WHERE (\n\n\nemail = 'a'\n\n\n);"
+    - "SELECT email FROM users WHERE (                email = 'a'                );"
+    - SELECT email FROM users WHERE ( NOT email = 'a' );
+    - "SELECT email FROM users WHERE (\tNOT\t(\tNOT\temail = 'a'\t)\t);"
+    - "SELECT email FROM users WHERE ((\t(\temail = 'a'\t)\t));"
+    - SELECT email FROM users WHERE ( email = 'a' AND ( users.id = 1 OR ( verified = TRUE ) ) );
+    - "SELECT email FROM users WHERE (email = 'a')\n\t;"
+
+- group: aliases the exclusion group lets through
+  expect: completed
+  queries:
+    # A strict prefix of a reserved name is not that name - no exclusion
+    # accepts yet, so the group may end.
+    - SELECT user.email FROM users AS user;
+    - SELECT emai.email FROM users AS emai;
+    - SELECT usersX.email FROM users AS usersX;
+    - SELECT users_.email FROM users AS users_;
+    - SELECT post.title FROM posts AS post;
+    # Past the name, the exclusion died on the extra character.
+    - SELECT email2.email FROM users AS email2;
+    - SELECT SELECTED.email FROM users AS SELECTED;
+    - SELECT NOTHING.email FROM users AS NOTHING;
+    - SELECT ONE.email FROM users AS ONE;
+    # A bare underscore is an identifier, and nothing reserves it.
+    - SELECT _.email FROM users AS _;
+    - SELECT __.email FROM users AS __;
+    - SELECT _1.email FROM users AS _1;
+    # The reserved list carries each keyword upper and lower cased, and
+    # neither of these is either. Then one as long as an alias gets.
+    - SELECT Select.email FROM users AS Select;
+    - SELECT WhErE.email FROM users AS WhErE;
+    - SELECT abcdefghijklmnopqrstuvwxyz0123456789.email FROM users AS abcdefghijklmnopqrstuvwxyz0123456789;
+
+- group: aliases the exclusion group blocks
+  expect: stuck
+  queries:
+    # A table name, a column name, and a keyword in both of its cases.
+    - SELECT posts.title FROM posts AS posts;
+    - SELECT comments.body FROM comments AS comments;
+    - SELECT INNER.email FROM users AS INNER;
+    - SELECT email.email FROM users AS email;
+    - SELECT verified.email FROM users AS verified;
+    - SELECT id.email FROM users AS id;
+    - SELECT WHERE.email FROM users AS WHERE;
+    - SELECT select.email FROM users AS select;
+    - SELECT where.email FROM users AS where;
+    - SELECT AS.email FROM users AS AS;
+    - SELECT ON.email FROM users AS ON;
+    - SELECT NULL.email FROM users AS NULL;
+    # An identifier cannot open with a digit.
+    - SELECT 1u.email FROM users AS 1u;
+
+- group: numeric literals at their edges
+  expect: completed
+  queries:
+    # `-?[0-9]+(\.[0-9]+)?` says nothing about the value, so a leading
+    # zero, a signed zero and thirty digits are all just the shape.
+    - SELECT email FROM users WHERE users.id = 0;
+    - SELECT email FROM users WHERE users.id = -0;
+    - SELECT email FROM users WHERE users.id = 000;
+    - SELECT email FROM users WHERE users.id = 0.0;
+    - SELECT email FROM users WHERE users.id = -0.0;
+    - SELECT email FROM users WHERE users.id = 00.00;
+    - SELECT email FROM users WHERE users.id > 123456789012345678901234567890;
+    - SELECT email FROM users WHERE users.id < -123456789012345678901234567890;
+    - SELECT email FROM users WHERE users.id >= 1.000000000000000000000001;
+    - SELECT email FROM users WHERE users.id != -9.9;
+
+- group: numbers the pattern refuses
+  expect: stuck
+  queries:
+    # The dot needs digits on both sides, the sign has to touch, and
+    # there is no exponent, no radix prefix and no separator.
+    - SELECT email FROM users WHERE users.id = 1.;
+    - SELECT email FROM users WHERE users.id = .5;
+    - SELECT email FROM users WHERE users.id = --1;
+    - SELECT email FROM users WHERE users.id = +1;
+    - SELECT email FROM users WHERE users.id = 1.2.3;
+    - SELECT email FROM users WHERE users.id = 1e5;
+    - SELECT email FROM users WHERE users.id = 0x1;
+    - SELECT email FROM users WHERE users.id = 1_000;
+    - SELECT email FROM users WHERE users.id = - 1;
+
+- group: text literals that spell the language back
+  expect: completed
+  queries:
+    - SELECT email FROM users WHERE email = ' ';
+    - "SELECT email FROM users WHERE email = '\\';"
+    - SELECT email FROM users WHERE email = '%';
+    - SELECT email FROM users WHERE email = '_';
+    - SELECT email FROM users WHERE email = '%%%';
+    # The terminator inside a literal is not the terminator.
+    - SELECT email FROM users WHERE email = 'a;b';
+    - SELECT email FROM users WHERE email = ';';
+    # Nor is a keyword, a bracket or a comma; `[^']*` reads them all as
+    # characters.
+    - SELECT email FROM users WHERE email = 'SELECT * FROM users;';
+    - SELECT email FROM users WHERE email = 'WHERE (a AND b)';
+    - SELECT email FROM users WHERE email LIKE '%, %';
+    - SELECT email FROM users WHERE email = 'users.email';
+    # A character class matches a newline and a tab like anything else,
+    # so a literal spans lines.
+    - "SELECT email FROM users WHERE email = 'a\nb';"
+    - "SELECT email FROM users WHERE email = 'a\tb';"
+    - SELECT email FROM users WHERE email LIKE 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+- group: text literals that do not close
+  expect: stuck
+  queries:
+    # A literal runs from one quote to the next, and that is the whole
+    # rule - there is no escape and no doubling.
+    - SELECT email FROM users WHERE email = 'a;
+    - SELECT email FROM users WHERE email = 'a''b';
+    - "SELECT email FROM users WHERE email = \"a\";"
+    - SELECT email FROM users WHERE email = a;
+    - SELECT email FROM users WHERE email = '';;
+    - SELECT email FROM users WHERE email = ''';
+
+- group: temporal literals at their shape
+  expect: completed
+  queries:
+    # Four digits, two, two, and optionally a time of three more pairs.
+    # Whether the date exists is not the pattern's business.
+    - SELECT email FROM users WHERE created_at = '0000-00-00';
+    - SELECT email FROM users WHERE created_at = '9999-99-99';
+    - "SELECT email FROM users WHERE created_at > '2024-01-31 00:00:00';"
+    - "SELECT email FROM users WHERE created_at < '9999-99-99 99:99:99';"
+    - "SELECT email FROM users WHERE created_at != '2024-12-31 23:59:59';"
+    - "SELECT email FROM users WHERE created_at <= '0001-01-01 01:01:01';"
+
+- group: temporal literals off their shape
+  expect: stuck
+  queries:
+    # One digit short, one separator wrong, one space too many, or a
+    # precision the pattern does not carry.
+    - SELECT email FROM users WHERE created_at = '2024-1-31';
+    - SELECT email FROM users WHERE created_at = '24-01-31';
+    - "SELECT email FROM users WHERE created_at = '2024-01-31 12:30';"
+    - "SELECT email FROM users WHERE created_at = '2024-01-31T12:30:00';"
+    - "SELECT email FROM users WHERE created_at = '2024-01-31  12:30:00';"
+    - "SELECT email FROM users WHERE created_at = '2024-01-31 12:30:00.5';"
+    - SELECT email FROM users WHERE created_at = '2024/01/31';
+    - SELECT email FROM users WHERE created_at = 20240131;
+    - SELECT email FROM users WHERE created_at = '2024-01-31 ';
+    - SELECT email FROM users WHERE created_at = ' 2024-01-31';
+
+- group: booleans, and what is not one
+  expect: completed
+  queries:
+    # Two spellings, and equality is the only thing a boolean takes.
+    - SELECT email FROM users WHERE verified != TRUE;
+    - SELECT email FROM users WHERE verified = TRUE AND verified = FALSE;
+    - SELECT email FROM users WHERE verified = FALSE;
+    - SELECT email FROM users WHERE NOT verified = FALSE;
+
+- group: booleans the pattern refuses
+  expect: stuck
+  queries:
+    # `TRUE|FALSE` is the whole pattern, and a boolean has no order and
+    # no pattern matching.
+    - SELECT email FROM users WHERE verified = True;
+    - SELECT email FROM users WHERE verified = tRuE;
+    - SELECT email FROM users WHERE verified = T;
+    - SELECT email FROM users WHERE verified = 1;
+    - SELECT email FROM users WHERE verified = 'TRUE';
+    - SELECT email FROM users WHERE verified = TRUEX;
+    - SELECT email FROM users WHERE verified < TRUE;
+    - SELECT email FROM users WHERE verified LIKE 'T%';
+
+- group: filters piled up
+  expect: completed
+  queries:
+    # The connective loop is flat, so a clause is as long as it likes and
+    # the contradictions are nobody's problem here.
+    - SELECT email FROM users WHERE verified = TRUE AND verified = FALSE AND verified = TRUE AND verified = FALSE AND verified = TRUE;
+    - SELECT email FROM users WHERE users.id = 1 OR users.id = 2 OR users.id = 3 OR users.id = 4 OR users.id = 5 OR users.id = 6;
+    - SELECT email FROM users WHERE users.id = 1 AND users.id = 2 OR users.id = 3 AND users.id = 4 OR users.id = 5;
+    - SELECT email FROM users WHERE NOT verified = TRUE AND NOT verified = FALSE AND NOT created_at IS NULL;
+    - SELECT email FROM users WHERE created_at IS NULL AND created_at IS NOT NULL;
+    - SELECT email FROM users WHERE email LIKE 'a%' AND email NOT LIKE '%b' AND email = 'c' AND email != 'd';
+    - SELECT email FROM users WHERE first_name = last_name AND last_name = first_name;
+
+- group: operands that would say nothing
+  expect: stuck
+  queries:
+    # Comparing a column with itself is refused however either side is
+    # spelled, so the two spellings of one column never meet.
+    - SELECT email FROM users WHERE users.id = users.id;
+    - SELECT email FROM users WHERE users.id < users.id;
+    - SELECT email FROM users WHERE created_at = created_at;
+    - SELECT email FROM users WHERE created_at = users.created_at;
+    - SELECT email FROM users WHERE users.created_at = created_at;
+    - SELECT u.email FROM users AS u WHERE u.email LIKE u.email;
+    - SELECT u.email FROM users AS u WHERE u.verified != u.verified;
+
+- group: brackets at the limit
+  expect: completed
+  queries:
+    # Three deep is the cap, and three is reachable from every direction
+    # - nested, sequential, negated and combined.
+    - SELECT email FROM users WHERE (((email = 'a' AND email = 'b')));
+    - SELECT email FROM users WHERE ((email = 'a')) AND ((email = 'b'));
+    - SELECT email FROM users WHERE (email = 'a') OR (email = 'b') OR (email = 'c');
+    - SELECT email FROM users WHERE ((email = 'a' OR email = 'b') AND (email = 'c' OR email = 'd'));
+    - SELECT email FROM users WHERE NOT ((NOT (email = 'a')));
+    - SELECT email FROM users WHERE (NOT email = 'a' AND (NOT email = 'b' AND (NOT email = 'c')));
+    - SELECT email FROM users WHERE (((email = 'a'))) AND (((email = 'b')));
+
+- group: brackets past the limit
+  expect: stuck
+  queries:
+    # The fourth bracket is never opened, and an empty one never is.
+    - SELECT email FROM users WHERE (((((email = 'a')))));
+    - SELECT email FROM users WHERE ((((((email = 'a'))))));
+    - SELECT email FROM users WHERE ((email = 'a' AND ((email = 'b'))));
+    - SELECT email FROM users WHERE ();
+    - SELECT email FROM users WHERE (());
+    - SELECT email FROM users WHERE (email = 'a'));
+
+- group: the projection repeated and mixed
+  expect: completed
+  queries:
+    # Every column of a table, the same column eight times, and the bare
+    # and qualified spellings of one name side by side.
+    - SELECT id, first_name, last_name, email, verified, created_at FROM users;
+    - SELECT email, email, email, email, email, email, email, email FROM users;
+    - SELECT u.email, email FROM users AS u;
+    - SELECT email, u.email FROM users AS u;
+    - SELECT u.email, u.email, u.first_name, u.first_name FROM users AS u;
+    - SELECT u.id, u.first_name, u.last_name, u.email, u.verified, u.created_at FROM users AS u;
+    - SELECT p.id, p.user_id, p.title, p.body, p.published_at FROM posts AS p;
+    - SELECT c.id, c.user_id, c.post_id, c.body FROM comments AS c;
+    - SELECT verified, verified FROM users;
+
+- group: two scopes over one table
+  expect: completed
+  queries:
+    # Two aliases are two scopes and two FROM nodes, so one table can be
+    # placed twice.
+    - SELECT u.email, v.email FROM users AS u, users AS v;
+    - SELECT u.email, v.first_name FROM users AS u, users AS v;
+    - SELECT p.title, q.title FROM posts AS p, posts AS q;
+
+- group: joins chained every way
+  expect: completed
+  queries:
+    # Each join type leading into each other, the chain walked from the
+    # far end, and the virtual table filtered afterwards.
+    - SELECT email, title, c.body FROM users INNER JOIN posts ON users.id = posts.user_id LEFT JOIN comments AS c ON posts.id = c.post_id;
+    - SELECT email, title, c.body FROM users LEFT JOIN posts ON users.id = posts.user_id RIGHT JOIN comments AS c ON posts.id = c.post_id;
+    - SELECT email, title, c.body FROM users RIGHT JOIN posts ON users.id = posts.user_id FULL JOIN comments AS c ON posts.id = c.post_id;
+    - SELECT email, title, c.body FROM users FULL JOIN posts ON users.id = posts.user_id INNER JOIN comments AS c ON posts.id = c.post_id;
+    - SELECT title, email, c.body FROM posts INNER JOIN users ON posts.user_id = users.id LEFT JOIN comments AS c ON posts.id = c.post_id;
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id WHERE title = body;
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id WHERE users.id = posts.id;
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id WHERE posts.user_id = users.id;
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id WHERE created_at IS NULL AND published_at IS NOT NULL;
+    - SELECT u.email, p.title FROM users AS u INNER JOIN posts AS p ON u.id = p.user_id WHERE u.verified = TRUE AND p.title LIKE 'a%';
+
+- group: the terminator after everything
+  expect: completed
+  queries:
+    # Whitespace before the `;` after every clause that can precede it.
+    - "SELECT email FROM users WHERE created_at IS NOT NULL\t;"
+    - "SELECT email FROM users WHERE email LIKE 'a%'\n;"
+    - SELECT email FROM users WHERE NOT verified = TRUE ;
+    - SELECT email FROM users WHERE (email = 'a' OR email = 'b') ;
+    - "SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id\n\t;"
+    - SELECT u.email, p.title FROM users AS u INNER JOIN posts AS p ON u.id = p.user_id ;
+    - SELECT email, body FROM users , comments ;
+    - SELECT email FROM users WHERE users.id = -1 ;
+    - "SELECT email FROM users WHERE created_at = '2024-01-31 12:30:00' ;"
