@@ -1,3 +1,22 @@
+//! kernel -- token indexes, and the machinery for walking many of them at once.
+//!
+//! An *index* is a language over vocabulary tokens. A `Lattice` spells one
+//! constant string, an `Expression` a regular expression, and a `Group` is one
+//! index minus any number of others. All three are immutable and hold no
+//! position of their own, which is what lets a single index back every walk
+//! that needs it.
+//!
+//! The walking is `runtime`. A `Factory` builds indexes and answers with ids,
+//! a `Memory` is one walk over one index, a `Head` pairs a walk with whatever
+//! the caller attached to it, and a `Runner` advances every head over each
+//! token across a worker pool. When a head reaches the end of its index the
+//! caller's `Resolver` is asked what may follow.
+//!
+//! That last question is the whole interface to the language being generated:
+//! the crate builds no grammar, keeps no graph, and never looks inside a
+//! payload. The `pyo3` feature adds the Python bindings, which fix the node and
+//! token widths and the transition layout -- see `pyfactory`.
+
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 

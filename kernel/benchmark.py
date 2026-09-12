@@ -1,13 +1,37 @@
+"""Expression build, scan and lookup timings, from Python.
+
+For each pattern below: how long the `Expression` takes to build, how long a
+node takes to answer with its whole route set, how long one transition lookup
+costs, and how much memory the index then holds.
+
+This does not run as it stands. It asks for a DFA layout per round and for
+TokTrie tuning parameters, and the bindings expose neither -- the layout is a
+type parameter, fixed to `FlatDFA` when the extension is compiled. Comparing
+layouts is therefore only possible from Rust, which is what
+`src/bin/benchmark.rs` is for.
+"""
+
 from __future__ import annotations
 
-import time
 import random
+import time
 from dataclasses import dataclass, field
+from typing import Callable
 
 import numpy as np
 from numpy.typing import NDArray
 
 import kernel_typed as kl
+
+VOCABULARY_PATH: str = "../vocabulary.tiktoken"
+EOS_ID: int = 1
+
+NUM_ROUNDS: int = 100
+NUM_SCAN_ITERS: int = 50
+NUM_LOOKUP_ITERS: int = 200
+
+NAME_WIDTH: int = 20
+VALUE_WIDTH: int = 12
 
 PATTERNS: list[str] = [
     "hi",
@@ -112,7 +136,6 @@ PATTERNS: list[str] = [
     "(inter|intra|extra|ultra|super|hyper)(nation|state|galactic|sonic|natural|active)",
 ]
 
-
 @dataclass
 class DFAResult:
     name: str
@@ -122,17 +145,11 @@ class DFAResult:
     memory_usages: list[int] = field(default_factory=list)
     failures: int = 0
 
-
 DFA_CONFIGS: list[tuple[str, int]] = [
     ("FastHashDFA", kl.FAST_HASH_DFA),
     ("DoubleHashDFA", kl.DOUBLE_HASH_DFA),
     ("FlatDFA", kl.FLAT_DFA),
 ]
-
-NUM_ROUNDS = 100
-NUM_SCAN_ITERS = 50
-NUM_LOOKUP_ITERS = 200
-
 
 def benchmark_expression(
     pattern: str,
@@ -140,51 +157,60 @@ def benchmark_expression(
     toktrie: kl.TokTrie,
     result: DFAResult,
 ) -> None:
-    try:
-        t0 = time.perf_counter()
-        expr = kl.Expression(pattern, vocabulary, toktrie)
-        t1 = time.perf_counter()
+    """Time one pattern on one layout, appending to `result`.
 
-        result.build_times_ms.append((t1 - t0) * 1000)
-        result.memory_usages.append(expr.memory_usage())
+    A pattern that fails to build is counted rather than raised on, so one bad
+    case does not lose the whole run.
+    """
+
+    try:
+        start: float = time.perf_counter()
+        expression: kl.Expression = kl.Expression(pattern, vocabulary, toktrie)
+        built: float = time.perf_counter()
+
+        result.build_times_ms.append((built - start) * 1000)
+        result.memory_usages.append(expression.memory_usage())
     except Exception:
         result.failures += 1
 
         return
 
-    start_node = 0
+    start_node: int = 0
     transitions: NDArray[np.uint64] = np.array([], dtype=np.uint64)
 
-    t0 = time.perf_counter()
+    start = time.perf_counter()
 
     for _ in range(NUM_SCAN_ITERS):
-        transitions = expr.transitions(start_node)
+        transitions = expression.transitions(start_node)
 
-    t1 = time.perf_counter()
+    elapsed: float = time.perf_counter() - start
 
-    result.scan_times_us.append((t1 - t0) / NUM_SCAN_ITERS * 1_000_000)
+    result.scan_times_us.append(elapsed / NUM_SCAN_ITERS * 1_000_000)
 
-    if transitions.size > 0:
-        token_ids = transitions.tolist()
-
-        random.seed(42)
-
-        sample_ids = [token_ids[random.randint(0, len(token_ids) - 1)] for _ in range(min(10, len(token_ids)))]
-
-        t0 = time.perf_counter()
-
-        for _ in range(NUM_LOOKUP_ITERS):
-            for tid in sample_ids:
-                expr.next(start_node, int(tid))
-
-        t1 = time.perf_counter()
-
-        total_lookups = NUM_LOOKUP_ITERS * len(sample_ids)
-
-        result.lookup_times_us.append((t1 - t0) / total_lookups * 1_000_000)
-    else:
+    if not transitions.size:
         result.lookup_times_us.append(0.0)
 
+        return
+
+    token_ids: list[int] = transitions.tolist()
+
+    random.seed(42)
+
+    sample_ids: list[int] = [
+        token_ids[random.randint(0, len(token_ids) - 1)]
+        for _ in range(min(10, len(token_ids)))
+    ]
+
+    start = time.perf_counter()
+
+    for _ in range(NUM_LOOKUP_ITERS):
+        for token_id in sample_ids:
+            expression.next(start_node, int(token_id))
+
+    elapsed = time.perf_counter() - start
+    lookups: int = NUM_LOOKUP_ITERS * len(sample_ids)
+
+    result.lookup_times_us.append(elapsed / lookups * 1_000_000)
 
 def avg(values: list[float]) -> float:
     if not values:
@@ -192,72 +218,73 @@ def avg(values: list[float]) -> float:
 
     return sum(values) / len(values)
 
-
 def print_single_leaderboard(
     title: str,
     results: list[DFAResult],
-    value_fn: callable,
+    value_fn: Callable[[DFAResult], float],
     unit: str,
 ) -> None:
-    col_name = 20
-    col_val = 12
+    ranked: list[DFAResult] = sorted(results, key=value_fn)
 
-    sorted_results = sorted(results, key=lambda r: value_fn(r))
-
-    header = f"{'DFA Type':<{col_name}}{'Avg (' + unit + ')':>{col_val}}"
-    sep = "-" * len(header)
+    header: str = f"{'DFA Type':<{NAME_WIDTH}}{f'Avg ({unit})':>{VALUE_WIDTH}}"
+    rule: str = "-" * len(header)
 
     print(f"{title}:")
-    print(sep)
+    print(rule)
     print(header)
-    print(sep)
+    print(rule)
 
-    for i, r in enumerate(sorted_results):
-        print(
-            f"{'#' + str(i + 1) + ' ' + r.name:<{col_name}}"
-            f"{value_fn(r):>{col_val}.3f}"
-        )
+    for position, result in enumerate(ranked):
+        name: str = f"#{position + 1} {result.name}"
 
-    print(sep)
+        print(f"{name:<{NAME_WIDTH}}{value_fn(result):>{VALUE_WIDTH}.3f}")
+
+    print(rule)
     print()
-
 
 def print_leaderboard(results: list[DFAResult]) -> None:
     print()
 
     print_single_leaderboard(
-        "LOOKUP LEADERBOARD", results,
-        lambda r: avg(r.lookup_times_us), "us",
+        "LOOKUP LEADERBOARD",
+        results,
+        lambda result: avg(result.lookup_times_us),
+        "us",
     )
 
     print_single_leaderboard(
-        "SCAN LEADERBOARD", results,
-        lambda r: avg(r.scan_times_us), "us",
+        "SCAN LEADERBOARD",
+        results,
+        lambda result: avg(result.scan_times_us),
+        "us",
     )
 
     print_single_leaderboard(
-        "BUILD LEADERBOARD", results,
-        lambda r: avg(r.build_times_ms), "ms",
+        "BUILD LEADERBOARD",
+        results,
+        lambda result: avg(result.build_times_ms),
+        "ms",
     )
 
     print_single_leaderboard(
-        "MEMORY LEADERBOARD", results,
-        lambda r: avg([float(m) for m in r.memory_usages]) / 1024, "KB",
+        "MEMORY LEADERBOARD",
+        results,
+        lambda result: avg([float(usage) for usage in result.memory_usages]) / 1024,
+        "KB",
     )
-
 
 def main() -> None:
     print("Loading vocabulary...")
 
     try:
-        vocabulary = kl.Vocabulary.from_file_path("../vocabulary.tiktoken", 1, 32)
+        vocabulary: kl.Vocabulary = kl.Vocabulary.from_file_path(VOCABULARY_PATH, EOS_ID, 32)
     except Exception:
-        print("Error: vocabulary.tiktoken not found.")
+        print(f"Error: {VOCABULARY_PATH} not found.")
 
         return
 
-    eos_id = vocabulary.get_eos_id()
-    total_cases = NUM_ROUNDS * len(PATTERNS)
+    eos_id: int = vocabulary.get_eos_id()
+    total_cases: int = NUM_ROUNDS * len(PATTERNS)
 
     print(f"Vocabulary loaded (eos_id={eos_id})")
     print(f"Building TokTrie bases for all {len(DFA_CONFIGS)} DFA types...")
@@ -265,33 +292,46 @@ def main() -> None:
     toktries: dict[int, kl.TokTrie] = {}
 
     for name, dfa_type in DFA_CONFIGS:
-        t0 = time.perf_counter()
+        start: float = time.perf_counter()
         toktries[dfa_type] = kl.TokTrie(vocabulary, dfa_type, 32, 32)
-        t1 = time.perf_counter()
+        elapsed: float = time.perf_counter() - start
 
-        print(f"  {name} TokTrie built in {(t1 - t0) * 1000:.1f} ms")
+        print(f"  {name} TokTrie built in {elapsed * 1000:.1f} ms")
 
-    print(f"\nRunning benchmark: {len(PATTERNS)} patterns x {len(DFA_CONFIGS)} DFA types x {NUM_ROUNDS} rounds")
-    print(f"Cases per DFA type: {total_cases} (total_cases % {NUM_ROUNDS} == {total_cases % NUM_ROUNDS})")
+    print(
+        f"\nRunning benchmark: {len(PATTERNS)} patterns"
+        f" x {len(DFA_CONFIGS)} DFA types x {NUM_ROUNDS} rounds"
+    )
+    print(f"Cases per DFA type: {total_cases}")
     print(f"Scan iterations per case: {NUM_SCAN_ITERS}")
     print(f"Lookup iterations per case: {NUM_LOOKUP_ITERS}")
     print()
 
     results: list[DFAResult] = [DFAResult(name=name) for name, _ in DFA_CONFIGS]
 
-    for r in range(NUM_ROUNDS):
-        for i, pattern in enumerate(PATTERNS):
-            idx = r * len(PATTERNS) + i + 1
+    for round_index in range(NUM_ROUNDS):
+        for pattern_index, pattern in enumerate(PATTERNS):
+            case: int = round_index * len(PATTERNS) + pattern_index + 1
 
-            print(f"\r[{idx:5d}/{total_cases}] Round {r + 1}/{NUM_ROUNDS} - Pattern: {pattern[:50]:<50s}", end="", flush=True)
+            print(
+                f"\r[{case:5d}/{total_cases}]"
+                f" Round {round_index + 1}/{NUM_ROUNDS}"
+                f" - Pattern: {pattern[:50]:<50s}",
+                end="",
+                flush=True,
+            )
 
-            for j, (name, dfa_type) in enumerate(DFA_CONFIGS):
-                benchmark_expression(pattern, vocabulary, toktries[dfa_type], results[j])
+            for position, (_, dfa_type) in enumerate(DFA_CONFIGS):
+                benchmark_expression(
+                    pattern,
+                    vocabulary,
+                    toktries[dfa_type],
+                    results[position],
+                )
 
     print("\n\nBenchmark complete!")
 
     print_leaderboard(results)
-
 
 if __name__ == "__main__":
     main()

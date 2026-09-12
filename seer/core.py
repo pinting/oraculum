@@ -1,10 +1,12 @@
-"""Shared setup for the two drivers.
+"""Shared setup for the drivers.
 
 Holds the vocabulary and the engine as module state and exposes `routes` and
-`feed` over them.
+`feed` over them, so a caller that has no engine of its own -- the logits
+processor of `processor.py` -- can still reach one.
 
-`main.py` (interactive) and `live.py` (model driven) both build their engine
-through `init_engine`.
+Both modes of `main.py`, interactive and model driven, build their engine
+through `init_engine`. The `int` returns are a status code rather than a raised
+exception, because the initialisation steps are also called one at a time.
 """
 
 from __future__ import annotations
@@ -62,7 +64,7 @@ def load_vocabulary(path: str) -> bytes:
     return data.encode("utf-8")
 
 def init_vocabulary(data: bytes, eos_id: int) -> int:
-    """Load the vocabulary. Returns 0 on success, matching the Rust API."""
+    """Load the vocabulary. Returns 0 on success."""
 
     global _vocabulary
 
@@ -147,7 +149,7 @@ def routes() -> NDArray[np.uint64]:
     return _engine.routes()
 
 def feed(token_id: int) -> int:
-    """Consume a token. Returns 0 on success, matching the Rust API."""
+    """Consume a token. Returns 0 on success."""
 
     if _engine is None:
         return 1

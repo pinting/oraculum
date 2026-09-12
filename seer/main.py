@@ -1,4 +1,15 @@
-"""Seer module entry point."""
+"""Driver for the seer syntax graph.
+
+Two modes over the same engine:
+
+* **interactive** -- print the tokens the graph would accept next and read one
+  from stdin, a token at a time.
+* **live** (`--live`) -- load a GGUF model through llama.cpp and let it sample,
+  with `processor.LogitsProcessor` masking away everything the graph rejects.
+
+Both build their engine through `core.init_engine` and leave the resolver
+tracing of `src.debug` on unless `--no-debug` is given.
+"""
 
 from __future__ import annotations
 
@@ -8,23 +19,91 @@ import sys
 import core
 from core import EOS_ID, SCHEMA, VOCABULARY_PATH, get_schema, init_engine, set_schema
 from src import Engine, debug
+from src.factory import DraftKind
 
 ROUTE_LIMIT: int = 100
 
+# Separators a constant is reached through, which no lattice head spells on its
+# own but which `narrow` must still keep on offer.
+SEPARATORS: tuple[str, ...] = (".", " ", "\t", ",")
+
 def printable(token: str) -> bool:
-    """Mirror the display filter of `main.rs`."""
+    """Whether a token can be shown in the route list and typed back.
+
+    Control characters would corrupt the line, and a multi-character run of
+    whitespace is indistinguishable from any other once printed.
+    """
+
     if len(token) != 1 and token.isspace():
         return False
+
     return not any(ord(c) < 32 or ord(c) == 127 for c in token)
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Walk the seer SQL syntax graph interactively or with a model.")
-    parser.add_argument("--live", action="store_true", help="run in model-driven live mode")
+def narrow(engine: Engine, routes: list[str]) -> tuple[list[str], bool]:
+    """Drop the routes that no live lattice head is spelling towards.
 
-    parser.add_argument("--vocabulary", default=VOCABULARY_PATH, help="tiktoken vocabulary file")
-    parser.add_argument("--eos-id", type=int, default=EOS_ID, help="end of sequence token id")
-    parser.add_argument("--threads", type=int, default=1, help="kernel worker threads")
-    parser.add_argument("--schema", default=None, help="path to a .sql schema, defaults to the built-in one")
+    An `Expression` head offers most of the vocabulary, so once the route list
+    runs past `ROUTE_LIMIT` the keywords and names among it are buried. The
+    tokens worth showing are the ones that start what a lattice head still has
+    left to match.
+
+    Returns the surviving routes and whether anything was dropped, so the
+    caller can say the list is not the whole of it.
+    """
+
+    constants: list[str] = [
+        head.payload.draft.value[len(head.matched):]
+        for head in engine.heads
+        if head.payload.draft.kind is DraftKind.LATTICE
+    ]
+
+    constants = [constant for constant in constants if constant]
+
+    constants.extend(SEPARATORS)
+
+    narrowed: list[str] = [
+        token
+        for token in routes
+        if any(constant.startswith(token) for constant in constants)
+    ]
+
+    if not narrowed or len(narrowed) == len(routes):
+        return routes, False
+
+    return narrowed, True
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Walk the seer SQL syntax graph interactively or with a model.",
+    )
+
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="run in model-driven live mode",
+    )
+    parser.add_argument(
+        "--vocabulary",
+        default=VOCABULARY_PATH,
+        help="tiktoken vocabulary file",
+    )
+    parser.add_argument(
+        "--eos-id",
+        type=int,
+        default=EOS_ID,
+        help="end of sequence token id",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=1,
+        help="kernel worker threads",
+    )
+    parser.add_argument(
+        "--schema",
+        default=None,
+        help="path to a .sql schema, defaults to the built-in one",
+    )
     parser.add_argument(
         "--no-debug",
         dest="debug",
@@ -32,10 +111,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="do not print the resolver state after each modifying operation",
     )
 
-    # Live mode arguments
-    parser.add_argument("--model", default="../models/gemma-3-4b-it-Q8_0.gguf", help="path to the GGUF model")
-    parser.add_argument("--model-threads", type=int, default=4, help="llama.cpp compute threads")
-    parser.add_argument("--prompt", default="Generate an SQL SELECT request to get the emails of users!", help="instruction appended to the schema")
+    # -- live mode --------------------------------------------------------
+
+    parser.add_argument(
+        "--model",
+        default="../models/gemma-3-4b-it-Q8_0.gguf",
+        help="path to the GGUF model",
+    )
+    parser.add_argument(
+        "--model-threads",
+        type=int,
+        default=4,
+        help="llama.cpp compute threads",
+    )
+    parser.add_argument(
+        "--prompt",
+        default="Generate an SQL SELECT request to get the emails of users!",
+        help="instruction appended to the schema",
+    )
     parser.add_argument("--temp", type=float, default=0.7)
     parser.add_argument("--top-p", type=float, default=0.9)
 
@@ -52,6 +145,7 @@ def run_interactive(args: argparse.Namespace) -> int:
         raw_vocabulary: bytes = core.load_vocabulary(args.vocabulary)
     except OSError as error:
         print(f"Failed to load vocabulary: {error}", file=sys.stderr)
+
         return 1
 
     if args.threads > 1:
@@ -66,6 +160,7 @@ def run_interactive(args: argparse.Namespace) -> int:
         )
     except RuntimeError as error:
         print(f"Failed to initialize engine: {error}", file=sys.stderr)
+
         return 1
 
     try:
@@ -84,34 +179,18 @@ def run_interactive(args: argparse.Namespace) -> int:
                     switch[token] = token_id
 
             routes: list[str] = sorted(token for token in switch if printable(token))
-            has_others = False
+            narrowed: bool = False
 
             if len(switch) > ROUTE_LIMIT:
-                from src.factory import DraftKind
-                constants = [
-                    h.payload.draft.value[len(h.matched):] 
-                    for h in engine.heads 
-                    if h.payload.draft.kind == DraftKind.LATTICE
-                ]
-                constants = [c for c in constants if c]
-                constants.extend([".", " ", "\t", ","])
-
-                if constants:
-                    constant_routes = []
-                    for token in routes:
-                        if any(c.startswith(token) for c in constants):
-                            constant_routes.append(token)
-                    
-                    if constant_routes and len(constant_routes) < len(routes):
-                        routes = constant_routes
-                        has_others = True
+                routes, narrowed = narrow(engine, routes)
 
             shown: list[str] = routes[:ROUTE_LIMIT]
+            more: bool = narrowed or len(routes) > len(shown)
 
             print(
                 "Routes: "
                 + ", ".join(f"`{token}`" for token in shown)
-                + (", ..." if len(routes) > len(shown) or has_others else " ")
+                + (", ..." if more else " ")
             )
 
             while True:
@@ -127,9 +206,11 @@ def run_interactive(args: argparse.Namespace) -> int:
 
                 if token_id is None:
                     print("Non-existent token!")
+
                     continue
 
                 engine.feed(token_id)
+
                 break
 
             print(f"Matched: `{engine.matched()}`")
@@ -151,6 +232,7 @@ def run_live(args: argparse.Namespace) -> int:
         from llama_cpp import Llama, LogitsProcessorList
     except ImportError:
         print("llama-cpp-python is not installed; run `make model`", file=sys.stderr)
+
         return 1
 
     print(f"Loading model from {args.model}...")
@@ -165,6 +247,7 @@ def run_live(args: argparse.Namespace) -> int:
         )
     except (OSError, ValueError) as error:
         print(f"Failed to load model: {error}", file=sys.stderr)
+
         return 1
 
     print("Model loaded successfully!")
@@ -184,6 +267,7 @@ def run_live(args: argparse.Namespace) -> int:
         )
     except RuntimeError as error:
         print(f"Failed to initialize engine: {error}", file=sys.stderr)
+
         return 1
 
     with open(args.vocabulary, "w", encoding="utf-8") as handle:
@@ -218,9 +302,8 @@ def run_live(args: argparse.Namespace) -> int:
             if result != 0:
                 break
 
-            # The Rust version has no equivalent: it relies on the route set
-            # emptying out. Stopping here keeps the model from sampling past
-            # the end of the statement.
+            # The statement is finished before the route set empties out, so
+            # stopping here keeps the model from sampling past the terminator.
             if processor.is_completed():
                 break
     finally:
@@ -238,8 +321,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.live:
         return run_live(args)
-    else:
-        return run_interactive(args)
+
+    return run_interactive(args)
 
 if __name__ == "__main__":
     raise SystemExit(main())

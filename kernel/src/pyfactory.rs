@@ -1,3 +1,15 @@
+//! The index registry, exposed to Python.
+//!
+//! This is where the widths the Python extension is compiled with are fixed:
+//! `u32` node ids, `u32` token ids and `FlatDFA` as the transition layout. The
+//! layout is a type parameter rather than a setting, so choosing another one
+//! means rebuilding; `pyrunner` takes all three from here.
+//!
+//! Every entry point that builds anything drops the GIL first. Building is
+//! measured in milliseconds and touches no Python state, so a caller with
+//! threads can build indexes in parallel and the runner can spread a batch over
+//! its worker pool.
+
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use std::sync::Arc;

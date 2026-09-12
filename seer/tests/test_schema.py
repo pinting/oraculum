@@ -1,16 +1,15 @@
 """The sqlglot backed schema parser.
 
-Ported from `experiments/9-advanced-modelling/schema.py`. The cases from the
-Rust `#[cfg(test)]` module are kept, because the new parser must still accept
-everything the line-based scanner did.
+`TestBasicCases` are the shapes a schema is expected to come in at all;
+`TestBeyondLineScanning` are the ones a parser has to be a real parser to
+read, rather than a scanner working a line at a time.
 """
 
 from __future__ import annotations
 
 from src.schema import Reference, Schema, Type, parse_schema
 
-class TestRustCases:
-    """The three cases from `seer/src/schema.rs`."""
+class TestBasicCases:
 
     def test_parse_simple_schema(self) -> None:
         schema = parse_schema("""
@@ -57,9 +56,9 @@ CREATE TABLE orders (
             "orders": ["id", "user_id", "total", "status"],
         }
 
-class TestBeyondTheRustParser:
+class TestBeyondLineScanning:
     def test_single_line_table(self) -> None:
-        """The line-based Rust scanner only ever saw the first column here."""
+        """Every column is on one line, so a line at a time sees only the first."""
 
         schema = parse_schema("CREATE TABLE t (a INT, b INT, c INT);")
 
@@ -115,7 +114,7 @@ CREATE TABLE posts (
         assert list(posts.references("nothing")) == []
 
     def test_identity_columns(self) -> None:
-        """The form the experiment's own schema uses."""
+        """An identity column still parses as the primary key."""
 
         schema = parse_schema("""
 CREATE TABLE users (

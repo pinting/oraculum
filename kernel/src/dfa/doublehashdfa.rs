@@ -1,3 +1,9 @@
+//! The transition table left as the nested hash map it was built as.
+//!
+//! Two hash lookups per transition, and a fresh `Vec` collected on every
+//! `transitions` call. It is the baseline the packed layouts are measured
+//! against rather than one to build on.
+
 use rustc_hash::{FxHashMap as HashMap};
 use std::borrow::Cow;
 

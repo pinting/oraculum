@@ -1,7 +1,9 @@
 """Vocabulary serialisation for llama.cpp models.
 
-Port of `seer/vocabulary.py`. Writes the model vocabulary in the tiktoken
-format `kernel.Vocabulary` expects: one `<base64 token> <id>` per line.
+Writes a loaded model's vocabulary in the tiktoken format `kernel.Vocabulary`
+expects: one `<base64 token> <id>` per line. Live mode saves the file so the
+interactive driver can be pointed at the same vocabulary the model samples
+from.
 """
 
 from __future__ import annotations

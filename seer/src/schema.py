@@ -1,12 +1,13 @@
 """SQL schema model and parsing.
 
-Port of `experiments/9-advanced-modelling/schema.py`, which replaced the
-line-based scanner of `seer/src/schema.rs` with a real parse via `sqlglot`.
+`CREATE TABLE` statements are parsed with `sqlglot`. Columns keep their type,
+nullability, uniqueness and -- the part the rest of the modelling depends on --
+their foreign key `Reference`, which is what `relationships.py` builds the join
+graph from.
 
-The model is richer than the `dict[str, list[str]]` the Rust version carried:
-columns keep their type, nullability, uniqueness and -- the part the rest of
-the port depends on -- their foreign key `Reference`, which is what
-`relationships.py` builds the join graph from.
+The resolvers only need the flat `table -> columns` view `get_fields` exposes;
+everything richer is here for the join graph and for the reserved name set an
+alias has to avoid.
 """
 
 from __future__ import annotations
@@ -166,8 +167,8 @@ def _parse_reference(kind: exp.Reference) -> Reference | None:
 def parse_schema(sql: str) -> Schema | None:
     """Parse `CREATE TABLE` statements into a `Schema`.
 
-    Returns `None` when nothing parsed, matching the `Option` the Rust version
-    returned so the callers keep their shape.
+    Returns `None` when nothing parsed, so a caller handed junk gets no schema
+    rather than an empty one.
     """
 
     schema: Schema = Schema()

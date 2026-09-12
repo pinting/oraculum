@@ -1,3 +1,20 @@
+//! A constant string, as every way the vocabulary can spell it.
+//!
+//! There are many tokenisations of `"SELECT"` in a subword vocabulary and a
+//! generator has to accept all of them. Aho-Corasick over the whole vocabulary
+//! finds, in one pass, every token occurring anywhere in the constant; a hit at
+//! byte offset `i` becomes an edge out of node `i`.
+//!
+//! So a node *is* a byte offset into the constant, and `next` needs no lookup
+//! table at all: consuming a token of length `n` at offset `i` lands at
+//! `i + n`. Only the outgoing token sets are stored, as one array indexed by
+//! offset, and the word is accepted exactly when the offset has reached the end
+//! of the constant.
+//!
+//! `base` builds the Aho-Corasick automaton. It is the expensive half and
+//! depends on nothing but the vocabulary, so it is built once and every lattice
+//! borrows it.
+
 use aho_corasick::{AhoCorasick, AhoCorasickKind};
 use std::{borrow::Cow, sync::Arc};
 

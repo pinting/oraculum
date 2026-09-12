@@ -1,3 +1,10 @@
+//! Walking indexes: what turns a pile of them into a generation.
+//!
+//! `memory` is one walk over one index, `head` pairs a walk with the caller's
+//! payload, `factory` builds the indexes and shares them out, `runner` advances
+//! every head over each token, and `resolver` is the single question it asks
+//! the caller: what may follow this.
+
 pub mod factory;
 pub mod head;
 pub mod memory;

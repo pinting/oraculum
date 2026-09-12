@@ -1,7 +1,5 @@
 """Registry of alias namespaces.
 
-Port of `experiments/9-advanced-modelling/scopes.py`.
-
 A scope is created lazily the first time an alias is used. Table names are
 reported qualified as `"<table> <alias>"`, which is the node naming the join
 graph in `relationships.py` expects and what distinguishes `users` from

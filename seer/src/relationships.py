@@ -1,7 +1,5 @@
 """FROM / JOIN resolution over the foreign key graph.
 
-Port of `experiments/9-advanced-modelling/relationships.py`.
-
 Once `conflicts.py` knows which tables the query needs, they have to be
 connected by foreign keys. Nodes are table names -- including aliased variants
 such as `"comments c"` -- and edges are the foreign keys between them, carrying
@@ -12,8 +10,8 @@ the head's neighbourhood becomes the union of both. That models SQL: once two
 tables are joined, every column of either is reachable, and the pair behaves as
 one node for further joins.
 
-Neighbour queries return sorted tuples rather than the experiment's sets,
-because the syntax graph must expand the same way on every run.
+Neighbour queries answer with sorted tuples rather than sets, because the
+syntax graph must expand the same way on every run.
 """
 
 from __future__ import annotations
@@ -30,9 +28,8 @@ from .scopes import sql_name, unqualify
 def reference_name(node: str) -> str:
     """How a node is written in an `ON` clause.
 
-    The experiment formats columns as `"comments c.user_id"`, which reads fine
-    in its menu but is not valid SQL. seer emits these tokens verbatim, so an
-    aliased node is referenced by its alias and a bare one by its table name.
+    These tokens are emitted verbatim, so they have to be valid SQL: an aliased
+    node is referenced by its alias and a bare one by its table name.
     """
 
     table, alias = unqualify(node)

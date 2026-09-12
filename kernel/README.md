@@ -148,7 +148,7 @@ python example.py                # own an index and walk it by hand
 python runner_example.py         # the factory, the head pool and a group
 ```
 
-The Python bindings fix both `N` (node index) and `T` (token ID) types to `u32` and use `FlatDFA` as the default DFA backend. The library can be rebuilt with different `N` / `T` / `D` configurations, but (at the moment) the source code needs to be modified for it (in the top of `pyvocabulary.rs` / `pyexpression.rs` / `pylattice.rs`).
+The Python bindings fix both `N` (node index) and `T` (token ID) types to `u32` and use `FlatDFA` as the default DFA backend. The library can be rebuilt with different `N` / `T` / `D` configurations, but (at the moment) the source code needs to be modified for it (in the top of `pyfactory.rs` / `pyvocabulary.rs` / `pyexpression.rs` / `pylattice.rs`).
 
 ```python
 import kernel_typed as kl

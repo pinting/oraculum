@@ -1,17 +1,14 @@
 """Field selection state.
 
-Port of `experiments/9-advanced-modelling/conflicts.py`: the facade that merges
-`Root` (unqualified fields) and `Scopes` (aliased fields) into one interface
-for the required and excluded table queries the FROM clause needs.
+The facade that merges `Root` (unqualified fields) and `Scopes` (aliased
+fields) into one interface for the required and excluded table queries the FROM
+clause needs. This is what `context.py` is built around.
 
-This is what `context.py` is built around, replacing the `ManyResolver` plus
-`OneResolver` pair the Rust `Context` held.
+Two properties the token driven engine depends on:
 
-Two adaptations for the token driven engine:
-
-* Selections report failure with a bool instead of raising. The TUI the
-  experiment was written for catches the exception and re-prompts; here a
-  selector runs while the engine is speculatively expanding nodes.
+* Selections report failure with a bool instead of raising, because a selector
+  runs while the engine is speculatively expanding nodes and a rejected
+  alternative is ordinary rather than exceptional.
 * `copy()` gives every branch of the syntax graph its own state, sharing the
   parts that are immutable once built.
 """

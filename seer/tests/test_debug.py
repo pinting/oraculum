@@ -1,7 +1,7 @@
 """Debug tracing.
 
-The experiment reprints the whole resolver state after every menu choice; here
-the same block is printed after every operation that modifies a `Context`.
+The whole resolver state is printed after every operation that modifies a
+`Context`, under a heading naming what was applied.
 """
 
 from __future__ import annotations

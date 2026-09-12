@@ -1,3 +1,14 @@
+//! What a flat index has to answer, and the dispatch over the two of them.
+//!
+//! `BaseIndex` is the walk: which tokens lead out of a node, where one of them
+//! leads, and whether a word may end here. `Accepting` says a little more than
+//! a bool -- `Yes(is_more)` carries whether the word could also go on -- which
+//! is what lets the runner retire a head that has nothing left to match rather
+//! than keep it in the pool for every later token.
+//!
+//! `Index` is how the two are reached once the concrete type is no longer known
+//! statically, which is the case from `Unit` down.
+
 use std::borrow::Cow;
 use crate::{Expression, Lattice, number::Number};
 use crate::dfa::dfa::DFA;

@@ -1,3 +1,14 @@
+"""A typed facade over the `kernel` extension module.
+
+The extension is built by PyO3 and carries no Python level types of its own, so
+each class here wraps one of its classes, holds it as `unit`, and forwards to
+it. Nothing is added on the way through: the point is the annotations, so that
+a caller gets checking and completion over an API that is otherwise opaque.
+
+`kernel.pyi` describes the same surface as stubs, for callers importing the
+extension directly.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Iterable, Sequence
@@ -43,7 +54,6 @@ class Vocabulary:
     def get_id_by_idx(self, idx: int) -> int | None:
         return self.unit.get_id_by_idx(idx)
 
-
 class AhoCorasick:
     __slots__ = ("unit",)
 
@@ -51,7 +61,6 @@ class AhoCorasick:
 
     def __init__(self, vocabulary: Vocabulary) -> None:
         self.unit = _kl.AhoCorasick.new(vocabulary.unit)
-
 
 class Lattice:
     __slots__ = ("unit",)
@@ -76,7 +85,6 @@ class Lattice:
     def memory_usage(self) -> int:
         return self.unit.memory_usage()
 
-
 class TokTrie:
     __slots__ = ("unit",)
 
@@ -84,7 +92,6 @@ class TokTrie:
 
     def __init__(self, vocabulary: Vocabulary) -> None:
         self.unit = _kl.TokTrie.new(vocabulary.unit)
-
 
 class Expression:
     __slots__ = ("unit",)
@@ -108,7 +115,6 @@ class Expression:
 
     def memory_usage(self) -> int:
         return self.unit.memory_usage()
-
 
 class Factory:
     """The index registry: drafts in, ids out.
@@ -172,7 +178,6 @@ class Factory:
 
     def __len__(self) -> int:
         return len(self.unit)
-
 
 class Runner:
     """The pool of active indexes, and the workers that drive them."""

@@ -1,8 +1,5 @@
 """Aliased field resolution.
 
-Port of `experiments/9-advanced-modelling/scope.py`, which replaces
-`seer/src/one_resolver.rs`.
-
 An alias refers to exactly one table, so unlike `root.py` there is no
 cross-talk to model: plain set intersection narrows the candidates as fields
 are selected. As in `root.py`, failures are reported with a bool rather than

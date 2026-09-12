@@ -10,17 +10,17 @@ its index, and seer answers with the indexes that may follow.
     graph.py          the SQL SELECT language
     context.py        the generation state a node is resolved against
 
-The modelling comes from `experiments/9-advanced-modelling`:
+The modelling underneath the graph is a stack of its own:
 
-    schema.py         experiment schema.py         (sqlglot, with references)
-    root.py           experiment root.py           (GF(2), SageMath)
-    scope.py          experiment scope.py
-    scopes.py         experiment scopes.py
-    conflicts.py      experiment conflicts.py
-    relationships.py  experiment relationships.py  (FK join graph)
+    schema.py         the SQL schema, parsed with sqlglot
+    root.py           unqualified field resolution over GF(2)
+    scope.py          one alias, narrowed by set intersection
+    scopes.py         the registry of alias scopes
+    conflicts.py      root and scopes behind one interface
+    relationships.py  the foreign key join graph
 
-This module re-exports the public surface; the drivers (`main.py`, `live.py`)
-and `core.py` import from here.
+This module re-exports the public surface; `main.py` and `core.py` import from
+here.
 """
 
 from __future__ import annotations
