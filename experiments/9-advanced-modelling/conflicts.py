@@ -65,7 +65,18 @@ class Conflicts:
         if not scope:
             return self.root.use_table(name)
         
-        return self.scopes.use_table(scope, name)
+        self.scopes.use_table(scope, name)
+
+        # Propagate to root: the table IS present (aliased),
+        # so root constraints referencing it are satisfied.
+        if name in self.root.vars and not self.root.is_satisfied():
+            var = self.root.vars[name]
+            next_expr = self.root.current.subs({var: 1})
+            
+            if next_expr != 0:
+                self.root.current = next_expr
+                self.root.used_tables.add(name)
+                self.root.refresh_fields()
 
     def is_satisfied(self) -> bool:
         return self.root.is_satisfied() and self.scopes.is_satisfied()

@@ -1,0 +1,31 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "kernel"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+pyo3 = ["dep:pyo3", "dep:numpy"]
+
+[dependencies]
+rand = "0.10.0"
+rayon = "1.10"
+rustc-hash = "2.1.1"
+base64 = "0.22.1"
+aho-corasick = "1.1.4"
+derivre = "0.3"
+toktrie = { git = "https://github.com/guidance-ai/llguidance.git", branch = "main" }
+pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
+numpy = { version = "0.22", optional = true }
+
+[package.metadata.maturin]
+bindings = "pyo3"
+features = ["pyo3"]
+
+[lints.rust]
+dead_code = "allow"
+unused_imports = "allow"

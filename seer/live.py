@@ -1,0 +1,142 @@
+"""Model driven driver -- the second of the two entry points.
+
+Loads a llama.cpp model, hands its vocabulary to `kernel` and samples with the
+syntax graph enforced, so the model can only emit a `SELECT` statement that is
+valid against the schema.
+
+    python live.py                    # one kernel worker
+    python live.py --threads 8        # eight
+
+See `main.py` for the interactive entry point.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+import core
+from core import EOS_ID, SCHEMA, VOCABULARY_PATH, get_schema, init_engine, set_schema
+from processor import LogitsProcessor
+from src import Engine, debug
+from vocabulary import serialize_vocabulary
+
+MODEL_PATH: str = "../models/gemma-3-4b-it-Q8_0.gguf"
+PROMPT: str = "Generate an SQL SELECT request to get the emails of users!"
+
+set_schema(SCHEMA)
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate SQL constrained by the seer syntax graph.")
+
+    parser.add_argument("--model", default=MODEL_PATH, help="path to the GGUF model")
+    parser.add_argument("--vocabulary", default=VOCABULARY_PATH, help="where to write the vocabulary")
+    parser.add_argument("--eos-id", type=int, default=EOS_ID, help="end of sequence token id")
+    parser.add_argument("--threads", type=int, default=1, help="kernel worker threads")
+    parser.add_argument("--model-threads", type=int, default=4, help="llama.cpp compute threads")
+    parser.add_argument("--prompt", default=PROMPT, help="instruction appended to the schema")
+    parser.add_argument("--temp", type=float, default=0.7)
+    parser.add_argument("--top-p", type=float, default=0.9)
+    parser.add_argument(
+        "--no-debug",
+        dest="debug",
+        action="store_false",
+        help="do not print the resolver state after each modifying operation",
+    )
+
+    return parser.parse_args(argv)
+
+def main(argv: list[str] | None = None) -> int:
+    args: argparse.Namespace = parse_args(argv)
+
+    if args.debug:
+        debug.enable()
+
+    try:
+        from llama_cpp import Llama, LogitsProcessorList
+    except ImportError:
+        print("llama-cpp-python is not installed; run `make model`", file=sys.stderr)
+
+        return 1
+
+    print(f"Loading model from {args.model}...")
+
+    try:
+        model = Llama(
+            model_path=args.model,
+            n_ctx=4096,
+            n_threads=args.model_threads,
+            n_gpu_layers=999,
+            verbose=False,
+        )
+    except (OSError, ValueError) as error:
+        print(f"Failed to load model: {error}", file=sys.stderr)
+
+        return 1
+
+    print("Model loaded successfully!")
+
+    raw_vocabulary: str = serialize_vocabulary(model)
+    raw_vocabulary_bytes: bytes = raw_vocabulary.encode("utf-8")
+
+    if args.threads > 1:
+        print(f"Driving the head pool on {args.threads} kernel workers")
+
+    try:
+        engine: Engine = init_engine(
+            raw_vocabulary_bytes,
+            args.eos_id,
+            get_schema(),
+            args.threads,
+        )
+    except RuntimeError as error:
+        print(f"Failed to initialize engine: {error}", file=sys.stderr)
+
+        return 1
+
+    with open(args.vocabulary, "w", encoding="utf-8") as handle:
+        handle.write(raw_vocabulary)
+
+    print("Vocabulary saved successfully!")
+
+    vocab_size: int = model.n_vocab()
+    processor: LogitsProcessor = LogitsProcessor(vocab_size)
+
+    prompt: str = f"{get_schema()}\n\n{args.prompt}"
+    prompt_tokens: list[int] = model.tokenize(prompt.encode("utf-8"))
+
+    print("Generating response...\n")
+
+    try:
+        for token_id in model.generate(
+            prompt_tokens,
+            top_p=args.top_p,
+            temp=args.temp,
+            logits_processor=LogitsProcessorList([processor]),
+        ):
+            token: bytes = model.detokenize([token_id])
+
+            print(token_id, token)
+
+            if len(token) == 0:
+                break
+
+            result: int = processor.feed(token_id)
+
+            if result != 0:
+                break
+
+            # The Rust version has no equivalent: it relies on the route set
+            # emptying out. Stopping here keeps the model from sampling past
+            # the end of the statement.
+            if processor.is_completed():
+                break
+    finally:
+        core.shutdown()
+
+    print(f"\nMatched: `{engine.matched()}`")
+
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())

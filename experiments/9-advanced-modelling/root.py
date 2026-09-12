@@ -92,7 +92,7 @@ class Root:
         return result
 
     def get_excluded_tables(self) -> set[str]:
-        result = self.used_tables
+        result = set(self.used_tables)
 
         for t, var in self.vars.items():
             if self.current.subs({var: 1}) == 0:
@@ -106,11 +106,7 @@ class Root:
         }
 
     def is_satisfied(self) -> bool:
-        if len(self.current.variables()) == 0:
-            return False
-        
         subs = {var: 0 for var in self.vars.values()}
-        
         return self.current.subs(subs) == 1
 
     def __str__(self) -> str:

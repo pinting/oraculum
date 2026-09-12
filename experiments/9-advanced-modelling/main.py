@@ -1,11 +1,11 @@
-#!/usr/bin/env sage
+#!/usr/bin/env python
 
 import sys
 import tty
 import termios
 
 from conflicts import Conflicts
-from relationships import Relationships
+from relationships import Relationships, JoinType, JOIN_TYPES
 from schema import parse_schema
 
 SCHEMA = """
@@ -162,9 +162,11 @@ def main():
             
             if choice == "[Done]":
                 break
+
+            join_type = select_option(f"\nJOIN TYPE", JOIN_TYPES)
                 
             try:
-                relationships.join_table(choice)
+                relationships.join_table(choice, join_type)
             except Exception as e:
                 print(f"\nError: {e}")
                 pause()

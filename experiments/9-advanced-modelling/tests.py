@@ -1,6 +1,7 @@
+#!/usr/bin/env python
 from conflicts import Conflicts
 from relationships import Relationships
-from schema import Schema, parse_schema
+from schema import Schema, Reference, parse_schema
 
 def schema1() -> Schema:
     sql = """
@@ -126,14 +127,14 @@ def case1():
 
     join('i')
     
-    assert {n.table for n in relationships.get_joinable_neighbors()} == {'a'}
+    assert {n.table for n in relationships.get_joinable_neighbors()} == set()
     assert relationships.get_required_tables() == set()
     assert conflicts.is_satisfied() is True
     
-    assert "JOIN b ON a.kab = b.kab" in relationships.used_references[0]
-    assert "JOIN c x ON b.kbc = c x.kbc" in relationships.used_references[0]
+    assert "INNER JOIN b ON a.kab = b.kab" in relationships.used_references[0]
+    assert "INNER JOIN c x ON b.kbc = c x.kbc" in relationships.used_references[0]
     assert relationships.used_references[0].startswith("a")
-    assert relationships.used_references[1] == "e JOIN i ON e.kie = i.kie"
+    assert relationships.used_references[1] == "e INNER JOIN i ON e.kie = i.kie"
 
 def schema2() -> Schema:
     sql = """
@@ -184,15 +185,153 @@ def case2():
 
     posts = schema.tables["posts"]
 
-    assert posts.fields["user_id"].reference == ("users", "id")
+    assert posts.fields["user_id"].reference == Reference("users", "id")
 
     assert "comments" in schema.tables
 
     comments = schema.tables["comments"]
 
-    assert comments.fields["user_id"].reference == ("users", "id")
-    assert comments.fields["post_id"].reference == ("posts", "id")
+    assert comments.fields["user_id"].reference == Reference("users", "id")
+    assert comments.fields["post_id"].reference == Reference("posts", "id")
+
+
+
+def test_use_missing_field_root():
+    conflicts = Conflicts(schema1())
+    try:
+        conflicts.use_field("", "nonexistent")
+        assert False
+    except Exception as e:
+        assert "does not exist" in str(e)
+
+def test_use_missing_field_scope():
+    conflicts = Conflicts(schema1())
+    try:
+        conflicts.use_field("x", "nonexistent")
+        assert False
+    except Exception as e:
+        assert "does not exist" in str(e)
+
+def test_scope_no_intersection():
+    conflicts = Conflicts(schema1())
+    conflicts.use_field("x", "fa")
+    try:
+        conflicts.use_field("x", "fb")
+        assert False
+    except Exception as e:
+        assert "No intersection" in str(e)
+
+def test_root_contradiction_tables():
+    schema = parse_schema("""
+        CREATE TABLE t1 ( f1 BIGINT );
+        CREATE TABLE t2 ( f1 BIGINT );
+    """)
+    conflicts = Conflicts(schema)
+    conflicts.use_field("", "f1")
+    conflicts.use_table("t1")
+    try:
+        conflicts.use_table("t2")
+        assert False
+    except Exception as e:
+        assert "would collapse" in str(e)
+
+def test_alias_propagation_success():
+    schema = parse_schema("""
+        CREATE TABLE a ( id BIGINT PRIMARY KEY, f_a BIGINT );
+        CREATE TABLE b ( id BIGINT PRIMARY KEY, a_id BIGINT REFERENCES a(id), f_b BIGINT );
+        CREATE TABLE c ( id BIGINT PRIMARY KEY, b_id BIGINT REFERENCES b(id), f_c BIGINT );
+        CREATE TABLE d ( id BIGINT PRIMARY KEY, b_id BIGINT REFERENCES b(id), f_d BIGINT );
+    """)
+    conflicts = Conflicts(schema)
+    conflicts.use_field("", "f_d")
+    conflicts.use_field("x", "f_d")
+    conflicts.use_table("d x")
+    assert "d" not in conflicts.root.get_required_tables()
+
+def test_alias_propagation_ignored():
+    schema = parse_schema("""
+        CREATE TABLE t1 ( f1 BIGINT );
+        CREATE TABLE t2 ( f1 BIGINT );
+    """)
+    conflicts = Conflicts(schema)
+    conflicts.use_field("", "f1")
+    conflicts.use_table("t1")
+    conflicts.use_field("x", "f1")
+    conflicts.use_table("t2 x")
+    assert "t2" in conflicts.get_excluded_tables()
+
+def test_relationship_use_not_required():
+    schema = parse_schema("""
+        CREATE TABLE a ( id BIGINT PRIMARY KEY, f_a BIGINT );
+    """)
+    conflicts = Conflicts(schema)
+    rels = Relationships(conflicts, schema)
+    try:
+        rels.use_table("a")
+        assert False
+    except Exception as e:
+        assert "not required" in str(e)
+
+def test_relationship_join_not_joinable():
+    schema = parse_schema("""
+        CREATE TABLE a ( id BIGINT PRIMARY KEY, f_a BIGINT );
+        CREATE TABLE b ( id BIGINT PRIMARY KEY, a_id BIGINT REFERENCES a(id), f_b BIGINT );
+        CREATE TABLE c ( id BIGINT PRIMARY KEY, b_id BIGINT REFERENCES b(id), f_c BIGINT );
+    """)
+    conflicts = Conflicts(schema)
+    conflicts.use_field("", "f_a")
+    conflicts.use_field("", "f_c")
+    rels = Relationships(conflicts, schema)
+    rels.use_table("a")
+    try:
+        from relationships import Neighbor
+        rels.join_table(Neighbor("c", "a.id", "c.a_id"))
+        assert False
+    except Exception as e:
+        assert "Cannot join node" in str(e)
+
+def test_relationship_join_excluded():
+    schema = parse_schema("""
+        CREATE TABLE a ( id BIGINT PRIMARY KEY, f1 BIGINT );
+        CREATE TABLE b ( id BIGINT PRIMARY KEY, a_id BIGINT REFERENCES a(id), f1 BIGINT );
+    """)
+    conflicts = Conflicts(schema)
+    conflicts.use_field("", "f1")
+    rels = Relationships(conflicts, schema)
+    rels.use_table("a")
+    neighbors = rels.get_joinable_neighbors()
+    assert len(neighbors) == 0
+
+def test_relationships_join_type_format():
+    from relationships import Neighbor, JoinType
+    n = Neighbor("b", "a.id", "b.a_id")
+    assert n.format(JoinType.LEFT) == "LEFT JOIN b ON a.id = b.a_id"
+    assert n.format(JoinType.FULL) == "FULL JOIN b ON a.id = b.a_id"
+
+def test_relationship_undirected_orient():
+    from relationships import EdgeLabel, FieldRef
+    label = EdgeLabel(FieldRef("a", "a.id"), FieldRef("b", "b.a_id"))
+    n1 = label.orient("a", "b")
+    assert n1.table == "b"
+    assert n1.src_field == "a.id"
+    assert n1.dst_field == "b.a_id"
+    n2 = label.orient("b", "a")
+    assert n2.table == "a"
+    assert n2.src_field == "b.a_id"
+    assert n2.dst_field == "a.id"
 
 if __name__ == "__main__":
     case1()
     case2()
+    test_use_missing_field_root()
+    test_use_missing_field_scope()
+    test_scope_no_intersection()
+    test_root_contradiction_tables()
+    test_alias_propagation_success()
+    test_alias_propagation_ignored()
+    test_relationship_use_not_required()
+    test_relationship_join_not_joinable()
+    test_relationship_join_excluded()
+    test_relationships_join_type_format()
+    test_relationship_undirected_orient()
+    print("All tests passed!")

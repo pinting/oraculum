@@ -9,13 +9,18 @@ class Type:
     length: Optional[int] = None
 
 @dataclass
+class Reference:
+    table: str
+    column: str
+
+@dataclass
 class Field:
     name: str
     type: Type
     is_nullable: bool = True
     is_unique: bool = False
     is_primary_key: bool = False
-    reference: Optional[Tuple[str, str]] = None
+    reference: Optional[Reference] = None
 
 @dataclass
 class Table:
@@ -76,7 +81,7 @@ def parse_schema(sql: str) -> Schema:
                         # References users(id)
                         ref_table = c_kind.this.this.name
                         ref_col = c_kind.this.expressions[0].name
-                        reference = (ref_table, ref_col)
+                        reference = Reference(ref_table, ref_col)
                 
                 f = Field(
                     name=col_name,

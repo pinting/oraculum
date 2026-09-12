@@ -1,77 +1,137 @@
-from llama_cpp import Llama, LogitsProcessorList
+"""Interactive driver -- the first of the two entry points.
 
-from core import set_schema, get_schema, VOCABULARY_PATH, EOS_ID, init_engine
-from vocabulary import serialize_vocabulary
-from processor import LogitsProcessor
+Loads the vocabulary from disk, builds the engine over a schema and walks the
+syntax graph one token at a time, printing the tokens the graph currently
+allows and reading the next one from stdin.
 
-set_schema("""
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+    python main.py                    # one kernel worker
+    python main.py --threads 8        # eight
+    python main.py --schema my.sql
 
-CREATE TABLE orders (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id),
-    total DECIMAL(10, 2),
-    status TEXT DEFAULT 'pending'
-);
-""")
+See `live.py` for the model driven entry point.
+"""
 
-PROMPT = "Generate an SQL SELECT request to get the emails of users!"
+from __future__ import annotations
 
-def main() -> None:
-    model_path: str = "../models/gemma-3-4b-it-Q8_0.gguf"
+import argparse
+import sys
 
-    print(f"Loading model from {model_path}...")
+import core
+from core import EOS_ID, VOCABULARY_PATH, SCHEMA
+from src import Engine, debug
 
-    model: Llama = Llama(
-        model_path=model_path,
-        n_ctx=4096,
-        n_threads=4,
-        n_gpu_layers=999,
-        verbose=False,
+ROUTE_LIMIT: int = 100
+
+def printable(token: str) -> bool:
+    """Mirror the display filter of `main.rs`."""
+
+    if len(token) != 1 and token.isspace():
+        return False
+
+    return not any(ord(c) < 32 or ord(c) == 127 for c in token)
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Walk the seer SQL syntax graph interactively.")
+
+    parser.add_argument("--vocabulary", default=VOCABULARY_PATH, help="tiktoken vocabulary file")
+    parser.add_argument("--eos-id", type=int, default=EOS_ID, help="end of sequence token id")
+    parser.add_argument("--threads", type=int, default=1, help="kernel worker threads")
+    parser.add_argument("--schema", default=None, help="path to a .sql schema, defaults to the built-in one")
+    parser.add_argument(
+        "--no-debug",
+        dest="debug",
+        action="store_false",
+        help="do not print the resolver state after each modifying operation",
     )
 
-    print("Model loaded successfully!")
+    return parser.parse_args(argv)
 
-    raw_vocabulary: str = serialize_vocabulary(model)
-    raw_vocabulary_bytes: bytes = raw_vocabulary.encode("utf-8")
+def main(argv: list[str] | None = None) -> int:
+    args: argparse.Namespace = parse_args(argv)
 
-    init_engine(raw_vocabulary_bytes, EOS_ID, get_schema())
+    if args.debug:
+        debug.enable()
 
-    with open(VOCABULARY_PATH, "w", encoding="utf-8") as f:
-        f.write(raw_vocabulary)
+    if args.schema is not None:
+        with open(args.schema, "r", encoding="utf-8") as handle:
+            core.set_schema(handle.read())
+    else:
+        core.set_schema(SCHEMA)
 
-    print("Vocabulary saved successfully!")
+    try:
+        raw_vocabulary: bytes = core.load_vocabulary(args.vocabulary)
+    except OSError as error:
+        print(f"Failed to load vocabulary: {error}", file=sys.stderr)
 
-    vocab_size: int = model.n_vocab()
-    processor: LogitsProcessor = LogitsProcessor(vocab_size)
+        return 1
 
-    prompt: str = f"{get_schema()}\n\n{PROMPT}"
-    prompt_tokens: list[int] = model.tokenize(prompt.encode("utf-8"))
+    if args.threads > 1:
+        print(f"Driving the head pool on {args.threads} kernel workers")
 
-    print("Generating response...\n")
+    try:
+        engine: Engine = core.init_engine(
+            raw_vocabulary,
+            args.eos_id,
+            core.get_schema(),
+            args.threads,
+        )
+    except RuntimeError as error:
+        print(f"Failed to initialize engine: {error}", file=sys.stderr)
 
-    for token_id in model.generate(
-        prompt_tokens,
-        top_p=0.9,
-        temp=0.7,
-        logits_processor=LogitsProcessorList([processor]),
-    ):
-        token: bytes = model.detokenize([token_id])
+        return 1
 
-        print(token_id, token)
+    try:
+        while True:
+            route_ids: list[int] = engine.routes().tolist()
 
-        if len(token) == 0:
-            break
+            if not route_ids:
+                break
 
-        result: int = processor.feed(token_id)
+            switch: dict[str, int] = {}
 
-        if result != 0:
-            break
+            for token_id in route_ids:
+                token: str | None = engine.get_token(token_id)
+
+                if token is not None:
+                    switch[token] = token_id
+
+            routes: list[str] = sorted(token for token in switch if printable(token))
+            shown: list[str] = routes[:ROUTE_LIMIT]
+
+            print(
+                "Routes: "
+                + ", ".join(f"`{token}`" for token in shown)
+                + (", ..." if len(switch) > len(shown) else " ")
+            )
+
+            while True:
+                try:
+                    line: str = input("> ")
+                except EOFError:
+                    return 0
+
+                if not line:
+                    continue
+
+                token_id = switch.get(line)
+
+                if token_id is None:
+                    print("Non-existent token!")
+
+                    continue
+
+                engine.feed(token_id)
+
+                break
+
+            print(f"Matched: `{engine.matched()}`")
+
+            if engine.is_completed():
+                break
+    finally:
+        core.shutdown()
+
+    return 0
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
