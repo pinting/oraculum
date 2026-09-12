@@ -7,10 +7,15 @@ through the two phases a SELECT is resolved in:
    qualified by an alias or not.
 2. **FROM / JOIN** - `Relationships` walks the foreign key graph to connect
    the tables `Conflicts` ended up requiring.
+3. **WHERE** - `Relation` holds the virtual table the finished clause produced,
+   and the conditions are gated on the types of its columns.
 
-The boundary between them falls on a token: the `FROM` keyword. `enter_from()`
-is what the selector on that keyword calls, and it is where the join graph is
-built, because only then is the required table set final.
+Each boundary falls on a token. `enter_from()` is what the selector on the
+`FROM` keyword calls, and it is where the join graph is built, because only
+then is the required table set final; `enter_where()` is the same move one
+phase later, on the `WHERE` keyword, because only then is the FROM clause
+final. The second boundary only ever reads: a filter can neither require a
+table nor satisfy one.
 
 Everything a thunk asks is ordered and side effect free, and everything a
 selector applies happens on a `copy()`, so branches never see each other.
@@ -23,6 +28,8 @@ from __future__ import annotations
 
 from . import debug
 from .conflicts import Conflicts
+from .operators import TypeClass
+from .relation import Operand, Relation
 from .relationships import JoinType, Neighbor, Relationships
 from .schema import RESERVED, Schema
 from .scopes import unqualify
@@ -41,6 +48,7 @@ class Context:
         "_schema",
         "_conflicts",
         "_relationships",
+        "_relation",
         "_current_namespace",
         "_reserved",
     )
@@ -52,6 +60,7 @@ class Context:
         self._schema = schema
         self._conflicts = Conflicts(schema)
         self._relationships: Relationships | None = None
+        self._relation: Relation | None = None
         self._current_namespace: str = GLOBAL_NAMESPACE
         self._reserved: tuple[str, ...] | None = None
 
@@ -63,6 +72,7 @@ class Context:
         clone._relationships = (
             None if self._relationships is None else self._relationships.copy()
         )
+        clone._relation = None if self._relation is None else self._relation.copy()
         clone._current_namespace = self._current_namespace
         clone._reserved = self._reserved
 
@@ -79,6 +89,10 @@ class Context:
     @property
     def relationships(self) -> Relationships | None:
         return self._relationships
+
+    @property
+    def relation(self) -> Relation | None:
+        return self._relation
 
     # -- field phase ------------------------------------------------------
 
@@ -217,6 +231,62 @@ class Context:
 
         return self._relationships.head
 
+    def get_used_nodes(self) -> tuple[str, ...]:
+        """The nodes the FROM clause has placed, in the order it placed them."""
+
+        if self._relationships is None:
+            return ()
+
+        return self._relationships.get_used_nodes()
+
+    # -- second phase boundary --------------------------------------------
+
+    @debug.traced(lambda self: "enter_where()")
+    def enter_where(self) -> None:
+        """Fix the virtual table over the FROM clause as it now stands.
+
+        Called by the selector on the `WHERE` keyword. Idempotent for the same
+        reason `enter_from` is: a branch may reach it more than once while the
+        engine expands.
+        """
+
+        self._enter_where()
+
+    def _enter_where(self) -> None:
+        if self._relation is not None or self._relationships is None:
+            return
+
+        self._relation = Relation(self._schema, self._relationships.get_used_nodes())
+
+    # -- WHERE phase ------------------------------------------------------
+
+    def get_operands(self, kind: TypeClass | None = None) -> tuple[Operand, ...]:
+        """Columns a condition may name, optionally only those of one class.
+
+        Empty until the `WHERE` keyword has been taken, because until then
+        there is no closed FROM clause to read them off.
+        """
+
+        if self._relation is None:
+            return ()
+
+        return self._relation.get_operands(kind)
+
+    @debug.traced(lambda self, text: f"use_filter({text})")
+    def use_filter(self, text: str) -> bool:
+        """Record a condition, once it has been written whole."""
+
+        if self._relation is None:
+            return False
+
+        return self._relation.use_filter(text)
+
+    def get_used_filters(self) -> tuple[str, ...]:
+        if self._relation is None:
+            return ()
+
+        return self._relation.get_used_filters()
+
     # -- completion -------------------------------------------------------
 
     def is_satisfied(self) -> bool:
@@ -225,13 +295,19 @@ class Context:
     def __str__(self) -> str:
         """The state block `debug.py` prints after every modifying operation.
 
-        `Conflicts.__str__` supplies the first six lines; the last is the FROM
-        clause as `Relationships` has it so far, empty until phase two begins.
+        `Conflicts.__str__` supplies the first six lines; then the FROM clause
+        as `Relationships` has it so far, empty until phase two begins, and the
+        conditions `Relation` has taken, empty until phase three does.
         """
 
         references: str = "" if self._relationships is None else str(self._relationships)
+        filters: str = "" if self._relation is None else str(self._relation)
 
-        return f"{self._conflicts}\nUsed references  = {references}"
+        return (
+            f"{self._conflicts}\n"
+            f"Used references  = {references}\n"
+            f"Used filters     = {filters}"
+        )
 
     def __repr__(self) -> str:
         return f"Context(required={self.get_required_tables()})"

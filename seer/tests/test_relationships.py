@@ -149,6 +149,27 @@ class TestRelationships:
 
         assert str(relationships) == "users LEFT JOIN comments AS c ON users.id = c.user_id"
 
+    def test_used_nodes_are_structural(self, schema: Schema) -> None:
+        """The SQL rendering is for reading; the node names are for the relation."""
+
+        relationships: Relationships = Relationships(schema, {"comments c"})
+
+        relationships.use_table("users")
+
+        neighbor = [n for n in relationships.get_joinable_neighbors() if n.table == "comments c"][0]
+
+        relationships.join_table(neighbor, JoinType.LEFT)
+
+        assert relationships.get_used_nodes() == ("users", "comments c")
+
+    def test_used_nodes_span_entries(self, schema: Schema) -> None:
+        relationships: Relationships = Relationships(schema, ())
+
+        relationships.use_table("users")
+        relationships.use_table("posts")
+
+        assert relationships.get_used_nodes() == ("users", "posts")
+
     def test_neighbors_are_ordered(self, schema: Schema) -> None:
         relationships: Relationships = Relationships(schema, ())
 
@@ -177,3 +198,5 @@ class TestRelationships:
         assert "posts" not in clone.graph
         assert "posts" in relationships.graph
         assert relationships.get_used_references() == ("users",)
+        assert relationships.get_used_nodes() == ("users",)
+        assert clone.get_used_nodes() == ("users", "posts")

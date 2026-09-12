@@ -36,6 +36,11 @@ STATEMENTS: list[str] = [
     "SELECT title, c.body FROM posts LEFT JOIN comments AS c ON posts.id = c.post_id;",
     "SELECT email, title, c.body FROM users INNER JOIN posts ON users.id = posts.user_id"
     " INNER JOIN comments AS c ON posts.id = c.post_id;",
+    # A WHERE clause spawns a head per column of the virtual table, which is
+    # the widest frontier the graph produces.
+    "SELECT email FROM users WHERE email LIKE 'a%';",
+    "SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id"
+    " WHERE (email = 'a' OR users.id > 1) AND NOT title = body;",
 ]
 
 class TestEquivalence:

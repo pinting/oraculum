@@ -18,6 +18,8 @@ The modelling underneath the graph is a stack of its own:
     scopes.py         the registry of alias scopes
     conflicts.py      root and scopes behind one interface
     relationships.py  the foreign key join graph
+    relation.py       the virtual table a finished FROM clause produces
+    operators.py      type classes, and what each may be compared with
 
 This module re-exports the public surface; `main.py` and `core.py` import from
 here.
@@ -31,6 +33,17 @@ from .context import Context, GLOBAL_NAMESPACE
 from .engine import Engine, Head, Node, Selector, Thunk, ThunkFn
 from .factory import DraftKind, IndexDraft, IndexFactory, IndexSpec
 from .graph import alias, root
+from .operators import (
+    BINARY_OPERATORS,
+    LITERALS,
+    Operator,
+    TypeClass,
+    classify,
+    is_comparable,
+    literal_for,
+    operators_for,
+)
+from .relation import Operand, Relation
 from .relationships import (
     JOIN_TYPES,
     EdgeLabel,
@@ -43,9 +56,10 @@ from .relationships import (
 from .root import Root
 from .schema import RESERVED, Field, Reference, Schema, Table, Type, parse_schema
 from .scope import Scope
-from .scopes import Scopes, qualify, sql_name, unqualify
+from .scopes import Scopes, qualify, reference_name, sql_name, unqualify
 
 __all__ = [
+    "BINARY_OPERATORS",
     "Conflicts",
     "Context",
     "debug",
@@ -62,10 +76,14 @@ __all__ = [
     "JOIN_TYPES",
     "JoinGraph",
     "JoinType",
+    "LITERALS",
     "Neighbor",
     "Node",
+    "Operand",
+    "Operator",
     "RESERVED",
     "Reference",
+    "Relation",
     "Relationships",
     "Root",
     "Schema",
@@ -76,9 +94,15 @@ __all__ = [
     "Thunk",
     "ThunkFn",
     "Type",
+    "TypeClass",
     "alias",
+    "classify",
+    "is_comparable",
+    "literal_for",
+    "operators_for",
     "parse_schema",
     "qualify",
+    "reference_name",
     "root",
     "sql_name",
     "unqualify",

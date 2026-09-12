@@ -23,18 +23,7 @@ from typing import Any, Iterable, NamedTuple
 from sage.all import Graph
 
 from .schema import Schema
-from .scopes import sql_name, unqualify
-
-def reference_name(node: str) -> str:
-    """How a node is written in an `ON` clause.
-
-    These tokens are emitted verbatim, so they have to be valid SQL: an aliased
-    node is referenced by its alias and a bare one by its table name.
-    """
-
-    table, alias = unqualify(node)
-
-    return alias if alias else table
+from .scopes import reference_name, sql_name, unqualify
 
 class JoinType(Enum):
     INNER = "INNER JOIN"
@@ -132,7 +121,7 @@ class JoinGraph:
 class Relationships:
     """The FROM clause: pick a required table, then walk the foreign keys."""
 
-    __slots__ = ("_schema", "_graph", "_head", "_used_references")
+    __slots__ = ("_schema", "_graph", "_head", "_used_references", "_used_nodes")
 
     def __init__(
         self,
@@ -145,6 +134,7 @@ class Relationships:
         self._schema = schema
         self._head: str | None = None
         self._used_references: tuple[str, ...] = ()
+        self._used_nodes: tuple[str, ...] = ()
         self._graph = JoinGraph(self._build_edges(schema, required))
 
     @staticmethod
@@ -194,6 +184,7 @@ class Relationships:
         clone._graph = self._graph.copy()
         clone._head = self._head
         clone._used_references = self._used_references
+        clone._used_nodes = self._used_nodes
 
         return clone
 
@@ -208,11 +199,24 @@ class Relationships:
     def get_used_references(self) -> tuple[str, ...]:
         return self._used_references
 
+    def get_used_nodes(self) -> tuple[str, ...]:
+        """Every node the clause has placed, as `"table"` or `"table alias"`.
+
+        `_used_references` is the same history rendered as SQL, which is what
+        the debug block prints; this is the structural half, and it is what the
+        virtual table of `relation.py` is built over. Contraction destroys the
+        vertices as it goes, so the record has to be kept rather than read back
+        off the graph.
+        """
+
+        return self._used_nodes
+
     def use_table(self, node: str) -> bool:
         """Open a new FROM entry at `node`, which becomes the head."""
 
         self._head = node
         self._used_references = self._used_references + (sql_name(node),)
+        self._used_nodes = self._used_nodes + (node,)
 
         return True
 
@@ -241,6 +245,8 @@ class Relationships:
             return False
 
         self._graph.merge_vertices(self._head, neighbor.table)
+
+        self._used_nodes = self._used_nodes + (neighbor.table,)
 
         if self._used_references:
             joined: str = f"{self._used_references[-1]} {neighbor.format(join_type)}"

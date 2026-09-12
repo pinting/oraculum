@@ -17,7 +17,7 @@ an existing `.venv` was created without access to the system packages.
 
 ```bash
 make build       # venv + kernel + runtime dependencies
-make test        # 240 tests
+make test        # 358 tests
 make run         # main.py, interactive
 make live        # main.py --live, model driven
 make distclean   # also removes .venv, to recreate it

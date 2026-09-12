@@ -218,6 +218,93 @@ class TestCopy:
         assert clone.relationships is not None
         assert ctx.relationships is None
 
+class TestWherePhase:
+    """`enter_where` is the second boundary: it fixes the virtual table."""
+
+    def _joined(self, schema: Schema) -> Context:
+        """A context whose FROM clause is `users INNER JOIN comments AS c`."""
+
+        ctx: Context = Context(schema)
+
+        ctx.use_field("email")
+        ctx.set_current_namespace("c")
+        ctx.use_field("post_id")
+        ctx.use_table("users")
+        ctx.join_table(_neighbor(ctx, "comments c"))
+
+        return ctx
+
+    def test_no_operands_before_the_keyword(self, schema: Schema) -> None:
+        ctx: Context = self._joined(schema)
+
+        assert ctx.relation is None
+        assert ctx.get_operands() == ()
+        assert ctx.use_filter("email = 'a'") is False
+
+    def test_relation_covers_the_joined_nodes(self, schema: Schema) -> None:
+        ctx: Context = self._joined(schema)
+
+        assert ctx.get_used_nodes() == ("users", "comments c")
+
+        ctx.enter_where()
+
+        assert ctx.relation is not None
+        assert ctx.relation.get_nodes() == ("users", "comments c")
+
+        names: set[str] = {operand.text for operand in ctx.get_operands()}
+
+        # Both sides of the join are reachable, the aliased one by its alias.
+        assert "users.email" in names
+        assert "c.post_id" in names
+        # `id` is on both nodes, so the bare spelling is ambiguous and absent.
+        assert "email" in names
+        assert "id" not in names
+
+    def test_enter_where_is_idempotent(self, schema: Schema) -> None:
+        ctx: Context = self._joined(schema)
+
+        ctx.enter_where()
+
+        relation = ctx.relation
+
+        ctx.use_filter("users.email = 'a'")
+        ctx.enter_where()
+
+        assert ctx.relation is relation
+        assert ctx.get_used_filters() == ("users.email = 'a'",)
+
+    def test_enter_where_without_a_from_clause_does_nothing(self, schema: Schema) -> None:
+        ctx: Context = Context(schema)
+
+        ctx.enter_where()
+
+        assert ctx.relation is None
+
+    def test_filters_do_not_change_satisfaction(self, schema: Schema) -> None:
+        """A condition can neither require a table nor discharge one."""
+
+        ctx: Context = self._joined(schema)
+
+        ctx.enter_where()
+
+        required: list[str] = ctx.get_required_tables()
+
+        assert ctx.use_filter("users.email = 'a'") is True
+        assert ctx.get_required_tables() == required
+        assert ctx.is_satisfied()
+
+    def test_copy_isolates_the_relation(self, schema: Schema) -> None:
+        ctx: Context = self._joined(schema)
+
+        ctx.enter_where()
+
+        clone: Context = ctx.copy()
+
+        clone.use_filter("users.email = 'a'")
+
+        assert clone.get_used_filters() == ("users.email = 'a'",)
+        assert ctx.get_used_filters() == ()
+
 class TestDisplay:
     """`Context.__str__` is the state block `debug.py` prints."""
 
@@ -234,6 +321,7 @@ class TestDisplay:
             "Scopes tables    = ",
             "Excluded tables  = ",
             "Used references  = ",
+            "Used filters     = ",
         ]
 
     def test_initial_state(self, schema: Schema) -> None:
@@ -260,6 +348,16 @@ class TestDisplay:
             in block
         )
         assert "Satisfied        = True" in block
+
+    def test_filters_are_reported(self, schema: Schema) -> None:
+        ctx: Context = Context(schema)
+
+        ctx.use_field("email")
+        ctx.use_table("users")
+        ctx.enter_where()
+        ctx.use_filter("users.email = 'a'")
+
+        assert "Used filters     = users.email = 'a'" in str(ctx)
 
     def test_root_is_rendered_as_dnf(self, schema: Schema) -> None:
         """An ambiguous field leaves a disjunction, simplified by sympy."""
