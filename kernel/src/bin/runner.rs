@@ -8,7 +8,7 @@
 //! notification at a time.
 //!
 //! The language is `<greeting> <alias>`, where the alias is any identifier that
-//! is not a reserved word -- which is a group: the identifier pattern minus one
+//! is not a reserved word - which is a group: the identifier pattern minus one
 //! lattice per word to keep out.
 
 use std::io::{self, Write};

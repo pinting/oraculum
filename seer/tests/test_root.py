@@ -1,4 +1,4 @@
-"""`Root` -- the GF(2) mutual exclusion resolver.
+"""`Root` - the GF(2) mutual exclusion resolver.
 
 The running product over SageMath's `BooleanPolynomialRing`: selecting a field
 multiplies its mutual exclusion constraint in, and the questions the FROM

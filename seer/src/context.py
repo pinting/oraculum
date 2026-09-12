@@ -3,9 +3,9 @@
 A context owns a `Conflicts` and a `Relationships`, and tracks the query
 through the two phases a SELECT is resolved in:
 
-1. **fields** -- `Conflicts` narrows the table space as fields are selected,
+1. **fields** - `Conflicts` narrows the table space as fields are selected,
    qualified by an alias or not.
-2. **FROM / JOIN** -- `Relationships` walks the foreign key graph to connect
+2. **FROM / JOIN** - `Relationships` walks the foreign key graph to connect
    the tables `Conflicts` ended up requiring.
 
 The boundary between them falls on a token: the `FROM` keyword. `enter_from()`
@@ -115,8 +115,8 @@ class Context:
 
         The SQL keywords of `schema.RESERVED` in both cases, plus every table
         and column name of the schema. An alias that spelled one of those would
-        be ambiguous with the token it shadows -- `SELECT users.email` would
-        open an alias called `users` rather than reference the table -- so
+        be ambiguous with the token it shadows - `SELECT users.email` would
+        open an alias called `users` rather than reference the table - so
         `graph.alias` subtracts them from the identifier pattern.
 
         Constant for a schema, so it is computed once and carried by `copy()`

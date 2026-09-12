@@ -1,8 +1,8 @@
 """Shared setup for the drivers.
 
 Holds the vocabulary and the engine as module state and exposes `routes` and
-`feed` over them, so a caller that has no engine of its own -- the logits
-processor of `processor.py` -- can still reach one.
+`feed` over them, so a caller that has no engine of its own - the logits
+processor of `processor.py` - can still reach one.
 
 Both modes of `main.py`, interactive and model driven, build their engine
 through `init_engine`. The `int` returns are a status code rather than a raised

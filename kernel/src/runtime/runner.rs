@@ -2,12 +2,12 @@
 //!
 //! A feed is three stages, and only the middle one is the caller's:
 //!
-//! 1. **advance** -- every head consumes the token. Heads are independent, so
+//! 1. **advance** - every head consumes the token. Heads are independent, so
 //!    this fans out over the workers; the ones that reject the token die.
-//! 2. **notify** -- every head that reached an accepting state is reported to
+//! 2. **notify** - every head that reached an accepting state is reported to
 //!    the resolver, which answers with the drafts that may follow. This is the
 //!    caller's modelling and runs on the runner's own thread.
-//! 3. **build** -- the drafts come back as real indexes from the factory, which
+//! 3. **build** - the drafts come back as real indexes from the factory, which
 //!    spreads the batch over the same workers, and each becomes a new head.
 //!
 //! Stages 2 and 3 repeat until nothing new appears, because an index may accept
@@ -247,8 +247,8 @@ where
     ///
     /// The whole feed runs inside the worker pool, not merely the stages that
     /// fan out here. Rayon routes nested parallel work to the pool the current
-    /// thread belongs to, so a resolver that reaches back into the factory --
-    /// which is what building a wide group draft does -- shares these workers
+    /// thread belongs to, so a resolver that reaches back into the factory -
+    /// which is what building a wide group draft does - shares these workers
     /// instead of starting a second pool of its own.
     pub fn feed(&mut self, token_id: T, resolver: &(dyn Resolver<P> + Sync)) -> bool {
         let pool: Arc<ThreadPool> = self.pool.clone();

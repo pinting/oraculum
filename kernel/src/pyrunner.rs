@@ -41,7 +41,7 @@ pub struct PyHead {
     pub index_id: u64,
     #[pyo3(get)]
     pub node: u64,
-    /// The index's label -- for a group, the shape of its inclusion.
+    /// The index's label - for a group, the shape of its inclusion.
     #[pyo3(get)]
     pub rule: String,
     #[pyo3(get)]
@@ -89,7 +89,7 @@ impl<'a> Bridge<'a> {
             report.matched.as_str(),
         ))?;
 
-        // `None` is the end of the graph; a list -- possibly empty -- is the
+        // `None` is the end of the graph; a list - possibly empty - is the
         // set of indexes that may follow.
         if answer.is_none() {
             return Ok(Expansion::Terminal);
@@ -132,8 +132,8 @@ impl Resolver<Payload> for Bridge<'_> {
 ///
 /// Set a resolver, spawn the heads the generation starts from, then feed
 /// tokens. Every time a head reaches the end of its index the resolver is
-/// called with `(head_id, payload, matched)` and answers with either `None` --
-/// nothing follows -- or a list of `(spec, payload)` pairs naming the indexes
+/// called with `(head_id, payload, matched)` and answers with either `None` -
+/// nothing follows - or a list of `(spec, payload)` pairs naming the indexes
 /// that do.
 #[pyclass(name = "Runner")]
 pub struct PyRunner {

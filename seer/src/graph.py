@@ -75,8 +75,8 @@ def dot(next: Thunk) -> Thunk:
 def alias(selector: Selector, next: Thunk) -> Thunk:
     """Match an alias: an identifier that spells nothing else.
 
-    An alias is invented by whoever is generating -- nothing in the schema says
-    what it should be called -- so the only shape available is the identifier
+    An alias is invented by whoever is generating - nothing in the schema says
+    what it should be called - so the only shape available is the identifier
     pattern. That pattern is too wide on its own: `users` matches it, and so
     does `SELECT`, which would make `SELECT users.email` open an alias named
     after a table and `SELECT SELECT.x` legal.
@@ -84,7 +84,7 @@ def alias(selector: Selector, next: Thunk) -> Thunk:
     So the index is a group: the identifier pattern minus one lattice per
     reserved word, table and field. While an exclusion still spells what has
     been matched the group refuses to end, and generation has to go on until
-    the identifier grows past it -- `user` is blocked, `users` is blocked,
+    the identifier grows past it - `user` is blocked, `users` is blocked,
     `users2` is not.
     """
 

@@ -1,4 +1,4 @@
-"""`Conflicts` -- the facade over `Root` and `Scopes`."""
+"""`Conflicts` - the facade over `Root` and `Scopes`."""
 
 from __future__ import annotations
 

@@ -5,8 +5,8 @@ use crate::number::Number;
 
 /// Everything the factory can hand out an id for.
 ///
-/// A `Unit` is either a flat index -- a `Lattice` or an `Expression`, addressed
-/// by a node id, unchanged from when they were the whole library -- or a
+/// A `Unit` is either a flat index - a `Lattice` or an `Expression`, addressed
+/// by a node id, unchanged from when they were the whole library - or a
 /// `Group` built over other units. The split matters because only a flat index
 /// answers `next`/`transitions`/`accepting` from a node id alone; a group has
 /// to walk each of its members, which is a job for `Memory`.

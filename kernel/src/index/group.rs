@@ -6,8 +6,8 @@ use crate::number::Number;
 
 /// A language subtraction: one inclusion minus any number of exclusions.
 ///
-/// From the outside a group is just another index -- it is fed the same tokens
-/// and asked the same questions -- but it accepts a word only when the
+/// From the outside a group is just another index - it is fed the same tokens
+/// and asked the same questions - but it accepts a word only when the
 /// inclusion accepts it and no exclusion does. That is what alias resolution
 /// needs: an identifier is a legal alias unless it happens to spell a reserved
 /// word, a table name or a field name.

@@ -1,4 +1,4 @@
-"""`Scope` and `Scopes` -- alias resolution by set intersection."""
+"""`Scope` and `Scopes` - alias resolution by set intersection."""
 
 from __future__ import annotations
 

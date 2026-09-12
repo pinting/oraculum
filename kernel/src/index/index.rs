@@ -2,7 +2,7 @@
 //!
 //! `BaseIndex` is the walk: which tokens lead out of a node, where one of them
 //! leads, and whether a word may end here. `Accepting` says a little more than
-//! a bool -- `Yes(is_more)` carries whether the word could also go on -- which
+//! a bool - `Yes(is_more)` carries whether the word could also go on - which
 //! is what lets the runner retire a head that has nothing left to match rather
 //! than keep it in the pool for every later token.
 //!

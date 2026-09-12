@@ -10,15 +10,15 @@ Three kinds of draft exist, mirroring the kernel:
 * a **lattice** matches a constant string through Aho-Corasick;
 * an **expression** matches a regular expression through a TokTrie backed DFA;
 * a **group** is one inclusion minus any number of exclusions, and is what
-  alias resolution is built from -- see `graph.alias`.
+  alias resolution is built from - see `graph.alias`.
 
 A group is drafted from other drafts, but the kernel wants the *ids* of its
 members, so `spec` builds them first. That is cheap after the first time: the
 members of an alias group are one shared identifier expression plus one tiny
 lattice per excluded name, and all of them are memoised.
 
-Indexes are immutable and carry no position -- the position lives in the
-kernel's `Memory`, one per head -- which is what lets a single index back every
+Indexes are immutable and carry no position - the position lives in the
+kernel's `Memory`, one per head - which is what lets a single index back every
 node that asks for it and be shared across the worker pool.
 """
 
@@ -113,8 +113,8 @@ class IndexFactory:
     """Drafts in, index ids out.
 
     A thin layer over `kernel.Factory`: it resolves the members of a group
-    draft into ids and leaves everything else -- building, memoising,
-    single-flight across threads -- to the kernel.
+    draft into ids and leaves everything else - building, memoising,
+    single-flight across threads - to the kernel.
     """
 
     __slots__ = ("_vocabulary", "_unit", "_specs", "_cache")

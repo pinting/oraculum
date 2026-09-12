@@ -8,7 +8,7 @@ Directed graph generator library for LLM token guidance. Translates regular expr
 
 **Groups** subtract: one inclusion minus any number of exclusions, which is how an alias becomes "any identifier that is not a reserved word".
 
-On top of those it offers a **dynamic API** -- a factory that keeps the indexes and answers with ids, and a runner that keeps a pool of active indexes walking them over a pool of workers. The graph being walked stays with the caller: the kernel only says when a head has finished, and asks what comes next.
+On top of those it offers a **dynamic API** - a factory that keeps the indexes and answers with ids, and a runner that keeps a pool of active indexes walking them over a pool of workers. The graph being walked stays with the caller: the kernel only says when a head has finished, and asks what comes next.
 
 ```
 Vocabulary loaded in 106.719618ms
@@ -47,14 +47,14 @@ An index is built at most once however many callers ask for it and however many
 threads ask at the same moment, so a head is cheap: it borrows a shared index
 instead of owning one.
 
-**`Runner`** is the pool of active indexes -- *heads*. Each head is a `Memory`
+**`Runner`** is the pool of active indexes - *heads*. Each head is a `Memory`
 over an index (where the walk stands and what it has consumed) plus an opaque
 payload the kernel never looks inside. Feeding a token advances every head
 across the workers; the ones that reject it die.
 
 **The resolver** is how the kernel asks what happens next. When a head reaches
 the end of its index the runner calls it with `(head_id, payload, matched)` and
-takes back either `None` -- nothing follows, the generation is complete -- or
+takes back either `None` - nothing follows, the generation is complete - or
 the `(spec, payload)` pairs of the indexes that do. Those are built on the same
 workers and become the next heads, and the loop repeats until nothing new
 appears.
@@ -123,7 +123,7 @@ Either side of a group may itself be a group, so subtractions nest.
 
 ### Memory, and where the parallelism goes
 
-Indexes carry no position -- a `Lattice` is a table of token edges per byte
+Indexes carry no position - a `Lattice` is a table of token edges per byte
 offset, an `Expression` is a DFA, and both are immutable once built. The walk
 over one is the `Memory`, and there is one per head. For a flat index that is a
 single node id; for a group it is one sub-memory per member, which is what makes
@@ -169,7 +169,7 @@ factory, the head pool and a group index.
 Index construction releases the GIL, so `Lattice`, `Expression` and the two
 bases can be built from several Python threads in parallel. The work touches no
 Python state while the GIL is dropped. The `Factory` and `Runner` do this for
-you -- a `Runner.feed` holds the GIL only while calling the resolver -- so reach
+you - a `Runner.feed` holds the GIL only while calling the resolver - so reach
 for a thread pool here only when owning the indexes directly.
 
 ```python

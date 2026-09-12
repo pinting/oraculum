@@ -2,7 +2,7 @@
 //!
 //! The kernel builds no graph of its own. When a head accepts, it notifies the
 //! caller through a `Resolver` and gets back either the drafts of the indexes
-//! that may follow -- each carrying the payload for the head it will become --
+//! that may follow - each carrying the payload for the head it will become -
 //! or `Terminal`, meaning nothing follows and the generation is complete.
 //!
 //! The library on the other side owns the modelling: it takes the payload,
@@ -55,7 +55,7 @@ pub enum Expansion<P> {
     Terminal,
 
     /// The indexes that may follow. An empty list is a dead end rather than a
-    /// completion -- the head simply has no children.
+    /// completion - the head simply has no children.
     Children(Vec<Request<P>>),
 }
 

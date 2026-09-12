@@ -1,4 +1,4 @@
-"""`Context` -- the generation state built on `Conflicts` and `Relationships`.
+"""`Context` - the generation state built on `Conflicts` and `Relationships`.
 
 Covers both phases and the boundary between them, plus the copy-on-write
 cloning the engine depends on.
