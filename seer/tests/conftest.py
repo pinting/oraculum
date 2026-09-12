@@ -18,7 +18,7 @@ import kernel as kl
 from src.factory import IndexFactory
 from src.schema import Schema, parse_schema
 
-VOCABULARY_PATH: Path = Path(__file__).parent.parent / "vocabulary.tiktoken"
+VOCABULARY_PATH: Path = Path(__file__).parent.parent.parent / "vocabulary.tiktoken"
 EOS_ID: int = 1
 
 # The schema of `experiments/9-advanced-modelling`: `id` is ambiguous across

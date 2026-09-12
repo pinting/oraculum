@@ -71,15 +71,12 @@ kernel: prerequisites
 build: kernel
 	uv pip install -r requirements.txt
 
-# Extra dependency of the live.py entry point.
+# Extra dependency of the live mode entry point.
 model: build
 	uv pip install llama-cpp-python
 
 test:
 	$(PYTHON) -m pytest tests/ -q
-
-benchmark:
-	$(PYTHON) benchmark.py
 
 # Interactive entry point.
 run:
@@ -87,7 +84,7 @@ run:
 
 # Model driven entry point.
 live:
-	$(PYTHON) live.py
+	$(PYTHON) main.py --live
 
 clean:
 	rm -rf __pycache__/ src/__pycache__/ tests/__pycache__/ tests/parity/__pycache__/ .pytest_cache/
