@@ -96,12 +96,34 @@ def main(argv: list[str] | None = None) -> int:
                     switch[token] = token_id
 
             routes: list[str] = sorted(token for token in switch if printable(token))
+            has_others = False
+
+            if len(switch) > ROUTE_LIMIT:
+                from src.factory import DraftKind
+                constants = [
+                    h.payload.draft.value[len(h.matched):] 
+                    for h in engine.heads 
+                    if h.payload.draft.kind == DraftKind.LATTICE
+                ]
+                constants = [c for c in constants if c]
+                constants.extend([".", " ", "\t", ","])
+
+                if constants:
+                    constant_routes = []
+                    for token in routes:
+                        if any(c.startswith(token) for c in constants):
+                            constant_routes.append(token)
+                    
+                    if constant_routes and len(constant_routes) < len(routes):
+                        routes = constant_routes
+                        has_others = True
+
             shown: list[str] = routes[:ROUTE_LIMIT]
 
             print(
                 "Routes: "
                 + ", ".join(f"`{token}`" for token in shown)
-                + (", ..." if len(switch) > len(shown) else " ")
+                + (", ..." if len(routes) > len(shown) or has_others else " ")
             )
 
             while True:

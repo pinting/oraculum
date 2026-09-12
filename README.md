@@ -1,74 +1,14 @@
 # oraculum
 
-Text to SQL LLM enforcement research.
-
-**Warning:** This is a proof of concept & work in progress project, currently at the experimenting stage!
-
-## seer
-
-`seer` is an SQL syntax graph generator: it constrains an LLM to emit only `SELECT` statements that are valid *against a specific schema*. It owns the modelling and the syntax graph and leaves every automaton to `kernel`.
-
-Its modelling comes from Experiment 9, so the generated language includes `JOIN`: `Root` (the GF(2) ring), `Scope`, `Scopes`, `Conflicts` and `Relationships` decide which fields, tables and joins are still legal and the schema is parsed with `sqlglot`. SageMath is used directly, as the experiment does, so the venv is created with `--system-site-packages`; a parity test drives seer and the experiment's original over the same cases and compares their traces. Every modifying `Context` operation prints the experiment's resolver state block to stdout.
-
-Aliases are resolved with a `kernel` group index -- the identifier pattern minus every reserved word, table name and field name -- so an alias can never shadow the token it would otherwise be confused with. See `seer/README.md`.
-
-## kernel
-
-`kernel` is a directed graph generator library, the conclusion of Experiment 1-7. It translates regular expressions and constant strings to DFAs and subtracts one from another with **groups**.
-
-It also owns the walking. A **factory** keeps every index and answers with an id rather than handing ownership out and a **runner** keeps a pool of active indexes -- *heads* -- moving over a pool of workers. The graph being walked stays with the caller: when a head reaches the end of its index the kernel says so and asks what comes next, which is the seam `seer` plugs its syntax graph into. See `kernel/README.md`.
+![Preview](preview.gif)
 
 ## Architecture
 
 Two things have to be true of every statement the system produces. It has to be **grammatical** — a well formed `SELECT`. And it has to be **meaningful** — a query the schema can actually answer. Both are enforced one token at a time, while the model is writing, so neither is ever checked after the fact.
 
-This section is how. Grey notes carry the data structures behind each piece: what is stored, what is shared and how the records point at one another.
-
 ### 1. Tokens, not characters
 
-A grammar talks about text: the word `SELECT`, a comma, an identifier. A language model does not emit text. It emits **tokens** drawn from a fixed vocabulary and the same text can arrive many ways:
-
-```
-"users"   as   [users]   or   [user][s]   or   [us][ers]   or   [u][se][r][s]   ...
-```
-
-To compare the two you have to turn a token sequence back into text, which just means gluing the pieces together. Call that $c$:
-
-```math
-c(v_1 v_2 \cdots v_k) \;=\; v_1 v_2 \cdots v_k
-```
-
-Gluing is associative, $c(xy) = c(x)\,c(y)$, which is the only sense in which the vocabulary is a homomorphism.
-
-So what has to be enforced is not the set $L$ of legal texts but the set of token sequences that glue into it:
-
-```math
-c^{-1}(L) \;=\; \{\, w \in V^{*} \;:\; c(w) \in L \,\}
-```
-
-— every way of spelling something in $L$ with this vocabulary. For $L = \{\texttt{"users"}\}$ that is the handful of chops above; for an infinite $L$ it is infinite.
-
-$c$ is many-to-one, so $c^{-1}(L)$ is always larger than $L$ and can never be listed; it has to be a machine. And regular languages survive inverse homomorphism, so whenever $L$ is regular that machine is a finite automaton over $V$. It is what `kernel` calls an **index** and sections 2 to 4 are three ways of building one.
-
-```
-NOTE: What an index is, from outside
-
-You hand the factory a description -- a constant, a pattern, or a
-difference of other indexes -- and get back an id. After that the only
-thing anyone says is "advance index 7 by token 1204" and which of the
-three kinds it happens to be stops mattering.
-
-The one place it does matter is that a group is built over other indexes
-rather than over flat ones, so an exclusion can itself be a difference
-and subtractions nest. And none of the three stores a position, which is
-why one automaton can sit behind every active index using it.
-```
-
-### 2. Constants: a graph over the gaps in a string
-
-Take the constant `users`. Put a node at every position in it — before the `u`, between each pair of letters, after the `s`. Six nodes for five characters. Then draw an edge from $i$ to $j$ whenever some vocabulary token spells exactly the characters between them.
-
-Against the Gemma 3 vocabulary, that graph is:
+A grammar talks about text: the word `SELECT`, a comma, an identifier. A language model does not emit text. It emits **tokens** drawn from a fixed vocabulary and the same text can arrive many ways.
 
 ```mermaid
 graph LR
@@ -95,6 +35,42 @@ graph LR
     style n5 stroke-width:4px
 ```
 
+To compare the two you have to turn a token sequence back into text, which just means gluing the pieces together. Call that $c$:
+
+```math
+c(v_1 v_2 \cdots v_k) \;=\; v_1 v_2 \cdots v_k
+```
+
+Gluing is associative, $c(xy) = c(x)\,c(y)$, which is the only sense in which the vocabulary is a homomorphism.
+
+So what has to be enforced is not the set $L$ of legal texts but the set of token sequences that glue into it:
+
+```math
+c^{-1}(L) \;=\; \{\, w \in V^{*} \;:\; c(w) \in L \,\}
+```
+
+— every way of spelling something in $L$ with this vocabulary. For $L = \{\texttt{"users"}\}$ that is the handful of chops above; for an infinite $L$ it is infinite.
+
+$c$ is many-to-one, so $c^{-1}(L)$ is always larger than $L$ and can never be listed; it has to be a machine. And regular languages survive inverse homomorphism, so whenever $L$ is regular that machine is a finite automaton over $V$. It is what `kernel` calls an **index** and sections 2 to 4 are three ways of building one.
+
+```
+NOTE: What an index is from outside
+
+You hand the factory a description - a constant, a pattern, or a
+difference of other indexes - and get back an id. After that the only
+thing anyone says is "advance index 7 by token 1204" and which of the
+three kinds it happens to be stops mattering.
+
+The one place it does matter is that a group is built over other indexes
+rather than over flat ones, so an exclusion can itself be a difference
+and subtractions nest. And none of the three stores a position, which is
+why one automaton can sit behind every active index using it.
+```
+
+### 2. Constants: a graph over the gaps in a string
+
+Take the constant `users`. Put a node at every position in it — before the `u`, between each pair of letters, after the `s`. Six nodes for five characters. Then draw an edge from $i$ to $j$ whenever some vocabulary token spells exactly the characters between them.
+
 A **path from 0 to 5 is one way of spelling `users`** and every way appears as a path. So this graph *is* $c^{-1}(\{\texttt{users}\})$, drawn out. It is acyclic because every edge moves right and it has one accepting node, the last one.
 
 The encoding follows from the picture. Group the edges by their source node and two facts let most of the data disappear:
@@ -108,10 +84,9 @@ What is left is the out-edge labels, grouped by source — two arrays. Finding t
 NOTE: What a lattice answers
 
 Ask it which tokens leave position i and it hands back a slice of an
-array it already holds -- no allocation, no search. That is the only
+array it already holds - no allocation, no search. That is the only
 question it needs to answer: the target is i plus the token's length and
-"no tokens leave here" already means accepting, so neither is stored. For
-`users` the whole thing is 168 bytes.
+"no tokens leave here" already means accepting, so neither is stored.
 
 The Aho-Corasick automaton that found the edges is not part of it. It is
 built once per vocabulary, read while the arrays are filled and shared by
@@ -122,31 +97,23 @@ every lattice afterwards.
 
 A constant has a graph you can draw. A regular expression does not, so its automaton has to be discovered — and the trick is to let **the states be regular expressions themselves**.
 
-The *derivative* of a regex $r$ by a character $b$, written $\partial_b r$, is the regex describing what may still follow once $b$ has been read:
+The *derivative* of a regex $r$ by a character $b$, written $\partial_b r$, is exactly what remains of the regex after stripping off just the **first, single character** $b$:
 
 ```math
 \partial_b r \;=\; \{\, w \;:\; bw \in L(r) \,\}
 ```
 
-It is computed by four rules, structurally, with no search:
+Because a regular expression only has a finite number of distinct derivatives, every derivative naturally loops back on itself to become a state in a finite automaton.
 
-```
-  d_b(b)      = ""            reading the thing you wanted leaves nothing to do
-  d_b(x)      = none          reading anything else kills the branch
-  d_b(r | s)  = d_b(r) | d_b(s)
-  d_b(r s)    = d_b(r) s      ... and also d_b(s), if r can match nothing at all
-  d_b(r*)     = d_b(r) r*     one pass through the loop, then the loop again
-```
-
-Take the identifier pattern. Reading a `u` consumes the first class and leaves the starred tail; reading another letter leaves the same starred tail again:
+Take the SQL identifier pattern `[a-zA-Z_][a-zA-Z0-9_]*`. Reading a `u` consumes the first character class and leaves the starred tail. Reading another letter from the starred tail leaves the exact same starred tail again:
 
 ```
   r          = [a-zA-Z_][a-zA-Z0-9_]*
   d_u(r)     = [a-zA-Z0-9_]*
-  d_s(d_u(r))= [a-zA-Z0-9_]*        the same regex -- no new state
+  d_s(d_u(r))= [a-zA-Z0-9_]* -> The same regex, no new state
 ```
 
-Two distinct derivatives, so **two states** — which is exactly what the built automaton reports. Brzozowski's theorem guarantees this always terminates: a regex has only finitely many distinct derivatives, so the states run out. `derivre` computes them lazily, materialising a state the first time it is reached.
+Two distinct derivatives means exactly **two states** — which is what the built automaton reports. Brzozowski's theorem guarantees this always terminates: a regex has only finitely many distinct derivatives, so the states run out. `derivre` computes them lazily, materialising a state the first time it is reached.
 
 That gives an automaton over *characters*. One more step turns it into one over tokens: to take a token $v$, walk all of its characters at once.
 
@@ -163,21 +130,7 @@ The automata that come out are tiny in states and enormous in edges:
 [ \n\t]+                   2 states                                     1,628 bytes
 ```
 
-Two states — "nothing yet" and "inside an identifier" — but a fifth of the vocabulary continues legally from each. **An index costs its edge count, not its state count.**
-
-```
-NOTE: Where an expression's bytes go
-
-Ask it which tokens leave a state and you get a slice; ask where one of
-them goes and it binary-searches that slice, then reads the same position
-in a parallel array. Three arrays in CSR, with the offsets narrowed to
-the smallest integer width that can index them.
-
-That is where the 849,816 bytes of a two-state automaton go: 106,215
-edges, each storing a token and a target at 4 bytes apiece. The backend
-is swappable -- `DoubleHashDFA` and `FastHashDFA` trade the space for
-faster lookups, benchmarked in Experiment 7.
-```
+**An index costs its edge count, not its state count.**
 
 ### 4. Difference without a product
 
@@ -375,43 +328,6 @@ foreign keys are two alternatives, not a duplicate to collapse. The head
 is a single vertex name, so growing one FROM entry is a sequence of
 contractions into it.
 ```
-
-### 7. Grammar and semantics, together
-
-Both halves live in Python. `kernel` decides nothing about the language — it is the machine that runs automata fast and in parallel and it would run a graph describing something else just as happily.
-
-- The **syntax graph** of section 5 is the grammar. It decides *shape*.
-- The **latent state** of section 6 is the semantics. It rides along every branch of that graph, narrowed by each choice. It decides *content*.
-
-Neither shows up as a rejection, because nothing illegal is ever emitted — an illegal token is simply not on the menu. What you see instead is the menu shrinking and at times collapsing to a single entry. Walking one statement, listing the alternatives on offer at each point:
-
-```
-after                                       on offer
-------------------------------------------  ----------------------------
-SELECT body FROM                            comments | posts
-SELECT body, email FROM                     comments | posts | users
-SELECT email FROM                           users               (forced)
-SELECT email, title FROM users INNER JOIN   comments | posts
-SELECT ... INNER JOIN posts ON              users.id            (forced)
-SELECT ... INNER JOIN posts ON users.id =   posts.user_id       (forced)
-```
-
-`body` lives in two tables so both stay open; adding `email` pulls `users` in as well; on its own `email` forces `users` outright. Once the join target is chosen the `ON` columns are the edge label, so there is nothing left to choose.
-
-The three marked *forced* are the interesting ones: exactly one legal continuation, so the model has no decision left to make. It is not being scored down for choosing badly — it is being handed the only option.
-
-The other direction is the group of section 4, which can take the menu away entirely. An alias is being written, one character at a time:
-
-```
-SELECT u        . offered      -- `u` is a legal alias, so it may end here
-SELECT us       . offered
-SELECT user     . offered
-SELECT users    nothing        -- `users` is a table; the alias cannot end,
-                                  and no other rule is still alive
-SELECT users2   . offered      -- the exclusion died on the `2`
-```
-
-At `SELECT users` the alias has matched a table name, so the group refuses to finish and withholds the terminator; every other head has already died. The only way forward is to keep writing the identifier. Generation is not blocked, it is *forced* — which is the whole point of doing this during decoding rather than after it.
 
 ## Experiments
 
