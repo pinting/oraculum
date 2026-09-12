@@ -169,23 +169,40 @@ The trade is explicit: $O\bigl(\sum_i |Q_i|\bigr)$ of state per active alias, in
 
 ### 5. The graph: lazy determinization of an automaton nobody can build
 
-Above the indexes sits the syntax graph. It is a system of language equations over the index languages, with concatenation, union and recursion:
+Above the indexes sits the syntax graph. It weaves the raw primitives (constants, regexes, and groups) together into the overarching SQL grammar.
 
-```math
-\begin{aligned}
-S &= \texttt{SELECT} \cdot W \cdot F\bigl( W \cdot \texttt{FROM} \cdot W \cdot E \cdot \texttt{;} \bigr) \\
-F(k) &= \bigl( A \cdot \texttt{.} \cdot f \;+\; f \bigr) \cdot \bigl( k \;+\; C \cdot F(k) \bigr) \\
-E(k) &= \mathit{table} \cdot J(k) \\
-J(k) &= \mathit{fin}(k) \;+\; W \cdot \mathit{join} \cdot J(k) \\
-\mathit{fin}(k) &= \begin{cases} k & \text{if the selection is satisfied} \\ C \cdot E(k) & \text{otherwise} \end{cases}
-\end{aligned}
+The grammatical skeleton is right-linear:
+
+```mermaid
+graph TD
+    Start((Start)) -->|LATTICE: SELECT| S1(( ))
+    S1 -.->|EXPRESSION: space| F1(( ))
+
+    F1 -->|GROUP: alias| A1(( ))
+    A1 -->|LATTICE: .| D1(( ))
+    D1 -->|LATTICE: field| F2(( ))
+    F1 -->|LATTICE: field| F2
+
+    F2 -.->|EXPRESSION: comma + space| F1
+    F2 -.->|EXPRESSION: space| FROM(( ))
+
+    FROM -->|LATTICE: FROM| S2(( ))
+    S2 -.->|EXPRESSION: space| E1(( ))
+
+    E1 -->|LATTICE: table| J1(( ))
+    
+    J1 -.->|EXPRESSION: space + JOIN| E1
+    J1 -.->|EXPRESSION: comma + space| E1
+    J1 -->|LATTICE: ;| Accept(((Accept)))
 ```
 
-Every recursion is on the right, so the grammatical skeleton is right-linear and therefore regular. If that were all, the language could be compiled to one DFA ahead of time.
+If it were just this static structure, the language could be compiled ahead of time into one massive DFA. 
 
-$\mathit{fin}$ gives it away. Whether the statement may end after an entry or must open another one is not a property of the grammar; it is a question about what has already been selected. Every equation is like that — $f$ does not range over every field in the schema but over those still selectable, $\mathit{table}$ over those the FROM clause still owes. Each is a *function* of a latent state, not a fixed set.
+But it isn't static. Whether the statement may legally transition to the accepting `;` state or must open another table entry is not a property of the grammar — it is a question about what has *already been selected*. A node like `LATTICE: field` doesn't range over every field in the schema; it ranges only over the fields that are *still selectable in the current latent state*. 
 
-So the automaton is built while it is walked. A **configuration** is a finite set of heads:
+Every node evaluates a Boolean function over the latent context (the constraints on tables, aliases, and selected fields). 
+
+Because of this, the determinized machine is built lazily while it is walked. A **configuration** is a finite set of heads:
 
 ```math
 \begin{aligned}
@@ -195,9 +212,9 @@ So the automaton is built while it is walked. A **configuration** is a finite se
 \end{aligned}
 ```
 
-$\mathrm{routes}$ is the transition function of the determinized machine, taken over the live frontier — the subset construction, evaluated one token at a time instead of tabulated in advance. $\mathrm{expand}$ is the fixpoint: a head whose memory now accepts is replaced by the heads its continuation yields, applied to the state its selector returns, until nothing new appears.
+$\mathrm{routes}$ evaluates the transition function over the live frontier — effectively performing the subset construction one token at a time instead of tabulating it in advance. $\mathrm{expand}$ resolves the fixpoint: whenever a head reaches the end of its index, it yields its continuation $k_i$, applying it to the updated state $\mathit{ctx}_i$, spawning the next set of required indexes until nothing new appears.
 
-For a fixed schema the reachable configurations are finite, so the language is regular after all and the DFA does exist. It is merely unbuildable: the state carries a Boolean function over $n$ tables, of which there are $2^{2^n}$, times the alias states, times the contractions of the join graph. Ahead-of-time compilation is not wrong here, it is infeasible — the conclusion Experiments 1 through 7 reached from the other side.
+For a fixed schema the reachable configurations are technically finite, so the DFA does theoretically exist. But with $n$ tables carrying $2^{2^n}$ boolean functions, plus alias resolutions and join graphs, it is strictly unbuildable. Lazy determinization is the only way through.
 
 ```
 NOTE: The layers that meet at a head
