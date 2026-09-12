@@ -32,8 +32,10 @@ graph LR
 
     n3 -->|"rs"| n5
 
-    classDef accepting fill:#2f6fb5,stroke:#1b4670,color:#ffffff
-    class n5 accepting
+    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
+    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
+    class n0,n1,n2,n3,n4 plain
+    class n5 accent
 ```
 
 To compare the two you have to turn a token sequence back into text, which just means gluing the pieces together. Call that $c$:
@@ -200,8 +202,10 @@ graph LR
     head -.->|","| entry
     head -->|";"| accept(((accept)))
 
-    classDef latent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
-    class ref,entry,head latent
+    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
+    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
+    class q0,q1,q2,more,j1,j2,j3,accept plain
+    class ref,entry,head accent
 ```
 
 Solid edges are lattices, dashed ones expressions and the thick one is the alias group. The whitespace between tokens is an expression index of its own and is left out of the picture, as are the `AS alias` a join target may carry.
