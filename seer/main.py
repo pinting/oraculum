@@ -106,7 +106,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--schema",
         default=None,
-        help="path to a .sql schema, defaults to the built-in one",
+        help="path to a .sql schema, defaults to schema.sql",
     )
     parser.add_argument(
         "--no-debug",

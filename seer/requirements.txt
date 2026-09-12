@@ -2,6 +2,7 @@
 # created with --system-site-packages instead. See the Makefile.
 numpy>=1.24.0
 sqlglot>=25.0.0
-pytest>=8.0.0
+# Read by tests/main.py, which is the whole of the test suite:
+pyyaml>=6.0
 # Required only by the live.py entry point, installed by `make model`:
 # llama-cpp-python>=0.2.0

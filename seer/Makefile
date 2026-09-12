@@ -75,8 +75,10 @@ build: kernel
 model: build
 	uv pip install llama-cpp-python
 
+# Feeds every query of tests/cases.yaml into the engine, one character at a
+# time, and fails on any that does not behave as its group declares.
 test:
-	$(PYTHON) -m pytest tests/ -q
+	$(PYTHON) tests/main.py
 
 # Interactive entry point.
 run:
@@ -87,7 +89,7 @@ live:
 	$(PYTHON) main.py --live
 
 clean:
-	rm -rf __pycache__/ src/__pycache__/ tests/__pycache__/ tests/parity/__pycache__/ .pytest_cache/
+	rm -rf __pycache__/ src/__pycache__/ tests/__pycache__/ .pytest_cache/
 
 distclean: clean
 	rm -rf $(VENV)
