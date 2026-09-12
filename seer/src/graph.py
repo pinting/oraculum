@@ -3,16 +3,28 @@
 The language, which resolves its FROM clause by walking the foreign key graph
 rather than by listing tables flat:
 
-    SELECT <fields> FROM <entry> [, <entry>]* ;
+    SELECT <fields> FROM <entry> [, <entry>]* [WHERE <filters>] ;
     <entry>  := <table> [AS <alias>] [<join>]*
     <join>   := <join type> <table> [AS <alias>] ON <column> = <column>
     <fields> := <field ref> [, <field ref>]*
     <field ref> := <field> | <alias>.<field>
+    <filters>   := <predicate> [(AND | OR) <predicate>]*
+    <predicate> := [NOT] (<condition> | "(" <filters> ")")
+    <condition> := <operand> <operator> <operand | literal>
+                 | <operand> IS [NOT] NULL
+    <operand>   := <column> | <qualifier>.<column>
 
 Two loops shape the FROM clause: the outer one over entries is `from_entry`
 plus `finish`, the inner one over joins is `joins`. The phase boundary ahead of
 them is the `FROM` keyword, whose selector calls `Context.enter_from` to build
 the join graph.
+
+The WHERE clause sits behind a second boundary of the same shape. Its keyword
+calls `Context.enter_where`, which fixes the virtual table the finished FROM
+clause produced, and every condition is then gated on the types of that table's
+columns. The type never enters the context: an operand knows its own `Field`,
+so the restriction rides in the continuation the way `join_clause` already
+carries its `Neighbor`.
 
 Every combinator returns a `Thunk`, so nodes only exist once a context is
 pushed through them, which is what lets the alternatives depend on what has
@@ -26,12 +38,23 @@ from typing import Sequence
 from .context import Context
 from .engine import Node, Selector, Thunk
 from .factory import IndexDraft
+from .operators import Operator, TypeClass, classify, literal_for, operators_for
+from .relation import Operand
 from .relationships import JOIN_TYPES, JoinType, Neighbor
 from .scopes import unqualify
 
 IDENTIFIER: str = r"[a-zA-Z_][a-zA-Z0-9_]*"
 WHITESPACE: str = r"[ \n\t]+"
 COMMA: str = r"[ \n\t]*,[ \n\t]*"
+
+# The brackets carry their own inner whitespace, so `(a = b)` and `( a = b )`
+# are both reachable without an index that accepts the empty word.
+LPAREN: str = r"\([ \n\t]*"
+RPAREN: str = r"[ \n\t]*\)"
+
+# How deep the parentheses of a WHERE clause may nest. The graph is generative,
+# so without a cap nothing would ever stop offering another `(`.
+NESTING_LIMIT: int = 3
 
 def branch(thunks: Sequence[Thunk]) -> Thunk:
     """A thunk offering every alternative at once."""
@@ -138,6 +161,43 @@ def _select_join(neighbor: Neighbor, join_type: JoinType) -> Selector:
         clone: Context = ctx.copy()
 
         clone.join_table(neighbor, join_type)
+
+        return clone
+
+    return selector
+
+def _enter_where(ctx: Context, _matched: str) -> Context:
+    """The second boundary: the FROM clause is closed, fix the virtual table."""
+
+    clone: Context = ctx.copy()
+
+    clone.enter_where()
+
+    return clone
+
+def _select_condition(left: Operand, operator: Operator) -> Selector:
+    """Commit a binary condition once its right hand side has been written.
+
+    The matched text *is* the right hand side, whether that was a column
+    spelling or a literal, so one factory covers both.
+    """
+
+    def selector(ctx: Context, matched: str) -> Context:
+        clone: Context = ctx.copy()
+
+        clone.use_filter(f"{left.text} {operator} {matched}")
+
+        return clone
+
+    return selector
+
+def _select_predicate(left: Operand, operator: Operator) -> Selector:
+    """Commit a unary condition, whose operator is its last token."""
+
+    def selector(ctx: Context, _matched: str) -> Context:
+        clone: Context = ctx.copy()
+
+        clone.use_filter(f"{left.text} {operator}")
 
         return clone
 
@@ -265,13 +325,135 @@ def finish(next: Thunk) -> Thunk:
 def from_clause(next: Thunk) -> Thunk:
     return from_entry(next)
 
+# -- WHERE ----------------------------------------------------------------
+
+def right_side(left: Operand, operator: Operator, next: Thunk) -> Thunk:
+    """What may stand opposite `left`: a column of its class, or a literal.
+
+    This is the whole of the restriction. `left` was fixed by the caller, so
+    its class is a constant here and the alternatives are simply the operands
+    that share it - plus the pattern that spells a literal of that class, where
+    the class has one. A class with no pattern, and `UNKNOWN` above all, is
+    comparable to columns only.
+    """
+
+    kind: TypeClass = classify(left.field.type)
+
+    def call(ctx: Context) -> list[Node]:
+        options: list[Thunk] = []
+
+        for right in ctx.get_operands(kind):
+            # Comparing a column with itself says nothing, however it is spelled.
+            if left.same_column(right):
+                continue
+
+            options.append(lat(right.text, _select_condition(left, operator), next))
+
+        pattern: str | None = literal_for(kind)
+
+        if pattern is not None:
+            options.append(exp(pattern, _select_condition(left, operator), next))
+
+        return branch(options).call(ctx) or []
+
+    return Thunk.new(call)
+
+def operator_choices(left: Operand, next: Thunk) -> Thunk:
+    """The operators `left`'s type admits, each carrying its right hand side.
+
+    A unary operator ends the condition, so it takes the selector itself; a
+    binary one defers that to whatever `right_side` offers.
+    """
+
+    def call(ctx: Context) -> list[Node]:
+        options: list[Thunk] = []
+
+        for operator in operators_for(left.field):
+            if operator.is_unary:
+                options.append(
+                    lat(str(operator), _select_predicate(left, operator), next)
+                )
+            else:
+                options.append(
+                    lat(str(operator), None, ws(right_side(left, operator, next)))
+                )
+
+        return branch(options).call(ctx) or []
+
+    return Thunk.new(call)
+
+def condition(next: Thunk) -> Thunk:
+    """One comparison over the virtual table.
+
+    The operand lattice is emitted once and its operators open only behind it,
+    so a step here costs a head per column rather than a head per column and
+    operator pair.
+    """
+
+    def call(ctx: Context) -> list[Node]:
+        options: list[Thunk] = [
+            lat(operand.text, None, ws(operator_choices(operand, next)))
+            for operand in ctx.get_operands()
+        ]
+
+        return branch(options).call(ctx) or []
+
+    return Thunk.new(call)
+
+def predicate(next: Thunk, depth: int) -> Thunk:
+    """One condition, optionally parenthesised, optionally negated."""
+
+    options: list[Thunk] = [condition(next)]
+
+    if depth > 0:
+        closing: Thunk = exp(RPAREN, None, next)
+
+        options.append(
+            exp(LPAREN, None, Thunk.deferred(lambda: filters(closing, depth - 1)))
+        )
+
+    inner: Thunk = branch(options)
+
+    return branch([inner, lat("NOT", None, ws(inner))])
+
+def connective(next: Thunk) -> Thunk:
+    return branch([
+        lat("AND", None, ws(next)),
+        lat("OR", None, ws(next)),
+    ])
+
+def filters(next: Thunk, depth: int) -> Thunk:
+    """`<predicate> [(AND | OR) <predicate>]*`, flat on purpose.
+
+    Precedence is a parser's problem. Layering disjunction over conjunction
+    would produce exactly the strings this one loop produces, since nothing
+    here has to recover the tree afterwards; the parentheses of `predicate` are
+    what add structure a reader can see, and they are where the cost is.
+    """
+
+    fork: Thunk = branch([
+        next,
+        Thunk.deferred(lambda: ws(connective(filters(next, depth)))),
+    ])
+
+    return predicate(fork, depth)
+
+def where_clause(next: Thunk) -> Thunk:
+    """An optional `WHERE <filters>` between the FROM clause and the terminator."""
+
+    return branch([
+        next,
+        ws(lat("WHERE", _enter_where, ws(filters(next, NESTING_LIMIT)))),
+    ])
+
 # -- root -----------------------------------------------------------------
 
 def root() -> Thunk:
-    """`SELECT <fields> FROM <entry> [, <entry>]* ;`"""
+    """`SELECT <fields> FROM <entry> [, <entry>]* [WHERE <filters>] ;`"""
 
     next: Thunk = Thunk.terminal()
     next = lat(";", None, next)
+    next = where_clause(next)
     next = from_clause(next)
     next = ws(next)
     next = lat("FROM", _enter_from, next)

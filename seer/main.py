@@ -23,9 +23,13 @@ from src.factory import DraftKind
 
 ROUTE_LIMIT: int = 100
 
-# Separators a constant is reached through, which no lattice head spells on its
-# own but which `narrow` must still keep on offer.
-SEPARATORS: tuple[str, ...] = (".", " ", "\t", ",")
+# What `narrow` must keep on offer even though no lattice head spells it: the
+# separators a constant is reached through, the brackets of a nested WHERE
+# predicate, and the characters a literal opens with. A literal is an
+# expression head, so narrowing would otherwise leave nothing to type.
+SEPARATORS: tuple[str, ...] = (
+    ".", " ", "\t", ",", "(", ")", "'", "-",
+) + tuple("0123456789")
 
 def printable(token: str) -> bool:
     """Whether a token can be shown in the route list and typed back.

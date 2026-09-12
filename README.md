@@ -1,10 +1,162 @@
 # oraculum
 
+Text to SQL conversion for the following subset of the SQL language.
+
+```xml
+<statement> := SELECT <fields> FROM <entry> [, <entry>]* [WHERE <filters>] ;
+
+<fields>    := <field ref> [, <field ref>]*
+<field ref> := <field> | <alias>.<field>
+
+<entry>     := <source> [<join>]*
+<join>      := <join type> <source> ON <column ref> = <column ref>
+<source>    := <table> [AS <alias>]
+<join type> := INNER JOIN | LEFT JOIN | RIGHT JOIN | FULL JOIN
+
+<filters>   := <predicate> [(AND | OR) <predicate>]*
+<predicate> := [NOT] (<condition> | "(" <filters> ")")
+<condition> := <operand> <operator> <operand | literal>
+             | <operand> IS [NOT] NULL
+<operand>   := <column> | <qualifier>.<column>
+```
+
+## An example
+
+```sql
+CREATE TABLE users (
+    id BIGINT PRIMARY KEY,
+    first_name VARCHAR(255) NOT NULL,
+    last_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    verified BOOLEAN,
+    created_at TIMESTAMP
+);
+
+CREATE TABLE posts (
+    id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    title VARCHAR(255) NOT NULL,
+    body TEXT NOT NULL,
+    published_at TIMESTAMP
+);
+
+CREATE TABLE comments (
+    id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    post_id BIGINT NOT NULL REFERENCES posts(id),
+    body TEXT NOT NULL
+);
+```
+
+**The projection.** One or more columns, each written bare or qualified by an
+alias. An alias is invented by whoever is generating, since nothing in the
+schema names it, so it may be any identifier that is not a keyword, a table
+name or a column name - `users2` is available, `users` is not. Aliases are
+introduced here and nowhere else: `FROM users AS u` is reachable only once
+something has written `u.` in the projection.
+
+```sql
+SELECT email, first_name FROM users;
+SELECT u.email, u.first_name FROM users AS u;
+```
+
+What may be written is what the schema can still answer. `email` is on `users`
+alone, so writing it settles the FROM clause; `body` is on `posts` and
+`comments`, so it leaves both open until something else decides between them,
+and `first_name` stops being offered the moment the query has committed to a
+table that has no such column. Section 6a is how that is computed.
+
+**The FROM clause.** One or more entries, comma separated, each a table
+optionally renamed by `AS`. Only tables the projection actually requires are
+ever offered, and the statement cannot reach its terminator until every one of
+them has been supplied.
+
+```sql
+SELECT email, body FROM users, comments;
+```
+
+**Joins.** Any entry may be grown by any number of joins, in all four types.
+The target has to be a foreign key neighbour of the entry as it now stands, and
+that settles the `ON` columns outright - they are read off the foreign key
+rather than chosen.
+
+```sql
+SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id;
+SELECT email, title FROM users FULL JOIN posts ON users.id = posts.user_id;
+SELECT title, c.body FROM posts LEFT JOIN comments AS c ON posts.id = c.post_id;
+```
+
+Joining merges the two, so a table two foreign keys away becomes reachable once
+the table between them is in. The second join here is only offered because the
+first one brought `posts` into the entry:
+
+```sql
+SELECT email, title, c.body
+FROM users
+INNER JOIN posts ON users.id = posts.user_id
+INNER JOIN comments AS c ON posts.id = c.post_id;
+```
+
+A renamed source answers to its alias everywhere afterwards and to nothing
+else, so `FROM users AS u` makes the join `ON u.id = posts.user_id`, never
+`ON users.id`. Section 6c is the graph this walks.
+
+**The WHERE clause.** Optional, and written against the relation the FROM
+clause produced: every column of every source it placed, joined or not.
+Each is reachable qualified by its source's alias or table name, and bare
+wherever exactly one source supplies the name. A column does not have to be
+projected to be filtered on.
+
+```sql
+SELECT email FROM users WHERE created_at IS NOT NULL;
+SELECT email FROM users WHERE first_name LIKE 'A%';
+
+SELECT email, title
+FROM users
+INNER JOIN posts ON users.id = posts.user_id
+WHERE created_at < published_at;
+```
+
+Which operators a column takes is fixed by its type. Everything may be compared
+for equality, only the classes that have an order may be ranged over, only text
+may be matched against a pattern, and only a column that can actually be null
+may be tested for it - which a `PRIMARY KEY` cannot, however it was declared.
+
+| type | operators | literal | example |
+|---|---|---|---|
+| `BIGINT`, `INT`, `DECIMAL`, ... | `=` `!=` `<` `<=` `>` `>=` | `-?[0-9]+(\.[0-9]+)?` | `users.id >= -1` |
+| `VARCHAR`, `TEXT`, `CHAR`, ... | `=` `!=` `<` `<=` `>` `>=` `LIKE` `NOT LIKE` | `'...'` | `email LIKE '%keyword%'` |
+| `TIMESTAMP`, `DATE`, `TIME`, ... | `=` `!=` `<` `<=` `>` `>=` | `'2024-01-31 12:30:00'` | `created_at > '2024-01-31'` |
+| `BOOLEAN`, `BIT` | `=` `!=` | `TRUE`, `FALSE` | `verified != FALSE` |
+| `BLOB`, `BYTEA`, unrecognised | `=` `!=` | none - columns only | |
+| any of them, where nullable | `IS NULL`, `IS NOT NULL` | | `published_at IS NULL` |
+
+The other side of an operator is either a literal of that shape or another
+column of the same class, which is what makes `created_at < published_at` a
+statement about two timestamps and `email = users.id` no statement at all.
+Sections 6d and 6e are the relation and this gating.
+
+Conditions combine with `AND` and `OR`, take a `NOT` in front, and nest three
+brackets deep:
+
+```sql
+SELECT email FROM users WHERE email = 'a' AND users.id > 1;
+SELECT email FROM users WHERE NOT email LIKE 'a%';
+SELECT email FROM users WHERE (email = 'a' OR email = 'b') AND NOT users.id = 1;
+```
+
+**Outside the subset.** `*` and `DISTINCT`, output aliases (`SELECT email AS e`),
+aggregates and every other function call, arithmetic, `IN`, `BETWEEN`, `CASE`,
+`GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `OFFSET`, subqueries, set operations,
+and any statement that is not a `SELECT`. Whitespace between tokens is free -
+spaces, tabs and newlines, one or more - and the statement ends at its
+semicolon.
+
+Two things have to be true of every statement the system produces. It has to be **grammatical** - a well formed `SELECT`. And it has to be **meaningful** - a query the schema can actually answer. Both are enforced one token at a time, while the model is writing, so neither is ever checked after the fact.
+
 ![Preview](preview.gif)
 
 ## Architecture
-
-Two things have to be true of every statement the system produces. It has to be **grammatical** - a well formed `SELECT`. And it has to be **meaningful** - a query the schema can actually answer. Both are enforced one token at a time, while the model is writing, so neither is ever checked after the fact.
 
 ### 1. Tokens - characters, words, pieces of text
 
@@ -202,17 +354,26 @@ graph LR
     head -.->|","| entry
     head -->|";"| accept(((accept)))
 
+    head -->|WHERE| cond
+    cond(["next condition"]) -->|operand| w1(( ))
+    w1 -->|"operator"| w2(( ))
+    w2 -->|"operand or literal"| done(["after a condition"])
+    w1 -->|"IS [NOT] NULL"| done
+
+    done -->|"AND, OR"| cond
+    done -->|";"| accept
+
     classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
     classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
-    class q0,q1,q2,more,j1,j2,j3,accept plain
-    class ref,entry,head accent
+    class q0,q1,q2,more,j1,j2,j3,w1,w2,done,accept plain
+    class ref,entry,head,cond accent
 ```
 
-Solid edges are lattices, dashed ones expressions and the thick one is the alias group. The whitespace between tokens is an expression index of its own and is left out of the picture, as are the `AS alias` a join target may carry.
+Solid edges are lattices, dashed ones expressions and the thick one is the alias group. The whitespace between tokens is an expression index of its own and is left out of the picture, as are the `AS alias` a join target may carry, the `NOT` prefix a condition may take and the brackets it may nest behind. The one mixed edge is the right hand side of a condition, which is a lattice where it is another column and an expression where it is a literal.
 
 If it were just this static structure, the language could be compiled ahead of time into one massive DFA. 
 
-But it isn't static. The three heavy states are the ones whose alternatives come from the latent context rather than from the grammar. Whether `head` may take the `;` or has to open another table entry depends on what has *already been selected*, and the `field` edge out of `ref` ranges over the fields that are *still selectable in the current latent state*. 
+But it isn't static. The four heavy states are the ones whose alternatives come from the latent context rather than from the grammar. Whether `head` may take the `;` or has to open another table entry depends on what has *already been selected*, the `field` edge out of `ref` ranges over the fields that are *still selectable in the current latent state*, and the `operand` edge out of `cond` ranges over the columns the FROM clause *actually placed*, with the operator that follows it fixed by that column's type. 
 
 Every node evaluates a Boolean function over the latent context (the constraints on tables, aliases, and selected fields). 
 
@@ -359,6 +520,97 @@ It is a multigraph deliberately: two tables joined by two different
 foreign keys are two alternatives, and both stay. The head is a single
 vertex name, so growing one FROM entry is a sequence of contractions
 into it.
+```
+
+#### 6d. The WHERE clause: closing the clause makes it a table
+
+The three structures above all run the same way round. Fields are chosen first
+and the tables follow: the polynomial says which FROM clauses are still
+consistent, the scopes say what each alias may still be, the join graph says
+how to connect what is left. Everything is a constraint waiting to be
+discharged.
+
+A filter runs the other way. By the time the `WHERE` keyword is taken the FROM
+clause is finished, and what a condition may name is no longer something to be
+solved - it is a set. Call it the **virtual table**: every column of every node
+the clause placed, whether that node arrived as a static entry or was contracted
+in by a join. A filter cannot tell the two apart, which is exactly what a join
+means.
+
+So there is a second phase boundary, on the `WHERE` keyword, of the same shape
+as the first on `FROM`. And closing the clause turns the two things SQL leaves
+to a resolver into counting problems:
+
+```math
+\begin{aligned}
+\mathrm{qualified}(n, f) &= \mathrm{ref}(n).f && \text{always, for every column } f \text{ of node } n \\
+\mathrm{bare}(f) &\text{ exists} \iff |\{\, n \in N : f \in \mathrm{cols}(n) \,\}| = 1 && \text{SQL's own ambiguity rule}
+\end{aligned}
+```
+
+with $\mathrm{ref}(n)$ the alias where the node carries one and the table name
+otherwise - the same function the `ON` clause is written from. `users INNER JOIN
+posts` offers `users.id` and `posts.id` but no bare `id`, and offers `email`
+bare because one node supplies it. Note what the second line is quantified
+over: the nodes of *this clause*, not the tables of the schema. `title` lives on
+two tables, yet it is unambiguous in any clause that names only one of them.
+
+#### 6e. Conditions: the type rides in the continuation
+
+On top of the virtual table sits the restriction proper. Every column carries a
+`Type` the schema parser has always produced and nothing ever read; the
+condition grammar is the first consumer. Types are partitioned into classes -
+numeric, text, temporal, boolean, binary, and `UNKNOWN` for a name the parser
+did not recognise - and each class fixes two things:
+
+```math
+\begin{aligned}
+\mathrm{ops}(f) &= \mathrm{ops}\bigl(\mathrm{class}(f)\bigr) \;\cup\; \{\,\texttt{IS NULL}, \texttt{IS NOT NULL}\,\} \text{ if } f \text{ may be null} \\
+\mathrm{rhs}(f) &= \{\, g : \mathrm{class}(g) = \mathrm{class}(f),\; g \neq f \,\} \;\cup\; \mathrm{lit}\bigl(\mathrm{class}(f)\bigr)
+\end{aligned}
+```
+
+Ordering belongs to the classes that have an order, matching to text alone, and
+equality to all of them. `UNKNOWN` is a class rather than a wildcard, so a type
+nobody recognised compares to nothing but another of its kind - a refusal is
+the safe direction to be wrong in. Values are not modelled at all: $\mathrm{lit}$
+is a *pattern*, one per class, and what a literal spells inside it is its own
+business. That is the whole of what typed means here.
+
+```
+SELECT email FROM users WHERE created_at
+    -> = != < <= > >= IS NULL IS NOT NULL      temporal, and it may be null
+
+SELECT email FROM users WHERE users.id
+    -> = != < <= > >=                          numeric; a primary key is never null
+
+SELECT email FROM users WHERE email
+    -> = != < <= > >= LIKE NOT LIKE            text alone may be matched
+```
+
+None of this is state. The virtual table is - it depends on what the FROM
+clause committed to, so it is built at the boundary and copied per branch like
+everything else. But the type is not: by the time a condition's alternatives
+are enumerated its left operand is already fixed, so the class is a constant of
+the continuation, in the same way the `ON` columns are a constant of the join
+clause that carries them. Nothing about types is ever asked of the context.
+
+The one thing the clause must not do is feed back. A filter can neither require
+a table nor discharge one, so `enter_where` only reads and the satisfaction
+test above is untouched by anything written after it.
+
+```
+NOTE: Why the conditions cost nothing extra
+
+The frontier inside a WHERE clause is one head per column of the virtual
+table, not one per column and operator pair: the operand lattice is
+emitted once and its operators open only behind it, so choosing the
+column is what prunes them.
+
+The indexes themselves are built once per schema and then shared. An
+operand is a constant, so it is a lattice, and a literal is one
+expression per class - a second pass over the same registry builds
+nothing at all.
 ```
 
 ## Experiments

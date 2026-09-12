@@ -40,6 +40,19 @@ def unqualify(node: str) -> tuple[str, str]:
 
     return parts[0], parts[1]
 
+def reference_name(node: str) -> str:
+    """How a node is referred to once it is in the clause: `"c"`, `"users"`.
+
+    These tokens are emitted verbatim, so they have to be valid SQL: an aliased
+    node is referenced by its alias and a bare one by its table name. It is the
+    qualifier of every column reference the node supplies, which is what an
+    `ON` clause and a `WHERE` operand are both written from.
+    """
+
+    table, alias = unqualify(node)
+
+    return alias if alias else table
+
 class Scopes:
     __slots__ = ("_scopes", "_schema")
 
