@@ -24,11 +24,12 @@ from src.factory import DraftKind
 ROUTE_LIMIT: int = 100
 
 # What `narrow` must keep on offer even though no lattice head spells it: the
-# separators a constant is reached through, the brackets of a nested WHERE
-# predicate, and the characters a literal opens with. A literal is an
-# expression head, so narrowing would otherwise leave nothing to type.
+# separators a constant is reached through, the terminator, the brackets of a
+# nested WHERE predicate, and the characters a literal opens with. A literal is
+# an expression head, so narrowing would otherwise leave nothing to type, and
+# the terminator carries its own leading whitespace so it is one too.
 SEPARATORS: tuple[str, ...] = (
-    ".", " ", "\t", ",", "(", ")", "'", "-",
+    ".", " ", "\t", ",", ";", "(", ")", "'", "-",
 ) + tuple("0123456789")
 
 def printable(token: str) -> bool:

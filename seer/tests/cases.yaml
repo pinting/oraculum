@@ -144,11 +144,45 @@
     - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id WHERE title LIKE 'a%';
     - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id WHERE users.id = posts.user_id;
 
+- group: stepping away from a clause and still closing it
+  expect: completed
+  queries:
+    # The `;` carries the whitespace in front of it, so a head that has taken
+    # a space can still come back and close. Without that the only things left
+    # after the space would be WHERE and the four join types.
+    - SELECT email FROM users ;
+    - "SELECT email FROM users\t;"
+    - SELECT email FROM users     ;
+    - |-
+      SELECT email FROM users
+      ;
+    - "SELECT email FROM users \n\t ;"
+    # Every clause the terminator can follow, stepped away from first.
+    - SELECT email, body FROM users, comments ;
+    - SELECT u.email FROM users AS u ;
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id ;
+    - SELECT email FROM users WHERE verified = TRUE ;
+    - SELECT email FROM users WHERE created_at IS NULL ;
+    - SELECT email FROM users WHERE (email = 'a') ;
+
+- group: an alias on a join target
+  expect: completed
+  queries:
+    # A join target carries its `AS` the way a FROM entry does, and answers to
+    # the alias in its own ON clause.
+    - SELECT email, p.title FROM users INNER JOIN posts AS p ON users.id = p.user_id;
+    - SELECT email, p.title FROM users LEFT JOIN posts AS p ON users.id = p.user_id;
+    - SELECT email, p.title FROM users RIGHT JOIN posts AS p ON users.id = p.user_id;
+    - SELECT email, p.title FROM users FULL JOIN posts AS p ON users.id = p.user_id;
+    - SELECT email, c.body FROM users INNER JOIN comments AS c ON users.id = c.user_id;
+    - SELECT email, posts2.title FROM users INNER JOIN posts AS posts2 ON users.id = posts2.user_id;
+    # Both sides renamed, and a chain of them.
+    - SELECT u.email, p.title FROM users AS u INNER JOIN posts AS p ON u.id = p.user_id;
+    - SELECT u.email, p.title, c.body FROM users AS u INNER JOIN posts AS p ON u.id = p.user_id INNER JOIN comments AS c ON p.id = c.post_id;
+
 - group: whitespace, where it is not free
   expect: stuck
   queries:
-    # The terminator follows the clause directly; nothing separates them.
-    - SELECT email FROM users ;
     # A keyword needs whitespace on the side it meets a name on.
     - SELECTemail FROM users;
     - SELECT emailFROM users;
@@ -181,6 +215,21 @@
     - SELECT users.email FROM users;
     - SELECT users.email FROM users AS users;
     - SELECT SELECT.email FROM users AS SELECT;
+
+- group: a join target that owes its alias
+  expect: stuck
+  queries:
+    # The projection asked for `p.title`, so the alias has to be declared, and
+    # the only place a join can declare it is on its own target. Joining the
+    # bare table leaves the scope undischarged and the statement cannot close.
+    - SELECT email, p.title FROM users INNER JOIN posts ON users.id = posts.user_id;
+    - SELECT title, c.body FROM posts LEFT JOIN comments ON posts.id = comments.post_id;
+    # Declared, then not used: a renamed source answers to its alias and to
+    # nothing else, the ON clause included.
+    - SELECT email, p.title FROM users INNER JOIN posts AS p ON users.id = posts.user_id;
+    - SELECT u.email, p.title FROM users AS u INNER JOIN posts AS p ON u.id = posts.user_id;
+    # An alias the projection never opened is not the one that is owed.
+    - SELECT email, p.title FROM users INNER JOIN posts AS q ON users.id = q.user_id;
 
 - group: joins the schema cannot answer
   expect: stuck

@@ -52,6 +52,14 @@ COMMA: str = r"[ \n\t]*,[ \n\t]*"
 LPAREN: str = r"\([ \n\t]*"
 RPAREN: str = r"[ \n\t]*\)"
 
+# The terminator carries the whitespace in front of it for the same reason.
+# Whitespace between tokens is free, and the `;` is a token like any other, so
+# `users;` and `users ;` are both the end of the statement. As a lattice it
+# would be neither - a head that had taken a space would have nothing but
+# `WHERE` and the join types left, and a statement that had stepped away from
+# its last table could never come back to close.
+TERMINATOR: str = r"[ \n\t]*;"
+
 # How deep the parentheses of a WHERE clause may nest. The graph is generative,
 # so without a cap nothing would ever stop offering another `(`.
 NESTING_LIMIT: int = 3
@@ -452,7 +460,7 @@ def root() -> Thunk:
     """`SELECT <fields> FROM <entry> [, <entry>]* [WHERE <filters>] ;`"""
 
     next: Thunk = Thunk.terminal()
-    next = lat(";", None, next)
+    next = exp(TERMINATOR, None, next)
     next = where_clause(next)
     next = from_clause(next)
     next = ws(next)
