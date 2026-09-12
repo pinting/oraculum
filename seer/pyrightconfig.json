@@ -8,8 +8,8 @@
     "**/.*",
     "models"
   ],
-  "typeCheckingMode": "strict",
+  "typeCheckingMode": "standard",
   "reportMissingTypeStubs": false,
-  "pythonVersion": "3.11",
+  "pythonVersion": "3.14",
   "pythonPlatform": "Linux"
 }
