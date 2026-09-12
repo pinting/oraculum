@@ -177,31 +177,38 @@ Above the indexes sits the syntax graph. It weaves the raw primitives (constants
 The grammatical skeleton is right-linear:
 
 ```mermaid
-graph TD
-    Start((Start)) -->|LATTICE: SELECT| S1(( ))
-    S1 -.->|EXPRESSION: space| F1(( ))
+graph LR
+    q0(( )) -->|SELECT| ref
 
-    F1 -->|GROUP: alias| A1(( ))
-    A1 -->|LATTICE: .| D1(( ))
-    D1 -->|LATTICE: field| F2(( ))
-    F1 -->|LATTICE: field| F2
+    ref(["next field"]) ==>|alias| q1(( ))
+    q1 -->|"."| q2(( ))
+    q2 -->|field| more(["after a field"])
+    ref -->|field| more
 
-    F2 -.->|EXPRESSION: comma + space| F1
-    F2 -.->|EXPRESSION: space| FROM(( ))
+    more -.->|","| ref
+    more -->|FROM| entry
 
-    FROM -->|LATTICE: FROM| S2(( ))
-    S2 -.->|EXPRESSION: space| E1(( ))
+    entry(["next table"]) -->|table| head(["current entry"])
+    entry -->|"table AS alias"| head
 
-    E1 -->|LATTICE: table| J1(( ))
-    
-    J1 -.->|EXPRESSION: space + JOIN| E1
-    J1 -.->|EXPRESSION: comma + space| E1
-    J1 -->|LATTICE: ;| Accept(((Accept)))
+    head -->|"join type"| j1(( ))
+    j1 -->|table| j2(( ))
+    j2 -->|ON| j3(( ))
+    j3 -->|"a = b"| head
+
+    head -.->|","| entry
+    head -->|";"| accept(((accept)))
+
+    style ref stroke-width:4px
+    style entry stroke-width:4px
+    style head stroke-width:4px
 ```
+
+Solid edges are lattices, dashed ones expressions and the thick one is the alias group. The whitespace between tokens is an expression index of its own and is left out of the picture, as are the `AS alias` a join target may carry.
 
 If it were just this static structure, the language could be compiled ahead of time into one massive DFA. 
 
-But it isn't static. Whether the statement may legally transition to the accepting `;` state or must open another table entry depends on what has *already been selected*. A node like `LATTICE: field` ranges over the fields that are *still selectable in the current latent state*. 
+But it isn't static. The three heavy states are the ones whose alternatives come from the latent context rather than from the grammar. Whether `head` may take the `;` or has to open another table entry depends on what has *already been selected*, and the `field` edge out of `ref` ranges over the fields that are *still selectable in the current latent state*. 
 
 Every node evaluates a Boolean function over the latent context (the constraints on tables, aliases, and selected fields). 
 
