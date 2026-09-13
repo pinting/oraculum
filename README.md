@@ -24,7 +24,7 @@ Text to SQL conversion for the following subset of the SQL language.
 
 <p align="center">
   <a href="https://pinting.github.io/oraculum/">
-    <img src="preview.png" alt="Run in the browser" width="800">
+    <img src="preview.png" alt="Run in the browser" max-width="1150">
   </a>
 </p>
 
