@@ -1,30 +1,17 @@
 //! An undirected multigraph that is only ever contracted, never grown.
 //!
-//! Join resolution walks a foreign key graph: the FROM clause opens at some
-//! table, and every join folds a neighbour into it, after which the pair
-//! behaves as one vertex for further joins. That is vertex contraction, and it
-//! is the *only* mutation - no vertex or edge is ever added once the graph has
-//! been built from the schema.
+//! Joining folds a neighbour into the head, after which the pair behaves as one
+//! vertex. That is vertex contraction, and it is the only mutation - nothing is
+//! added once the graph has been built from the schema.
 //!
-//! Which is worth exploiting, because the operation that actually dominates is
-//! `copy`. Every branch of the syntax graph needs its own graph to fold into,
-//! and branches are speculative: the overwhelming majority are copied, looked
-//! at and thrown away. A general purpose graph - SageMath's, or an adjacency
-//! dict - has to deep copy its adjacency for each one.
-//!
-//! So the edges live in an immutable `Base` that every copy shares, and the
-//! whole of the mutable state is one array: `class[v]` is the vertex `v` has
-//! been folded into, itself when it has not been. That array is behind an `Arc`
-//! too, so
+//! Which is worth exploiting, because the operation that dominates is `copy`:
+//! every branch of the syntax graph needs its own graph, and most are looked at
+//! and thrown away. So the edges live in an immutable `Base` that every copy
+//! shares, and the whole of the mutable state is one array behind an `Arc`.
 //!
 //!     copy            two reference count bumps, no allocation
 //!     merge_vertices  one clone of an array of `u32`, then a linear pass
 //!     edges           the class members' base incidence, mapped through it
-//!
-//! and a branch that never joins anything never allocates at all. Dropped loops
-//! need no special handling either: an edge whose far end is in the same class
-//! as the near end is simply not reported, which is the rule the SageMath graph
-//! this replaces enforces by refusing loops outright.
 
 use rustc_hash::FxHashMap as HashMap;
 use std::sync::Arc;
@@ -38,8 +25,8 @@ struct Base<L> {
     index: HashMap<String, VertexId>,
     endpoints: Vec<(VertexId, VertexId)>,
     labels: Vec<L>,
-    /// Edges incident to each vertex as the graph was built, before any
-    /// contraction. A vertex's current incidence is the union over its class.
+    /// Incidence before any contraction. A vertex's current incidence is the
+    /// union over its class.
     incident: Vec<Vec<EdgeId>>,
 }
 
@@ -61,14 +48,14 @@ impl<L> Base<L> {
 
 pub struct Multigraph<L> {
     base: Arc<Base<L>>,
+    /// `class[v]` is the vertex `v` has been folded into, itself when it has
+    /// not been.
     class: Arc<Vec<VertexId>>,
 }
 
 impl<L> Multigraph<L> {
-    /// Build from `(source, target, label)` triples.
-    ///
-    /// Vertices come from the edges alone: a table no foreign key touches is
-    /// not in the graph, and `contains` says so.
+    /// Build from `(source, target, label)` triples. Vertices come from the
+    /// edges alone.
     pub fn new<I>(edges: I) -> Self
     where
         I: IntoIterator<Item = (String, String, L)>,
@@ -103,9 +90,8 @@ impl<L> Multigraph<L> {
         }
     }
 
-    /// A clone every branch can fold into freely. Nothing is copied here: the
-    /// edges are shared and the class array is shared until one of the two
-    /// writes to it.
+    /// A clone every branch can fold into freely. Nothing is copied until one
+    /// of the two writes to the class array.
     pub fn copy(&self) -> Self {
         Self {
             base: Arc::clone(&self.base),
@@ -145,10 +131,9 @@ impl<L> Multigraph<L> {
 
     /// Every edge incident to `name`, as `(neighbour, label)`.
     ///
-    /// The class's members are found by a scan of the class array rather than
-    /// by a list kept per class: the array is what a copy shares, and keeping
-    /// anything else in step with it would put that something into every copy
-    /// as well.
+    /// The class's members are found by scanning the class array rather than
+    /// from a list kept per class: the array is what a copy shares, and
+    /// anything kept in step with it would land in every copy too.
     pub fn edges(&self, name: &str) -> Vec<(&str, &L)> {
         let Some(head) = self.alive(name) else {
             return Vec::new();
@@ -166,8 +151,7 @@ impl<L> Multigraph<L> {
                 let far: VertexId = if left == member as VertexId { right } else { left };
                 let target: VertexId = self.class[far as usize];
 
-                // Both ends in this class: the edge is a loop now, and a loop
-                // is not a join.
+                // Both ends in this class: a loop now, and a loop is not a join.
                 if target == head {
                     continue;
                 }
@@ -182,11 +166,8 @@ impl<L> Multigraph<L> {
         incident
     }
 
-    /// Fold `other` into `head`, which keeps its name and gains its edges.
-    ///
-    /// A no-op unless both are vertices and both are still standing, matching
-    /// what the adjacency dict and the SageMath graph both do with a vertex
-    /// that is not there.
+    /// Fold `other` into `head`, which keeps its name and gains its edges. A
+    /// no-op unless both are vertices and both are still standing.
     pub fn merge_vertices(&mut self, head: &str, other: &str) -> bool {
         if head == other {
             return false;
@@ -219,8 +200,8 @@ impl<L> Multigraph<L> {
         self.base.endpoints.len()
     }
 
-    /// The copy's own cost, which is what matters: the base is shared by every
-    /// graph descended from the same schema and counted once there.
+    /// The copy's own cost. The base is shared by every graph descended from
+    /// the same schema and counted by `base_memory_usage` instead.
     pub fn memory_usage(&self) -> usize {
         std::mem::size_of::<Self>() + self.class.capacity() * std::mem::size_of::<VertexId>()
     }

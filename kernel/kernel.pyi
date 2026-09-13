@@ -22,14 +22,9 @@ Resolver = Callable[[int, Any, str], Optional[Sequence[tuple[IndexSpec, Any]]]]
 class BooleanPolynomialRing:
     """Boolean polynomials over `GF(2)[t..]/(t^2 - t)`, as decision diagrams.
 
-    A port of the representation PolyBoRi gives SageMath's
-    `BooleanPolynomialRing`: a polynomial is a sum of squarefree monomials, so
-    it is a set of subsets of the variables, and that is held as a
-    zero-suppressed decision diagram.
-
-    A polynomial is the `int` id of a node in this ring's diagram. The diagram
+    A polynomial is the `int` id of a node in this ring's diagram; the diagram
     is hash consed, so equal ids mean equal polynomials, and `0` is the zero
-    polynomial and `1` the constant one. An id is meaningless to any other ring.
+    polynomial and `1` the constant one.
     """
 
     def __init__(self, names: Sequence[str]) -> None: ...
@@ -52,11 +47,9 @@ class BooleanPolynomialRing:
 class Multigraph:
     """An undirected multigraph whose only mutation is vertex contraction.
 
-    Vertices come from the edges alone. Labels are opaque - stored and handed
-    back, never examined, the same contract a head's payload has.
-
-    `copy` shares both the edges and the contraction state, so a branch that is
-    copied, queried and dropped allocates nothing.
+    Vertices come from the edges alone, and labels are opaque. `copy` shares
+    both the edges and the contraction state, so a branch that is copied,
+    queried and dropped allocates nothing.
     """
 
     def __init__(self, edges: Optional[Iterable[tuple[str, str, Any]]] = None) -> None: ...

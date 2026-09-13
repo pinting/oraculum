@@ -1,3 +1,5 @@
+# TEST CASES
+#
 # A group carries one `expect` and the queries it applies to, so the
 # expectation is written once per idea rather than once per line and the name
 # says what the idea was.

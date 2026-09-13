@@ -1,41 +1,15 @@
-//! A boolean polynomial ring, in the shape SageMath's `BooleanPolynomialRing`
-//! has it.
+//! A boolean polynomial ring over `GF(2)`: `zdd.rs` is the diagram the
+//! polynomial lives in, and this is the ring around it.
 //!
-//! SageMath's ring is a wrapper over PolyBoRi, which holds each polynomial as a
-//! ZDD over the monomials; `zdd.rs` is that diagram and this is the ring around
-//! it - the variable names, the constructions and the queries. The port is not
-//! of the whole ring: there is no Groebner machinery, no monomial ordering to
-//! choose and no division, because the only thing asked of the algebra here is
-//! the one asked of it in `root.py`:
-//!
-//! > a running product of mutual exclusion constraints, and four questions
-//! > about it - is it zero, does the all-zero assignment satisfy it, which
-//! > variables does it still depend on, and what happens if this one is one.
-//!
-//! **Why a ZDD rather than a list of monomials.** The constraint a field name
-//! contributes is "exactly one of the `k` tables it lives in":
-//!
-//!     SUM_i t_i * PRODUCT_(j != i) (1 + t_j)
-//!
-//! Expanded, a monomial over a subset `S` of those variables appears once per
-//! element of `S`, so over GF(2) it survives exactly when `|S|` is odd: the
-//! normal form has `2^(k-1)` monomials. A column called `id` lives in every
-//! table there is, so `k` is the table count and that number is the whole
-//! problem. The ZDD for "every odd subset" is two nodes per level - it is
-//! linear in `k` - which is what makes holding the polynomial itself, rather
-//! than a hand-rolled stand-in for it, affordable.
-//!
-//! **What is not ported.** `render` is DNF over the satisfying assignments,
-//! which SageMath reaches by handing the polynomial's string form to sympy.
-//! Nothing here needs sympy: the DNF is a Shannon expansion over the diagram's
-//! own support, which `substitute` already provides. It is debug output, and
-//! the only place the three backends are allowed to differ in spelling.
+//! Not a whole ring - there is no Groebner machinery, no monomial ordering to
+//! choose and no division, because all `root.py` asks for is a running product
+//! of mutual exclusion constraints and four questions about it.
 
 use rustc_hash::FxHashMap as HashMap;
 
 use crate::algebra::zdd::{NodeId, VarId, Zdd, ONE, ZERO};
 
-/// A support this wide is not rendered term by term - see `render`.
+/// A support this wide is described rather than expanded - see `render`.
 const RENDER_LIMIT: usize = 24;
 
 pub struct Ring {
@@ -45,11 +19,8 @@ pub struct Ring {
 }
 
 impl Ring {
-    /// The ring over these variables, in this order.
-    ///
-    /// The order is the diagram's variable order, top first. Callers hand the
-    /// table names in sorted order, which keeps a ring reproducible across runs
-    /// and so keeps the node ids reproducible too.
+    /// The ring over these variables, in this order, which is the diagram's
+    /// variable order, top first.
     pub fn new<I, S>(names: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -87,16 +58,11 @@ impl Ring {
 
     /// `SUM_i t_i * PRODUCT_(j != i) (1 + t_j)` - exactly one of `names` is on.
     ///
-    /// Built from the defining formula rather than from the closed form of its
-    /// monomials, so what the diagram holds is demonstrably the polynomial
-    /// SageMath would have built.
-    ///
-    /// The `k` inner products overlap almost entirely - each leaves out one
-    /// factor - so they are taken as a prefix and a suffix meeting at `i`,
-    /// which is the same formula with its common subexpressions shared and
-    /// `O(k)` multiplications rather than `O(k^2)`.
-    ///
-    /// `None` when a name is not a variable of the ring.
+    /// Built from the defining formula rather than the closed form of its
+    /// monomials, so the diagram demonstrably holds the polynomial the formula
+    /// defines. The `k` inner products each leave out one factor, so
+    /// they are taken as a prefix and a suffix meeting at `i`: the same formula
+    /// with its common subexpressions shared, `O(k)` rather than `O(k^2)`.
     pub fn mutual_exclusion(&mut self, names: &[String]) -> Option<NodeId> {
         let mut variables: Vec<VarId> = Vec::with_capacity(names.len());
 
@@ -106,8 +72,8 @@ impl Ring {
 
         let count: usize = variables.len();
 
-        // `prefix[i]` is the product of `(1 + t_j)` for every `j < i`, and
-        // `suffix[i]` the product for every `j > i`.
+        // `prefix[i]` is the product of `(1 + t_j)` over `j < i`, `suffix[i]`
+        // the product over `j > i`.
         let mut prefix: Vec<NodeId> = vec![ONE; count + 1];
         let mut suffix: Vec<NodeId> = vec![ONE; count + 1];
 
@@ -136,7 +102,7 @@ impl Ring {
         Some(constraint)
     }
 
-    /// Conjunction. Both operands are `0/1` valued, so the product is `AND`.
+    /// Conjunction: both operands are `0/1` valued, so the product is `AND`.
     pub fn product(&mut self, left: NodeId, right: NodeId) -> NodeId {
         self.zdd.mul(left, right)
     }
@@ -149,8 +115,7 @@ impl Ring {
         poly == ZERO
     }
 
-    /// Substitute `name = 1`. An unknown name constrains nothing, so the
-    /// polynomial comes back unchanged - which is what both other backends do.
+    /// Substitute `name = 1`. An unknown name constrains nothing.
     pub fn assume(&mut self, poly: NodeId, name: &str) -> NodeId {
         match self.variable(name) {
             Some(variable) => self.zdd.substitute(poly, variable, true),
@@ -171,13 +136,8 @@ impl Ring {
         self.zdd.holds_empty(poly)
     }
 
-    /// Which of `others` have a non-zero product with `poly`.
-    ///
-    /// One call for what `root.py` asks once per field name after every
-    /// selection. The products share a memo table, so the run costs rather less
-    /// than the same number of separate multiplications, and - the point of
-    /// doing it here at all - it costs one crossing of the language boundary
-    /// rather than two per field.
+    /// Which of `others` have a non-zero product with `poly`. One call for what
+    /// `root.py` asks once per field name after every selection.
     pub fn nonzero(&mut self, poly: NodeId, others: &[NodeId]) -> Vec<bool> {
         others
             .iter()
@@ -185,8 +145,8 @@ impl Ring {
             .collect()
     }
 
-    /// The variables that may still be asserted: those `assume` leaves
-    /// something behind. Asserting any other one contradicts the selection.
+    /// The variables that may still be asserted; any other contradicts the
+    /// selection.
     pub fn viable(&mut self, poly: NodeId) -> Vec<bool> {
         (0..self.names.len() as VarId)
             .map(|variable| self.zdd.substitute(poly, variable, true) != ZERO)
@@ -195,14 +155,10 @@ impl Ring {
 
     /// Disjunctive normal form, for debug output.
     ///
-    /// Shannon expansion over the support: at each variable the function splits
-    /// into what it is with that variable on and what it is with it off, and a
-    /// branch that turns out not to depend on the variable drops it rather than
-    /// writing both polarities. Terms are sorted so two runs print alike.
-    ///
-    /// The expansion is worst case exponential in the support, so a polynomial
-    /// with an implausibly wide one is described rather than expanded - this is
-    /// a trace line, not a result.
+    /// Shannon expansion over the support, dropping a variable on any branch
+    /// that turns out not to depend on it. Worst case exponential in the
+    /// support, so an implausibly wide one is described rather than expanded -
+    /// this is a trace line, not a result.
     pub fn render(&mut self, poly: NodeId) -> String {
         if poly == ZERO {
             return "False".to_string();
@@ -291,7 +247,6 @@ impl Ring {
         written.join(" & ")
     }
 
-    /// How many monomials the polynomial has - what a list of them would cost.
     pub fn terms(&self, poly: NodeId) -> u128 {
         self.zdd.terms(poly)
     }

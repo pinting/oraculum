@@ -1,20 +1,13 @@
 //! `Multigraph`, exposed to Python.
 //!
 //! Labels cross as whatever object the caller put on the edge and come back
-//! unexamined, exactly as a head's payload does in `pyrunner` - the graph is
-//! the shape of the foreign keys, and what an edge *means* belongs to the
-//! library that built it.
-//!
-//! `copy` is the method this class exists for. It shares the edges and shares
-//! the contraction state, so a speculative branch that is created, queried and
-//! dropped allocates nothing at all.
+//! unexamined, exactly as a head's payload does in `pyrunner`.
 
 use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
 
 use crate::graph::multigraph::Multigraph;
 
-/// The opaque edge label. The kernel only stores it and hands it back.
 type Label = Py<PyAny>;
 
 #[pyclass(name = "Multigraph")]
@@ -50,7 +43,8 @@ impl PyMultigraph {
         Ok(Self::wrap(Multigraph::new(triples)))
     }
 
-    /// A clone each branch of the syntax graph can merge into freely.
+    /// A clone each branch of the syntax graph can merge into freely, sharing
+    /// both the edges and the contraction state until one of them writes.
     fn copy(&self) -> Self {
         Self::wrap(self.graph.copy())
     }
@@ -59,7 +53,6 @@ impl PyMultigraph {
         self.graph.contains(node)
     }
 
-    /// Every surviving vertex, sorted.
     fn nodes(&self) -> Vec<&str> {
         self.graph.nodes()
     }

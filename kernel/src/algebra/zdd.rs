@@ -1,39 +1,23 @@
 //! Zero-suppressed decision diagrams, and the GF(2) algebra over them.
 //!
-//! This is the data structure PolyBoRi keeps a boolean polynomial in, rebuilt
-//! here without CUDD underneath it. A polynomial over `GF(2)[x1..xn]/(xi^2-xi)`
-//! is a sum of squarefree monomials and nothing else, so it is exactly a *set
-//! of subsets* of the variables - and a ZDD is the canonical way to hold one.
-//!
-//! A node is `(var, hi, lo)` and stands for the family
+//! The structure PolyBoRi keeps a boolean polynomial in, rebuilt without CUDD
+//! underneath it. A polynomial over `GF(2)[x1..xn]/(xi^2-xi)` is a sum of
+//! squarefree monomials and nothing else, so it is a set of subsets of the
+//! variables. A node `(var, hi, lo)` stands for the family
 //!
 //!     { {var} U S : S in hi }  U  { S : S in lo }
 //!
-//! with two terminals: `ZERO`, the empty family, which is the polynomial `0`,
-//! and `ONE`, the family whose only member is the empty monomial, which is the
-//! polynomial `1`. Two reductions make the representation canonical:
-//!
-//! * **zero suppression** - a node whose `hi` is `ZERO` says nothing, so it is
-//!   replaced by its `lo`. This is what makes the diagram small on sparse
-//!   families, and it is the whole reason PolyBoRi is a ZDD library rather
-//!   than a BDD one;
-//! * **hash consing** - `unique` maps a node triple to its id, so structurally
-//!   equal diagrams *are* the same id. Equality is then a `u32` comparison,
-//!   and so is "is this polynomial zero".
+//! Two reductions make it canonical: a node whose `hi` is `ZERO` is replaced by
+//! its `lo` (zero suppression), and `unique` hash conses the rest, so equal
+//! polynomials are equal `u32`s and "is this zero" is `== ZERO`.
 //!
 //! Variables are ordered by index, smallest at the top, which is PolyBoRi's
-//! lexicographic default. Every node sits strictly above its children.
-//!
-//! The operations are the recursive ones over that decomposition, each with a
-//! memo table that survives between calls. `mul` in particular follows
-//! PolyBoRi's `dd_multiply` (`routines/pbori_routines_misc.h`) including its
-//! two-call rearrangement of the three cross terms - see the comment there.
+//! lexicographic default; every node sits strictly above its children.
 //!
 //! Nodes are never freed. CUDD reference counts and garbage collects because it
-//! is a general purpose library; here the reachable set is the closure of a
-//! fixed handful of constraints under multiplication, which is small and does
-//! not grow once a schema has been walked a few times. `node_count` is there to
-//! confirm that rather than to be acted on.
+//! is general purpose; here the reachable set is the closure of a fixed handful
+//! of constraints under multiplication, which does not grow once a schema has
+//! been walked a few times.
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
@@ -43,10 +27,10 @@ pub type NodeId = u32;
 /// A variable, by position in the ring's variable order.
 pub type VarId = u32;
 
-/// The empty family - no monomial at all, which is the polynomial `0`.
+/// The empty family - the polynomial `0`.
 pub const ZERO: NodeId = 0;
 
-/// The family holding only the empty monomial, which is the polynomial `1`.
+/// The family holding only the empty monomial - the polynomial `1`.
 pub const ONE: NodeId = 1;
 
 /// The level a terminal is treated as sitting at. Below every real variable, so
@@ -60,8 +44,8 @@ struct Node {
     lo: NodeId,
 }
 
-/// The shared diagram store: every polynomial built through it is a node in
-/// here, and two equal polynomials are the same node.
+/// The shared diagram store. Every operation memoises, and the tables survive
+/// between calls.
 pub struct Zdd {
     nodes: Vec<Node>,
     unique: HashMap<Node, NodeId>,
@@ -114,10 +98,8 @@ impl Zdd {
         self.nodes[f as usize].lo
     }
 
-    /// The cofactors of `f` at level `v`, as `(hi, lo)`.
-    ///
-    /// A diagram that does not branch on `v` has no monomial containing it at
-    /// this level, which is `hi = ZERO` - the zero suppression read backwards.
+    /// The cofactors of `f` at level `v`, as `(hi, lo)`. A diagram that does
+    /// not branch on `v` has no monomial containing it there, so `hi` is `ZERO`.
     #[inline(always)]
     fn split(&self, f: NodeId, v: VarId) -> (NodeId, NodeId) {
         if self.var(f) == v {
@@ -147,7 +129,6 @@ impl Zdd {
         id
     }
 
-    /// The polynomial that is the single variable `v`.
     pub fn single(&mut self, v: VarId) -> NodeId {
         self.make(v, ONE, ZERO)
     }
@@ -157,8 +138,8 @@ impl Zdd {
         self.make(v, ONE, ONE)
     }
 
-    /// Addition, which over GF(2) is the symmetric difference of the monomial
-    /// sets: a monomial in both cancels.
+    /// Addition, which over GF(2) is symmetric difference: a monomial in both
+    /// sides cancels.
     pub fn xor(&mut self, a: NodeId, b: NodeId) -> NodeId {
         if a == b {
             return ZERO;
@@ -178,9 +159,8 @@ impl Zdd {
             return cached;
         }
 
-        // Neither side is a terminal here - the only terminals are `ZERO`,
-        // handled above, and `ONE`, which would have made `a == b` - so `v` is
-        // a real variable.
+        // Neither side is a terminal here - `ZERO` was handled above and `ONE`
+        // would have made `a == b` - so `v` is a real variable.
         let v: VarId = self.var(a).min(self.var(b));
         let (a1, a0) = self.split(a, v);
         let (b1, b0) = self.split(b, v);
@@ -203,12 +183,12 @@ impl Zdd {
     ///
     /// Three products for the `hi` branch, except that PolyBoRi's `dd_multiply`
     /// folds two of them into one by multiplying `a1` against `b0 + b1`, which
-    /// is what is done here. The two shortcuts it takes on the way - `a0 == a1`
-    /// collapsing the sum to `a1*b0`, and `b0 == b1` collapsing it to `a0*b1` -
-    /// fall straight out of the same identity over GF(2).
+    /// is what is done here. Its two shortcuts - `a0 == a1` collapsing the sum
+    /// to `a1*b0`, `b0 == b1` collapsing it to `a0*b1` - fall out of the same
+    /// identity.
     ///
-    /// `f * f = f` because the cross terms pair up and cancel and every
-    /// monomial is idempotent, which is the `a == b` case.
+    /// `f * f = f`, because the cross terms pair up and cancel and every
+    /// monomial is idempotent.
     pub fn mul(&mut self, a: NodeId, b: NodeId) -> NodeId {
         if a == ZERO || b == ZERO {
             return ZERO;
@@ -260,12 +240,9 @@ impl Zdd {
         result
     }
 
-    /// Substitute `v = 1` (`value` true) or `v = 0` (`value` false).
-    ///
-    /// At the level of `v` the diagram splits into the monomials that contain
-    /// it and those that do not. Setting it to one merges the two halves, which
-    /// is an `xor` because the shared monomials cancel; setting it to zero
-    /// throws the `hi` half away, which is the `lo` branch on its own.
+    /// Substitute `v = 1` (`value` true) or `v = 0` (`value` false). Setting it
+    /// to one merges the two halves, which is an `xor` because the shared
+    /// monomials cancel; setting it to zero keeps the `lo` branch alone.
     pub fn substitute(&mut self, f: NodeId, v: VarId, value: bool) -> NodeId {
         let var: VarId = self.var(f);
 
@@ -295,11 +272,8 @@ impl Zdd {
         result
     }
 
-    /// Whether the all-zero assignment satisfies the polynomial.
-    ///
-    /// Every variable at zero kills every monomial that mentions one, so what
-    /// is left is the constant term - the empty monomial, which lives at the
-    /// end of the `lo` chain.
+    /// Whether the all-zero assignment satisfies the polynomial: every variable
+    /// at zero leaves the constant term, at the end of the `lo` chain.
     pub fn holds_empty(&self, f: NodeId) -> bool {
         let mut node: NodeId = f;
 
@@ -334,10 +308,8 @@ impl Zdd {
         support
     }
 
-    /// The number of monomials, which is the number of paths ending at `ONE`.
-    ///
-    /// Exponential in the diagram's height and linear in its size, so it says
-    /// what the cube and monomial representations would have cost.
+    /// The number of monomials - the paths ending at `ONE`, counted in the size
+    /// of the diagram rather than in their own number.
     pub fn terms(&self, f: NodeId) -> u128 {
         let mut counted: HashMap<NodeId, u128> = HashMap::default();
 
@@ -367,7 +339,6 @@ impl Zdd {
         total
     }
 
-    /// Live nodes, terminals included.
     pub fn node_count(&self) -> usize {
         self.nodes.len()
     }

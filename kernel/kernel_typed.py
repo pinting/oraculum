@@ -57,9 +57,8 @@ class Vocabulary:
 class BooleanPolynomialRing:
     """Boolean polynomials over `GF(2)[t..]/(t^2 - t)`, as decision diagrams.
 
-    A polynomial is the `int` id of a node in this ring's diagram. The diagram
-    is hash consed, so equal ids mean equal polynomials; `0` is the zero
-    polynomial and `1` the constant one. An id means nothing to another ring.
+    A polynomial is the `int` id of a node in this ring's diagram, which is
+    hash consed, so equal ids mean equal polynomials.
     """
 
     __slots__ = ("unit",)
@@ -117,8 +116,7 @@ class BooleanPolynomialRing:
 class Multigraph:
     """An undirected multigraph whose only mutation is vertex contraction.
 
-    Vertices come from the edges alone; labels are stored and handed back,
-    never examined. `copy` shares both the edges and the contraction state.
+    `copy` shares both the edges and the contraction state.
     """
 
     __slots__ = ("unit",)

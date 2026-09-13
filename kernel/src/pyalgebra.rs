@@ -1,23 +1,12 @@
 //! `BooleanPolynomialRing`, exposed to Python.
 //!
-//! The surface is SageMath's, narrowed to what a mutual exclusion model asks
-//! for, so that the module drops in where `sage.all.BooleanPolynomialRing` was
-//! without a translation layer. The one difference is what a polynomial is on
-//! this side of the boundary: SageMath hands back an object, and this hands
-//! back the `int` id of a node in the ring's diagram.
+//! A polynomial crosses as the `int` id of a node in the ring's diagram. The
+//! diagram is hash consed, so equality of ids is equality of polynomials and
+//! `poly == 0` still means "zero"; an id means nothing to a ring that did not
+//! issue it.
 //!
-//! That is deliberate. A polynomial is a value - it is copied into every branch
-//! of a syntax graph and compared for equality constantly - and an `int` is the
-//! cheapest value Python has. Equality of ids *is* equality of polynomials,
-//! because the diagram is hash consed, so `poly == 0` still means "zero".
-//!
-//! Ids are only meaningful to the ring that issued them. Every caller holds its
-//! ring for as long as it holds an id, which `root.py` does by construction.
-//!
-//! `nonzero` and `viable` have no SageMath counterpart. They are the two loops
-//! `root.py` runs after every selection - one over the field constraints, one
-//! over the table variables - moved across the boundary so that a refresh costs
-//! one call rather than two per field.
+//! `nonzero` and `viable` are the two loops `root.py` would otherwise run after
+//! every selection, moved across the boundary.
 
 use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
@@ -33,7 +22,6 @@ pub struct PyRing {
 
 #[pymethods]
 impl PyRing {
-    /// The ring over these variables, in this order.
     #[new]
     fn new(names: Vec<String>) -> Self {
         Self {
@@ -46,7 +34,6 @@ impl PyRing {
         self.ring.one()
     }
 
-    /// The constant `0` - the function nothing satisfies.
     fn zero(&self) -> NodeId {
         self.ring.zero()
     }
@@ -58,7 +45,7 @@ impl PyRing {
             .ok_or_else(|| PyKeyError::new_err(format!("not a variable of the ring: {names:?}")))
     }
 
-    /// Conjunction. Both operands are `0/1` valued, so the product is `AND`.
+    /// Conjunction: both operands are `0/1` valued, so the product is `AND`.
     fn product(&mut self, left: NodeId, right: NodeId) -> NodeId {
         self.ring.product(left, right)
     }
@@ -112,12 +99,11 @@ impl PyRing {
         self.ring.render(poly)
     }
 
-    /// How many monomials the polynomial has - what listing them would cost.
+    /// How many monomials the polynomial has.
     fn term_count(&self, poly: NodeId) -> u128 {
         self.ring.terms(poly)
     }
 
-    /// Diagram nodes in the whole ring, terminals included.
     fn node_count(&self) -> usize {
         self.ring.node_count()
     }

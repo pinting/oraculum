@@ -20,7 +20,44 @@ Text to SQL conversion for the following subset of the SQL language.
 <operand>   := <column> | <qualifier>.<column>
 ```
 
-## An example
+## Building & running
+
+Needs [Rust](https://rustup.rs), [UV](https://docs.astral.sh/uv/getting-started/installation)
+and Python 3.14. Everything else is downloaded at a version this repository
+names.
+
+Each project builds itself, from its own directory:
+
+```bash
+cd seer
+make build       # seer and the kernel, natively
+make test        # the corpus, one character at a time
+make run         # interactive: the graph offers tokens, you pick one
+make live        # the same, with a model doing the picking
+make wasm        # the same kernel, cross compiled to WebAssembly
+```
+
+```bash
+cd kernel
+make build       # the kernel alone, into its own venv
+make benchmark   # DFA layouts, timed
+```
+
+```bash
+make docs        # the browser build, into docs/
+```
+
+**Run it in your browser locally!**  
+
+<p align="center">
+  <a href="https://pinting.github.io/oraculum/">
+    <img src="preview.png" alt="oraculum in the browser" width="800">
+  </a>
+</p>
+
+## Introduction
+
+Let's have the following example walkthrough over the attached SQL schema!
 
 ```sql
 CREATE TABLE users (
@@ -153,10 +190,6 @@ spaces, tabs and newlines, one or more - and the statement ends at its
 semicolon.
 
 Two things have to be true of every statement the system produces. It has to be **grammatical** - a well formed `SELECT`. And it has to be **meaningful** - a query the schema can actually answer. Both are enforced one token at a time, while the model is writing, so neither is ever checked after the fact.
-
-**A recording about running the engine in interactive mode.**
-
-![Preview](preview.gif)
 
 ## Architecture
 
@@ -485,8 +518,7 @@ It is not, for the reason 6c gives: contraction is its only mutation, so
 the edges can be shared and the copy is the contraction state alone.
 
 Underneath the running product is a zero-suppressed decision diagram,
-which is what PolyBoRi gives SageMath's BooleanPolynomialRing and what
-the kernel now carries its own port of. The representation matters more
+the representation PolyBoRi uses, carried by the kernel. It matters more
 than the multiply: C(f) for a field living in k tables has 2^(k-1)
 monomials by the closed form above, and `id` lives in every table there
 is, but every odd-sized subset of k variables is two diagram nodes per
@@ -629,94 +661,6 @@ operand is a constant, so it is a lattice, and a literal is one
 expression per class - a second pass over the same registry builds
 nothing at all.
 ```
-
-## Experiments
-
-Regular expression used: `(monday|tuesday|wednesday|thursday|friday)+`!
-With the following token selection: `we -> d -> ne -> s -> day`!
-Gemma 3 vocabulary is used!
-
-### 1st - Ahead-of-time lattice building for constants using the Aho-Corasick algorithm
-
-Token lattice approach for breaking up text into a Directed Acyclic Graph (forming all possible routes to build the text using the given vocabulary). The initial (one-time) build time (against the vocabulary) takes 2.3 s with extremely fast lattice construction (e.g. 80 µs for `It has snowed a lot in Europe`) and between 3-10 µs to traverse in the DAG. **No regular expression support**, but good for constant values!
-
-### 2nd - Just-in-time lattice generation using only `guidance-ai/derivre`
-
-Pure regex-based matching with derivative automata. 257 µs build time for the example regular expression. Slow next token filtering because of the exhaustive token matching, around 39 ms per step.
-
-### 3rd - Just-in-time lattice generation using `microsoft/toktrie` and `guidance-ai/derivre`
-
-Hybrid approach combining derivre and toktrie. 403 ms trie building (one time for a given vocabulary), 330 µs build time for the example regular expression. Moderate efficiency through trie pruning, 200-500 µs per step. Its weakness is the still relatively high transition attempts compared to AOT-based methods.
-
-### 4th - Ahead-of-time lattice building for regular expressions using `dottxt-ai/outlines-core`
-
-Prebuilt-based regex matching with precomputed token patterns. The obvious weakness are the increased memory usage for storing the index and the higher upfront cost: 211.950862 ms vocabulary rebuild (one time) and 1.190878411 s index build for the example regular expression. Its strength is its exceptional runtime efficiency, 6-18 µs per step.
-
-### 5th - Ahead-of-time lattice building for regular expressions using `regex-automata` directly
-
-Same as `outlines-core`. The `Index::new` function of Outlines is using linear search to build a token DFA on top of the regular expression byte DFA of `regex-automata`. This strategy is slow, could be improved - and it makes no sense to depend on a library which wraps another library in a couple of hundreds of lines. 583.171892 ms index build time for the example regular expression, 6-18 µs per step. The unanswered question, why build time decreased so much when using the same regular expression engine behind the scenes - perhaps it is due to no memory copy has to be initiated, the same vocabulary data structure is used as it is.
-
-### 6th - Ahead-of-time lattice building for regular expressions using `microsoft/toktrie` and `guidance-ai/derivre`
-
-The combination of AOT index building with TokTrie - Derivre: faster build time, same number of token matching per step as Outlines. 399.975656 ms trie building time (needed only once for a given vocabulary), 4.334894 ms index building time for the example regular expression and 7-21 µs per step.
-
-### 7th - Performance comparisons between `FastHashDFA` vs. `DoubleHashDFA` vs. `FlatDFA`
-
-The benchmarks demonstrate a space-time trade-off where the flat structures achieves the fastest performance for scanning and hash structures for lookups; while hybrid solutions are the fastest, they require the largest memory allocation. Ultimately, the `DoubleHashDFA` (the implementation `outlines-core` uses) proves to be a good universal solution, average in both lookups and scans, but only suffering (worst case) 2x memory usage compared to `FlatDFA` which is the most compact, but having a slow lookup algorithm due to its linearity (optimized by binary tree search on a CSR data structure, but still lacking the jump capabilities of hash functions). The heavily optimized `FastHashDFA` tries to combine both of the two worlds and outperforms other candidates in lookup and scan speeds, but suffers a high memory usage.
-
-### 8th - Namespace resolution
-
-Selecting fields from tables and dynamically restricting field space as the selection goes by, then enforcing tables that satisfy the previous field selections. Supporting both a global namespace and many individual "alias" namespaces. Using boolean algebra under the hood.
-
-Written in Rust with the `boolean_expression` crate. Two resolver types sit behind a unified `Context`:
-
-- **`ManyResolver`** (global namespace) - builds a BDD over table variables. For each field it constructs the *exactly-one* constraint: the BDD function that is true when exactly one of the field's tables is on. Selecting a field ANDs its constraint into a running product; a field is offered only when its constraint ANDed with the current product is still satisfiable. Table resolution uses `restrict` (substituting a variable to `true`) and satisfaction checks evaluate the BDD with all variables `false`.
-
-- **`OneResolver`** (per-alias namespace) - uses plain set intersection instead of BDD algebra. An alias denotes a single table, so each field selection intersects the candidates with the field's table set. No cross-talk between aliases, no polynomial machinery needed.
-
-`Context` keeps one `ManyResolver` for unqualified fields and an `FxHashMap` of `OneResolver`s keyed by alias name. Setting a namespace before selecting a field routes the selection to the right resolver. Required tables are the union of both halves and the query is satisfied when both the global BDD and every alias scope have been fully discharged. The whole `Context` is `Clone`, so branching is a value copy.
-
-### 9th - Advanced modelling
-
-Reimplements and extends Context in Python using SageMath, adding schema parsing, a proper GF(2) polynomial ring and foreign-key graph traversal. This is the modelling `seer` adopts.
-
-**Field selection & boolean conflict resolution:** `Root` replaces the BDD of Experiment 8 with a `BooleanPolynomialRing` over GF(2). For each field the *exactly-one* constraint is built as the sum of terms $t_i \cdot \prod_{j \neq i}(1 + t_j)$, which over GF(2) is `1` when exactly one table is on. Selecting a field multiplies its constraint into a running product $P$; table viability is tested by substituting $t = 1$; and satisfaction checks evaluate $P$ with all variables set to `0`. `Scope` handles aliased fields with set intersection (as `OneResolver` did), `Scopes` is the registry and `Conflicts` is the façade that unifies both, propagating alias table resolutions back into `Root` when an aliased table also appears in the global polynomial.
-
-**FROM/JOIN via graph contraction:** `Relationships` builds a SageMath `Graph` whose nodes are the required tables (including aliased variants like `"c x"`) and whose edges are foreign-key references, each labelled with the `(src_table.column, dst_table.column)` pair. Growing a FROM entry is a sequence of vertex contractions (`merge_vertices`): joining a neighbour merges it into the head, unifying both neighbourhoods so that tables two hops away become directly reachable. The `ON` columns are read from the edge label, never guessed. Excluded tables (those the conflict resolver has ruled out) are hidden from the joinable set.
-
-### 10th - The modelling, ported into the kernel
-
-SageMath was right about the mathematics and wrong about everything else: it installs system-wide only, does not cross compile, and - measurably - its `Graph` was slower at this than the adjacency dict written to replace it. So both halves of Experiment 9 moved into `kernel`, which seer already depended on for its indexes and which was already being cross compiled.
-
-**`BooleanPolynomialRing`, as a ZDD.** SageMath's ring is PolyBoRi, and PolyBoRi holds a boolean polynomial as a *zero-suppressed decision diagram*. A polynomial over $\mathbb{F}_2[t_1,\ldots,t_n]/(t_i^2-t_i)$ is a sum of squarefree monomials and nothing else, so it is a set of subsets of the variables, and a ZDD is the canonical way to hold one: hash consed, so equal polynomials are equal `u32`s; zero-suppressed, so `hi = 0` nodes vanish and sparse families stay small. `kernel/src/algebra/zdd.rs` is that diagram without CUDD underneath it, with a memo table per operation and a multiply that follows PolyBoRi's `dd_multiply` down to the rearrangement getting a product's three cross terms out of two recursive calls. The port was checked against SageMath directly: same answers, and the same monomial count, on random products over every subset constraint up to six variables.
-
-**The graph, built around contraction.** Nothing is ever added after the schema has been read, so the quotient is one array - which vertex each vertex has been folded into - and the edges can be shared by every copy. That inverts the cost: `copy` is two reference count bumps, `merge_vertices` is one clone of an array of `u32`, and a branch that joins nothing allocates nothing.
-
-**And the loops came across too.** A selection invalidates every field name and every table at once, so `nonzero` and `viable` answer the whole question rather than being called once per field. That was the cost, not the algebra.
-
-The two Python implementations - SageMath's and a cube-set-and-adjacency-dict one written to survive without it - stayed selectable for a while as the check on the port, and were then deleted along with the protocol layer selecting between them. `kernel` is not optional for seer; a fallback for it is a fallback for nothing. What the comparison was worth is kept instead by `seer/tests/model.py`, which checks both structures against a brute force reference written in the test: a boolean function as the set of assignments satisfying it, and a contracted multigraph as a dict of classes.
-
-These were the numbers that closed the question, microseconds per operation, before the two Python implementations were removed:
-
-| 16 tables, 34 field names | kernel | pure | sage |
-|---|---|---|---|
-| build the ring | 68.67 | **39.95** | 566.44 |
-| product | **0.12** | 13.66 | 0.45 |
-| `nonzero`, every field | **0.78** | 470.67 | 156.94 |
-| `viable`, every table | **0.95** | 41.61 | 71.92 |
-
-| 24 vertices, 110 edges | kernel | pure | sage |
-|---|---|---|---|
-| construct | **19.24** | 20.42 | 37.97 |
-| copy | **0.19** | 2.83 | 53.85 |
-| copy + `edges(head)` | **0.81** | 2.97 | 61.78 |
-| copy + 5 contractions | **8.86** | 76.58 | 499.12 |
-
-Two rows go the other way, and both are once per schema rather than once per branch: building the ring costs more than building a cube set, because a diagram is a real object and a cube set is a bit mask, and constructing a six vertex graph costs more than a dict does. Everything that happens per branch is between four and eighty times cheaper.
-
-Deleting the protocols took the forwarding classes with them - the extension already spells the methods the way seer wants them, so `backend.py` is now two aliases and `Root` calls into Rust directly. That is a Python frame off every operation on the hot path: graph `copy` went from 0.19 to **0.07 µs** and the contraction chain from 8.86 to **7.51**. `make benchmark` prints the current figures.
-
-End to end on the three-table schema of `seer/schema.sql` none of this shows - 4.5 of the 6.0 seconds a corpus run takes is `Runner.routes()` masking a 262k vocabulary, and the whole modelling layer is around 0.3 of it. The gap is what a wider schema, and the browser, get to spend elsewhere.
 
 ## License
 

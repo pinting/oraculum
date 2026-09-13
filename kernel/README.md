@@ -141,7 +141,7 @@ Two structures that have nothing to do with tokens. They are here because the
 library on the other side - seer - spends its time *copying* them, once per
 branch of the syntax graph it is expanding, and because what it wants out of
 them is narrow enough to be worth building for rather than reaching for a
-general purpose library. Both are ports of what SageMath was doing.
+general purpose library.
 
 ### `BooleanPolynomialRing` - conflicts
 
@@ -152,10 +152,10 @@ asked of the product is whether it is zero, whether the all-zero assignment
 satisfies it, which variables it still depends on, and what happens when one of
 them is set.
 
-That is a boolean polynomial over `GF(2)[t..]/(t^2 - t)`, which is what
-SageMath's `BooleanPolynomialRing` is, and underneath SageMath that is PolyBoRi,
-which holds one as a *zero-suppressed decision diagram*. `algebra/zdd.rs` is
-that diagram rebuilt without CUDD under it - hash consed, so equal polynomials
+That is a boolean polynomial over `GF(2)[t..]/(t^2 - t)`, and the way to hold
+one is the way PolyBoRi does: a *zero-suppressed decision diagram*.
+`algebra/zdd.rs` is that diagram rebuilt without CUDD under it - hash consed,
+so equal polynomials
 are equal `u32`s, with a memo table per operation and a `mul` that follows
 PolyBoRi's `dd_multiply` including the rearrangement that gets a product's three
 cross terms out of two recursive calls. `algebra/ring.rs` is the ring around it.
@@ -182,9 +182,9 @@ ring.holds_empty(current)    # False - the FROM clause is not settled yet
 
 A polynomial crosses to Python as the `int` id of a node, because a polynomial
 is a value: it is copied into every branch and compared constantly, and an `int`
-is the cheapest value Python has. `nonzero` and `viable` are batches with no
-SageMath counterpart - they are the two loops the caller would otherwise run
-after every selection, moved across the boundary.
+is the cheapest value Python has. `nonzero` and `viable` are batches: the two
+loops the caller would otherwise run after every selection, moved across the
+boundary.
 
 ### `Multigraph` - joins
 
