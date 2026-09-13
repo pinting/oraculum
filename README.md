@@ -20,7 +20,15 @@ Text to SQL conversion for the following subset of the SQL language.
 <operand>   := <column> | <qualifier>.<column>
 ```
 
-## Building & running
+## Running it in the browser
+
+<p align="center">
+  <a href="https://pinting.github.io/oraculum/">
+    <img src="preview.png" alt="Run in the browser" width="800">
+  </a>
+</p>
+
+## Building & running locally
 
 Needs [Rust](https://rustup.rs), [UV](https://docs.astral.sh/uv/getting-started/installation)
 and Python 3.14. Everything else is downloaded at a version this repository
@@ -46,14 +54,6 @@ make benchmark   # DFA layouts, timed
 ```bash
 make docs        # the browser build, into docs/
 ```
-
-**Run it in your browser locally!**  
-
-<p align="center">
-  <a href="https://pinting.github.io/oraculum/">
-    <img src="preview.png" alt="oraculum in the browser" width="800">
-  </a>
-</p>
 
 ## Introduction
 
