@@ -1,6 +1,6 @@
 # oraculum
 
-Text to SQL conversion for the following subset of the SQL language.
+An SQL autocomplete framework which guarantees grammatical and semantical correctness in the following subset of the language.
 
 ```xml
 <statement> := SELECT <fields> FROM <entry> [, <entry>]* [WHERE <filters>] ;
