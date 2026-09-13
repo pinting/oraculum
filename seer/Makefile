@@ -1,63 +1,31 @@
 VENV := .venv
 PYTHON := $(VENV)/bin/python
 
-# Captured before the venv is put on PATH, so the SageMath check below can tell
-# "not installed system-wide" apart from "this venv cannot see it".
-SYSTEM_PATH := $(PATH)
-
 export PATH := $(CURDIR)/$(VENV)/bin:$(PATH)
 export VIRTUAL_ENV := $(CURDIR)/$(VENV)
-
-# PyO3 0.22 refuses to build against Python 3.14 without this; the generated
-# extension works, the version check is simply ahead of the release.
-export PYO3_USE_ABI3_FORWARD_COMPATIBILITY := 1
 
 KERNEL_WHEELS := $(CURDIR)/../kernel/target/wheels
 
 .ONESHELL:
-.PHONY: prerequisites kernel build model test benchmark run live clean distclean
+.PHONY: prerequisites kernel build model test test-model test-all benchmark run live clean distclean
 
-# SageMath only ships system-wide, so the venv has to see the system packages.
-# `sage` is imported by src/root.py and src/relationships.py.
+# Nothing outside this venv is needed. The modelling seer runs on - a boolean
+# algebra over table variables and a foreign key multigraph - used to be
+# SageMath's, which ships system-wide only and does not cross compile; it lives
+# in `kernel` now, which is built here and which the browser build shares.
 prerequisites:
 	@command -v uv > /dev/null || (echo "Error: uv is not installed!" && exit 1)
 	@VERSION=$$(python3 -c \
 		"import tomllib; \
 		print(tomllib.load(open('pyproject.toml','rb'))['project']['requires-python'].lstrip('>= '))")
 
-	# SageMath installs into the system interpreter's site-packages, so look
-	# there directly. PATH may well start with an unrelated virtualenv.
-	SYSTEM_PYTHON=""
-
-	for CANDIDATE in /usr/bin/python$$VERSION /usr/local/bin/python$$VERSION \
-		$$(PATH="$(SYSTEM_PATH)" command -v python$$VERSION); do
-		if [ -x "$$CANDIDATE" ] && $$CANDIDATE -c "import sage" > /dev/null 2>&1; then
-			SYSTEM_PYTHON=$$CANDIDATE
-
-			break
-		fi
-	done
-
-	if [ -z "$$SYSTEM_PYTHON" ]; then
-		echo "Error: no Python $$VERSION with SageMath found!"
-		echo "SageMath only installs system-wide, e.g. 'sudo pacman -S sagemath'."
-		exit 1
-	fi
-
 	if [ ! -d "$(VENV)" ]; then
-		echo "Creating venv with Python $$VERSION and system site packages..."
-		uv venv "$(VENV)" --python "$$SYSTEM_PYTHON" --system-site-packages
+		uv venv "$(VENV)" --python "$$VERSION"
 	else
 		ACTUAL_VERSION=$$($(PYTHON) -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 
 		if [ "$$ACTUAL_VERSION" != "$$VERSION" ]; then
 			echo "Error: .venv Python version mismatch"
-			exit 1
-		fi
-
-		if ! $(PYTHON) -c "import sage" > /dev/null 2>&1; then
-			echo "Error: .venv cannot see SageMath."
-			echo "It was created without --system-site-packages; run 'make distclean build'."
 			exit 1
 		fi
 	fi
@@ -79,6 +47,18 @@ model: build
 # time, and fails on any that does not behave as its group declares.
 test:
 	$(PYTHON) tests/main.py
+
+# The algebra and the graph against the brute force reference written in the
+# test, on inputs the corpus never reaches.
+test-model:
+	$(PYTHON) tests/model.py
+
+test-all: test-model test
+
+# The modelling layer, timed. The corpus is the wrong place to look for this:
+# most of a run is the kernel masking the vocabulary.
+benchmark:
+	$(PYTHON) tests/benchmark.py
 
 # Interactive entry point.
 run:

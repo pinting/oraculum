@@ -2,3 +2,8 @@ target
 .venv
 __pycache__
 .claude
+# The WASM demo's toolchain and build output, and the wheel pyodide-build
+# leaves in the kernel.
+wasm/.build/
+wasm/dist/
+kernel/dist/

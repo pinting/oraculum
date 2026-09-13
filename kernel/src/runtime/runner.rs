@@ -16,8 +16,10 @@
 //! The runner never inspects a payload and never builds a graph. It knows
 //! nothing about what the indexes spell.
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
-use rayon::{ThreadPool, ThreadPoolBuilder};
+
+use crate::runtime::pool::{self, Pool};
 use rustc_hash::FxHashSet as HashSet;
 use std::sync::Arc;
 
@@ -42,7 +44,7 @@ where
     P: Send + Sync,
 {
     factory: Arc<Factory<N, T, D>>,
-    pool: Arc<ThreadPool>,
+    pool: Arc<Pool>,
     heads: Vec<Head<N, T, D, P>>,
     tokens: Vec<T>,
     next_id: HeadId,
@@ -62,17 +64,16 @@ where
 {
     /// `workers` of 0 or 1 still builds a pool, so the code path is the same
     /// either way; the thresholds are what keep a small run off the workers.
+    ///
+    /// Without the `parallel` feature there is no pool to build and this cannot
+    /// fail - the `Option` stays because the caller's error path does.
     pub fn new(factory: Arc<Factory<N, T, D>>, workers: usize) -> Option<Self> {
-        let pool: ThreadPool = ThreadPoolBuilder::new()
-            .num_threads(workers.max(1))
-            .thread_name(|i| format!("kernel-worker-{i}"))
-            .build()
-            .ok()?;
+        let pool: Pool = pool::build(workers)?;
 
         Some(Self::with_pool(factory, Arc::new(pool)))
     }
 
-    pub fn with_pool(factory: Arc<Factory<N, T, D>>, pool: Arc<ThreadPool>) -> Self {
+    pub fn with_pool(factory: Arc<Factory<N, T, D>>, pool: Arc<Pool>) -> Self {
         Self {
             factory,
             pool,
@@ -90,7 +91,7 @@ where
         &self.factory
     }
 
-    pub fn pool(&self) -> &Arc<ThreadPool> {
+    pub fn pool(&self) -> &Arc<Pool> {
         &self.pool
     }
 
@@ -217,12 +218,17 @@ where
             return Vec::new();
         }
 
+        #[cfg(feature = "parallel")]
         let collected: Vec<Vec<T>> = if self.heads.len() < PARALLEL_THRESHOLD {
             self.heads.iter().map(|head| head.transitions()).collect()
         } else {
             self.pool
                 .install(|| self.heads.par_iter().map(|head| head.transitions()).collect())
         };
+
+        #[cfg(not(feature = "parallel"))]
+        let collected: Vec<Vec<T>> =
+            self.heads.iter().map(|head| head.transitions()).collect();
 
         let mut seen: HashSet<T> = HashSet::default();
         let mut routes: Vec<T> = Vec::new();
@@ -251,7 +257,7 @@ where
     /// which is what building a wide group draft does - shares these workers
     /// instead of starting a second pool of its own.
     pub fn feed(&mut self, token_id: T, resolver: &(dyn Resolver<P> + Sync)) -> bool {
-        let pool: Arc<ThreadPool> = self.pool.clone();
+        let pool: Arc<Pool> = self.pool.clone();
 
         pool.install(|| self.drive(token_id, resolver))
     }
@@ -275,7 +281,7 @@ where
     /// Needed when a head is spawned onto an index that accepts straight away,
     /// which would otherwise sit unreported until the next token.
     pub fn settle(&mut self, resolver: &(dyn Resolver<P> + Sync)) {
-        let pool: Arc<ThreadPool> = self.pool.clone();
+        let pool: Arc<Pool> = self.pool.clone();
 
         pool.install(|| self.resolve(resolver))
     }
@@ -319,12 +325,18 @@ where
     }
 
     fn advance(&mut self, token_id: T) -> bool {
+        #[cfg(not(feature = "parallel"))]
+        for head in &mut self.heads {
+            head.feed(token_id);
+        }
+
+        #[cfg(feature = "parallel")]
         if self.heads.len() < PARALLEL_THRESHOLD {
             for head in &mut self.heads {
                 head.feed(token_id);
             }
         } else {
-            let pool: Arc<ThreadPool> = self.pool.clone();
+            let pool: Arc<Pool> = self.pool.clone();
             let heads: &mut Vec<Head<N, T, D, P>> = &mut self.heads;
 
             pool.install(|| {

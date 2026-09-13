@@ -480,10 +480,17 @@ and the per-field constraint polynomials are built once per schema and
 never change, so a copy just rebinds them; the running product and the
 field sets are values, so they need no copying at all.
 
-The join graph is the exception, since contraction mutates it - it is
-genuinely duplicated per branch and only after the FROM keyword has
-built it. Underneath the running product sits PolyBoRi's decision
-diagram, which is where the 0.25 us multiply comes from.
+The join graph looks like the exception, since contraction mutates it.
+It is not, for the reason 6c gives: contraction is its only mutation, so
+the edges can be shared and the copy is the contraction state alone.
+
+Underneath the running product is a zero-suppressed decision diagram,
+which is what PolyBoRi gives SageMath's BooleanPolynomialRing and what
+the kernel now carries its own port of. The representation matters more
+than the multiply: C(f) for a field living in k tables has 2^(k-1)
+monomials by the closed form above, and `id` lives in every table there
+is, but every odd-sized subset of k variables is two diagram nodes per
+level.
 ```
 
 #### 6b. Aliased fields: intersection
@@ -522,6 +529,14 @@ It is a multigraph deliberately: two tables joined by two different
 foreign keys are two alternatives, and both stay. The head is a single
 vertex name, so growing one FROM entry is a sequence of contractions
 into it.
+
+Contraction being the *only* mutation is worth saying out loud, because
+it is what makes the structure cheap. Nothing is ever added after the
+schema has been read, so the quotient is determined by which vertex each
+vertex has been folded into - one array - and everything else can be
+shared by every copy. A branch that joins nothing allocates nothing, and
+a dropped loop needs no handling: an edge whose far end is in the same
+class as its near end is simply not reported.
 ```
 
 #### 6d. The WHERE clause: closing the clause makes it a table
@@ -668,6 +683,40 @@ Reimplements and extends Context in Python using SageMath, adding schema parsing
 **Field selection & boolean conflict resolution:** `Root` replaces the BDD of Experiment 8 with a `BooleanPolynomialRing` over GF(2). For each field the *exactly-one* constraint is built as the sum of terms $t_i \cdot \prod_{j \neq i}(1 + t_j)$, which over GF(2) is `1` when exactly one table is on. Selecting a field multiplies its constraint into a running product $P$; table viability is tested by substituting $t = 1$; and satisfaction checks evaluate $P$ with all variables set to `0`. `Scope` handles aliased fields with set intersection (as `OneResolver` did), `Scopes` is the registry and `Conflicts` is the façade that unifies both, propagating alias table resolutions back into `Root` when an aliased table also appears in the global polynomial.
 
 **FROM/JOIN via graph contraction:** `Relationships` builds a SageMath `Graph` whose nodes are the required tables (including aliased variants like `"c x"`) and whose edges are foreign-key references, each labelled with the `(src_table.column, dst_table.column)` pair. Growing a FROM entry is a sequence of vertex contractions (`merge_vertices`): joining a neighbour merges it into the head, unifying both neighbourhoods so that tables two hops away become directly reachable. The `ON` columns are read from the edge label, never guessed. Excluded tables (those the conflict resolver has ruled out) are hidden from the joinable set.
+
+### 10th - The modelling, ported into the kernel
+
+SageMath was right about the mathematics and wrong about everything else: it installs system-wide only, does not cross compile, and - measurably - its `Graph` was slower at this than the adjacency dict written to replace it. So both halves of Experiment 9 moved into `kernel`, which seer already depended on for its indexes and which was already being cross compiled.
+
+**`BooleanPolynomialRing`, as a ZDD.** SageMath's ring is PolyBoRi, and PolyBoRi holds a boolean polynomial as a *zero-suppressed decision diagram*. A polynomial over $\mathbb{F}_2[t_1,\ldots,t_n]/(t_i^2-t_i)$ is a sum of squarefree monomials and nothing else, so it is a set of subsets of the variables, and a ZDD is the canonical way to hold one: hash consed, so equal polynomials are equal `u32`s; zero-suppressed, so `hi = 0` nodes vanish and sparse families stay small. `kernel/src/algebra/zdd.rs` is that diagram without CUDD underneath it, with a memo table per operation and a multiply that follows PolyBoRi's `dd_multiply` down to the rearrangement getting a product's three cross terms out of two recursive calls. The port was checked against SageMath directly: same answers, and the same monomial count, on random products over every subset constraint up to six variables.
+
+**The graph, built around contraction.** Nothing is ever added after the schema has been read, so the quotient is one array - which vertex each vertex has been folded into - and the edges can be shared by every copy. That inverts the cost: `copy` is two reference count bumps, `merge_vertices` is one clone of an array of `u32`, and a branch that joins nothing allocates nothing.
+
+**And the loops came across too.** A selection invalidates every field name and every table at once, so `nonzero` and `viable` answer the whole question rather than being called once per field. That was the cost, not the algebra.
+
+The two Python implementations - SageMath's and a cube-set-and-adjacency-dict one written to survive without it - stayed selectable for a while as the check on the port, and were then deleted along with the protocol layer selecting between them. `kernel` is not optional for seer; a fallback for it is a fallback for nothing. What the comparison was worth is kept instead by `seer/tests/model.py`, which checks both structures against a brute force reference written in the test: a boolean function as the set of assignments satisfying it, and a contracted multigraph as a dict of classes.
+
+These were the numbers that closed the question, microseconds per operation, before the two Python implementations were removed:
+
+| 16 tables, 34 field names | kernel | pure | sage |
+|---|---|---|---|
+| build the ring | 68.67 | **39.95** | 566.44 |
+| product | **0.12** | 13.66 | 0.45 |
+| `nonzero`, every field | **0.78** | 470.67 | 156.94 |
+| `viable`, every table | **0.95** | 41.61 | 71.92 |
+
+| 24 vertices, 110 edges | kernel | pure | sage |
+|---|---|---|---|
+| construct | **19.24** | 20.42 | 37.97 |
+| copy | **0.19** | 2.83 | 53.85 |
+| copy + `edges(head)` | **0.81** | 2.97 | 61.78 |
+| copy + 5 contractions | **8.86** | 76.58 | 499.12 |
+
+Two rows go the other way, and both are once per schema rather than once per branch: building the ring costs more than building a cube set, because a diagram is a real object and a cube set is a bit mask, and constructing a six vertex graph costs more than a dict does. Everything that happens per branch is between four and eighty times cheaper.
+
+Deleting the protocols took the forwarding classes with them - the extension already spells the methods the way seer wants them, so `backend.py` is now two aliases and `Root` calls into Rust directly. That is a Python frame off every operation on the hot path: graph `copy` went from 0.19 to **0.07 µs** and the contraction chain from 8.86 to **7.51**. `make benchmark` prints the current figures.
+
+End to end on the three-table schema of `seer/schema.sql` none of this shows - 4.5 of the 6.0 seconds a corpus run takes is `Runner.routes()` masking a 262k vocabulary, and the whole modelling layer is around 0.3 of it. The gap is what a wider schema, and the browser, get to spend elsewhere.
 
 ## License
 

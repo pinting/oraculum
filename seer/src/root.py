@@ -1,34 +1,45 @@
 """Unqualified field resolution.
 
-The table space is a Boolean polynomial ring `GF(2)[t1, ..., tn]` from
-SageMath, one variable per table. A field living in tables `{t1..tk}`
-contributes the mutual exclusion polynomial
+The table space is a boolean function over one variable per table. A field
+living in tables `{t1..tk}` contributes the mutual exclusion constraint "one of
+these is the table this field came from, and it is not the others", and a
+running product `P <- P * C(f)` accumulates the selection: `P = 0` means the
+selection is contradictory, asserting a table asks whether it is still viable,
+and the all-zero assignment holding asks whether the query is settled.
 
-    C(f) = SUM_i  t_i * PRODUCT_(j != i) (1 + t_j)
+The algebra itself is `backend.py`'s business - the kernel's port of what
+PolyBoRi gives SageMath's `BooleanPolynomialRing`, with the polynomial held as
+a zero-suppressed decision diagram. Nothing in this module depends on that.
 
-Over GF(2), `(1 + t)` is negation, so each term says "this table is on and the
-others are off", and the sum admits exactly one. A running product
-`P <- P * C(f)` accumulates the selection: `P = 0` means the selection is
-contradictory, substituting `t = 1` asks whether a table is viable, and
-evaluating with every variable at zero asks whether the query is settled.
+What this module does depend on is that the questions come in batches. A
+selection changes one thing and invalidates every field name and every table at
+once, so `nonzero` and `viable` ask for the whole answer rather than looping
+here: the loop was the cost, not the algebra.
 
 Two properties the token driven engine depends on, both explained in the
 README: selections report failure with a bool rather than raising, and `copy()`
-gives each branch of the syntax graph its own `current` while sharing the ring,
-the variables and the constraint table, which are immutable once built.
+gives each branch of the syntax graph its own `current` while sharing the
+algebra and the constraint table, which are immutable once built.
 """
 
 from __future__ import annotations
 
-import re
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
-from sage.all import BooleanPolynomialRing
-from sympy import simplify_logic
-from sympy.parsing.sympy_parser import parse_expr
+from .backend import Algebra, Poly
 
 class Root:
-    __slots__ = ("_ring", "_vars", "_constraints", "_current", "_fields", "_used_tables")
+    __slots__ = (
+        "_algebra",
+        "_tables",
+        "_constraints",
+        "_names",
+        "_polys",
+        "_current",
+        "_fields",
+        "_excluded_fields",
+        "_used_tables",
+    )
 
     def __init__(self, tables: Mapping[str, Sequence[str]] | None = None) -> None:
         if tables is None:
@@ -36,10 +47,8 @@ class Root:
 
         all_tables: list[str] = sorted(tables.keys())
 
-        self._ring: Any = BooleanPolynomialRing(names=all_tables)
-        self._vars: dict[str, Any] = {
-            name: self._ring.gens()[i] for i, name in enumerate(all_tables)
-        }
+        self._algebra: Algebra = Algebra(all_tables)
+        self._tables: frozenset[str] = frozenset(all_tables)
 
         tables_by_field: dict[str, set[str]] = {}
 
@@ -47,58 +56,60 @@ class Root:
             for name in fields:
                 tables_by_field.setdefault(name, set()).add(table)
 
-        self._constraints: dict[str, Any] = {
-            name: self._mutual_exclusion(sorted(field_tables))
+        self._constraints: dict[str, Poly] = {
+            name: self._algebra.mutual_exclusion(sorted(field_tables))
             for name, field_tables in tables_by_field.items()
         }
 
-        self._current: Any = self._ring(1)
+        # The same table, in the order `nonzero` answers in. Kept as two
+        # parallel tuples rather than rebuilt per refresh, because a refresh
+        # happens after every single selection.
+        self._names: tuple[str, ...] = tuple(self._constraints)
+        self._polys: tuple[Poly, ...] = tuple(self._constraints.values())
+
+        self._current: Poly = self._algebra.one()
         self._fields: frozenset[str] = frozenset()
+        self._excluded_fields: frozenset[str] = frozenset()
         self._used_tables: frozenset[str] = frozenset()
 
         self._refresh_fields()
 
-    def _mutual_exclusion(self, tables: Sequence[str]) -> Any:
-        """`SUM_i t_i * PRODUCT_(j != i) (1 + t_j)` - exactly one table is on."""
-
-        terminals: list[Any] = [self._vars[table] for table in tables]
-        constraint: Any = self._ring(0)
-
-        for i, vi in enumerate(terminals):
-            term: Any = vi
-
-            for j, vj in enumerate(terminals):
-                if i != j:
-                    term *= self._ring(1) + vj
-
-            constraint += term
-
-        return constraint
-
     def copy(self) -> "Root":
         """Clone of the resolver state.
 
-        The ring, its variables and the constraint polynomials never change
-        after construction, so a clone shares them; polynomials are values, so
-        `current` needs no copying either.
+        The algebra, its variables and the constraints never change after
+        construction, so a clone shares them; the running function is a value,
+        so `current` needs no copying either.
         """
 
         clone: Root = Root.__new__(Root)
 
-        clone._ring = self._ring
-        clone._vars = self._vars
+        clone._algebra = self._algebra
+        clone._tables = self._tables
         clone._constraints = self._constraints
+        clone._names = self._names
+        clone._polys = self._polys
         clone._current = self._current
         clone._fields = self._fields
+        clone._excluded_fields = self._excluded_fields
         clone._used_tables = self._used_tables
 
         return clone
 
     def _refresh_fields(self) -> None:
+        """Split the field names by whether they still have a product.
+
+        One call, and both halves fall out of it - the excluded set is what is
+        left over, so nothing recomputes it later.
+        """
+
+        surviving: Sequence[bool] = self._algebra.nonzero(self._current, self._polys)
+
         self._fields = frozenset(
-            name
-            for name, constraint in self._constraints.items()
-            if self._current * constraint != 0
+            name for name, alive in zip(self._names, surviving) if alive
+        )
+        self._excluded_fields = frozenset(
+            name for name, alive in zip(self._names, surviving) if not alive
         )
 
     def get_fields(self) -> frozenset[str]:
@@ -107,14 +118,14 @@ class Root:
     def use_field(self, field: str) -> bool:
         """Multiply the running product by this field's constraint."""
 
-        constraint: Any | None = self._constraints.get(field)
+        constraint: Poly | None = self._constraints.get(field)
 
         if constraint is None:
             return False
 
-        next_current: Any = self._current * constraint
+        next_current: Poly = self._algebra.product(self._current, constraint)
 
-        if next_current == 0:
+        if self._algebra.is_zero(next_current):
             return False
 
         self._current = next_current
@@ -124,16 +135,14 @@ class Root:
         return True
 
     def use_table(self, name: str) -> bool:
-        """Substitute `name = 1`, asserting the table is in the FROM clause."""
+        """Assert the table is in the FROM clause."""
 
-        variable: Any | None = self._vars.get(name)
-
-        if variable is None:
+        if name not in self._tables:
             return False
 
-        next_current: Any = self._current.subs({variable: 1})
+        next_current: Poly = self._algebra.assume(self._current, name)
 
-        if next_current == 0:
+        if self._algebra.is_zero(next_current):
             return False
 
         self._current = next_current
@@ -152,51 +161,25 @@ class Root:
         if self.is_satisfied():
             return frozenset()
 
-        return frozenset(
-            str(variable)
-            for variable in self._current.variables()
-            if self._current.subs({variable: 1}) != 0
-        )
+        return self._algebra.constrained(self._current) & self._algebra.viable(self._current)
 
     def get_excluded_tables(self) -> frozenset[str]:
         """Tables already used plus those that would collapse the product."""
 
-        excluded: set[str] = set(self._used_tables)
-
-        for table, variable in self._vars.items():
-            if self._current.subs({variable: 1}) == 0:
-                excluded.add(table)
-
-        return frozenset(excluded)
+        return self._used_tables | (self._tables - self._algebra.viable(self._current))
 
     def get_excluded_fields(self) -> frozenset[str]:
-        return frozenset(
-            name
-            for name, constraint in self._constraints.items()
-            if self._current * constraint == 0
-        )
+        return self._excluded_fields
 
     def is_satisfied(self) -> bool:
         """True once the product holds with every table variable at zero."""
 
-        return self._current.subs({variable: 0 for variable in self._vars.values()}) == 1
+        return self._algebra.holds_empty(self._current)
 
     def __str__(self) -> str:
         """The running product, simplified to disjunctive normal form."""
 
-        expression: str = str(self._current)
-
-        if expression == "0":
-            return "False"
-
-        if expression == "1":
-            return "True"
-
-        expression = expression.replace("+", "^").replace("*", "&")
-        expression = re.sub(r"\b1\b", "True", expression)
-        expression = re.sub(r"\b0\b", "False", expression)
-
-        return str(simplify_logic(parse_expr(expression), form="dnf"))
+        return self._algebra.render(self._current)
 
     def __repr__(self) -> str:
         return f"Root({self})"

@@ -2,25 +2,29 @@
 
 ## Setup
 
-Requires [Rust](https://rustup.rs), [UV](https://docs.astral.sh/uv/getting-started/installation),
-Python 3.14 and **SageMath installed system-wide**, since it cannot be
-installed into a virtualenv:
-
-```bash
-sudo pacman -S sagemath          # or your distribution's equivalent
-```
-
-`make build` then creates `.venv` with `--system-site-packages` so it can see
-Sage, builds `kernel` against that interpreter and installs the wheel into
-it. It stops with a clear message if no Python 3.14 with Sage is found, or if
-an existing `.venv` was created without access to the system packages.
+Requires [Rust](https://rustup.rs), [UV](https://docs.astral.sh/uv/getting-started/installation)
+and Python 3.14, and nothing else. `make build` creates `.venv`, builds `kernel`
+against that interpreter and installs the wheel into it.
 
 ```bash
 make build       # venv + kernel + runtime dependencies
 make test        # tests/main.py over tests/cases.yaml
+make test-model  # the algebra and the graph against a brute force reference
+make test-all    # both
+make benchmark   # the modelling layer, timed
 make run         # interactive, user driven
 make live        # live, model driven
 ```
+
+**SageMath is no longer involved.** The modelling seer does - a boolean algebra
+over table variables and a multigraph over foreign keys - was its
+`BooleanPolynomialRing` and its `Graph`, which meant hunting for a system-wide
+interpreter that could see it and gave the browser nothing at all. Both are
+ports in `kernel` now: the algebra holds the polynomial as a zero-suppressed
+decision diagram, which is what PolyBoRi gives `BooleanPolynomialRing`
+underneath SageMath, and the graph is built for the single mutation join
+resolution performs. seer already needed `kernel` for its indexes, so the
+modelling costs it no dependency it did not have.
 
 ### User driven interactive mode
 

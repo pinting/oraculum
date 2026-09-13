@@ -11,7 +11,7 @@ use crate::vocabulary::Vocabulary;
 
 type T = u32;
 
-#[pyclass(name = "Vocabulary")]
+#[pyclass(name = "Vocabulary", from_py_object)]
 #[derive(Clone)]
 pub struct PyVocabulary {
     pub unit: Arc<Vocabulary<T>>,

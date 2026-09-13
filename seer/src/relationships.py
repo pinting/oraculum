@@ -5,7 +5,7 @@ connected by foreign keys. Nodes are table names - including aliased variants
 such as `"comments c"` - and edges are the foreign keys between them, carrying
 the column pair the `ON` clause is written from.
 
-Joining merges the neighbour into the head via SageMath's `merge_vertices`, so
+Joining merges the neighbour into the head via the graph's `merge_vertices`, so
 the head's neighbourhood becomes the union of both. That models SQL: once two
 tables are joined, every column of either is reachable, and the pair behaves as
 one node for further joins.
@@ -20,8 +20,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Iterable, NamedTuple
 
-from sage.all import Graph
-
+from .backend import JoinGraph
 from .schema import Schema
 from .scopes import reference_name, sql_name, unqualify
 
@@ -66,57 +65,6 @@ class EdgeLabel:
             return Neighbor(neighbor_node, self.src.field, self.dst.field)
 
         return Neighbor(neighbor_node, self.dst.field, self.src.field)
-
-class JoinGraph:
-    """A thin wrapper over SageMath's multigraph.
-
-    It exists only to keep the vertex and edge vocabulary of this module in one
-    place, and to give `Relationships` a `copy()` so each branch of the syntax
-    graph can merge vertices without disturbing its siblings.
-    """
-
-    __slots__ = ("_graph",)
-
-    def __init__(self, edges: Iterable[tuple[str, str, EdgeLabel]] | None = None) -> None:
-        self._graph: Any = Graph(list(edges or ()), multiedges=True)
-
-    @property
-    def unit(self) -> Any:
-        return self._graph
-
-    def copy(self) -> "JoinGraph":
-        clone: JoinGraph = JoinGraph.__new__(JoinGraph)
-
-        clone._graph = self._graph.copy()
-
-        return clone
-
-    def __contains__(self, node: str) -> bool:
-        return node in self._graph
-
-    def nodes(self) -> list[str]:
-        return sorted(str(vertex) for vertex in self._graph.vertices())
-
-    def edges(self, node: str) -> list[tuple[str, EdgeLabel]]:
-        """Every edge incident to `node`, as `(neighbour, label)`."""
-
-        if node not in self._graph:
-            return []
-
-        incident: list[tuple[str, EdgeLabel]] = []
-
-        for source, target, label in self._graph.edges(node, labels=True):
-            incident.append((target if source == node else source, label))
-
-        return incident
-
-    def merge_vertices(self, head: str, other: str) -> None:
-        """Fold `other` into `head`."""
-
-        if head == other or other not in self._graph or head not in self._graph:
-            return
-
-        self._graph.merge_vertices([head, other])
 
 class Relationships:
     """The FROM clause: pick a required table, then walk the foreign keys."""

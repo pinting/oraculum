@@ -13,6 +13,7 @@ its index, and seer answers with the indexes that may follow.
 The modelling underneath the graph is a stack of its own:
 
     schema.py         the SQL schema, parsed with sqlglot
+    backend.py        the algebra and the graph, both from the kernel
     root.py           unqualified field resolution over GF(2)
     scope.py          one alias, narrowed by set intersection
     scopes.py         the registry of alias scopes
