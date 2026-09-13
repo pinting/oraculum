@@ -54,6 +54,114 @@ class Vocabulary:
     def get_id_by_idx(self, idx: int) -> int | None:
         return self.unit.get_id_by_idx(idx)
 
+class BooleanPolynomialRing:
+    """Boolean polynomials over `GF(2)[t..]/(t^2 - t)`, as decision diagrams.
+
+    A polynomial is the `int` id of a node in this ring's diagram. The diagram
+    is hash consed, so equal ids mean equal polynomials; `0` is the zero
+    polynomial and `1` the constant one. An id means nothing to another ring.
+    """
+
+    __slots__ = ("unit",)
+
+    unit: _kl.BooleanPolynomialRing
+
+    def __init__(self, names: Sequence[str]) -> None:
+        self.unit = _kl.BooleanPolynomialRing(names)
+
+    def one(self) -> int:
+        return self.unit.one()
+
+    def zero(self) -> int:
+        return self.unit.zero()
+
+    def mutual_exclusion(self, names: Sequence[str]) -> int:
+        return self.unit.mutual_exclusion(names)
+
+    def product(self, left: int, right: int) -> int:
+        return self.unit.product(left, right)
+
+    def sum(self, left: int, right: int) -> int:
+        return self.unit.sum(left, right)
+
+    def is_zero(self, poly: int) -> bool:
+        return self.unit.is_zero(poly)
+
+    def assume(self, poly: int, name: str) -> int:
+        return self.unit.assume(poly, name)
+
+    def constrained(self, poly: int) -> frozenset[str]:
+        return self.unit.constrained(poly)
+
+    def holds_empty(self, poly: int) -> bool:
+        return self.unit.holds_empty(poly)
+
+    def nonzero(self, poly: int, others: Sequence[int]) -> list[bool]:
+        return self.unit.nonzero(poly, others)
+
+    def viable(self, poly: int) -> frozenset[str]:
+        return self.unit.viable(poly)
+
+    def render(self, poly: int) -> str:
+        return self.unit.render(poly)
+
+    def term_count(self, poly: int) -> int:
+        return self.unit.term_count(poly)
+
+    def node_count(self) -> int:
+        return self.unit.node_count()
+
+    def memory_usage(self) -> int:
+        return self.unit.memory_usage()
+
+class Multigraph:
+    """An undirected multigraph whose only mutation is vertex contraction.
+
+    Vertices come from the edges alone; labels are stored and handed back,
+    never examined. `copy` shares both the edges and the contraction state.
+    """
+
+    __slots__ = ("unit",)
+
+    unit: _kl.Multigraph
+
+    def __init__(self, edges: Iterable[tuple[str, str, Any]] | None = None) -> None:
+        self.unit = _kl.Multigraph(edges)
+
+    @classmethod
+    def wrap(cls, unit: _kl.Multigraph) -> Multigraph:
+        instance = cls.__new__(cls)
+        instance.unit = unit
+
+        return instance
+
+    def copy(self) -> Multigraph:
+        return Multigraph.wrap(self.unit.copy())
+
+    def __contains__(self, node: str) -> bool:
+        return node in self.unit
+
+    def nodes(self) -> list[str]:
+        return self.unit.nodes()
+
+    def edges(self, node: str) -> list[tuple[str, Any]]:
+        return self.unit.edges(node)
+
+    def merge_vertices(self, head: str, other: str) -> bool:
+        return self.unit.merge_vertices(head, other)
+
+    def edge_count(self) -> int:
+        return self.unit.edge_count()
+
+    def memory_usage(self) -> int:
+        return self.unit.memory_usage()
+
+    def base_memory_usage(self) -> int:
+        return self.unit.base_memory_usage()
+
+    def __len__(self) -> int:
+        return len(self.unit)
+
 class AhoCorasick:
     __slots__ = ("unit",)
 

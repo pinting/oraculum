@@ -14,6 +14,7 @@
 //! already being built is waited on rather than built a second time.
 
 use aho_corasick::{AhoCorasick, AhoCorasickKind};
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -287,7 +288,11 @@ where
             return drafts.iter().map(|draft| self.create(draft)).collect();
         }
 
-        drafts.par_iter().map(|draft| self.create(draft)).collect()
+        #[cfg(feature = "parallel")]
+        return drafts.par_iter().map(|draft| self.create(draft)).collect();
+
+        #[cfg(not(feature = "parallel"))]
+        drafts.iter().map(|draft| self.create(draft)).collect()
     }
 
     fn claim(&self, draft: &Draft) -> Claim {

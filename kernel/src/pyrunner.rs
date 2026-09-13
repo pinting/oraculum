@@ -97,7 +97,7 @@ impl<'a> Bridge<'a> {
 
         let mut children: Vec<Request<Payload>> = Vec::new();
 
-        for item in answer.iter()? {
+        for item in answer.try_iter()? {
             let item = item?;
             let spec = item.get_item(0)?;
             let payload: Payload = item.get_item(1)?.unbind();
@@ -111,7 +111,7 @@ impl<'a> Bridge<'a> {
 
 impl Resolver<Payload> for Bridge<'_> {
     fn resolve(&self, report: &Report<'_, Payload>) -> Expansion<Payload> {
-        Python::with_gil(|py| match self.call(py, report) {
+        Python::attach(|py| match self.call(py, report) {
             Ok(expansion) => expansion,
             Err(error) => {
                 *self.error.lock().unwrap() = Some(error);
@@ -149,6 +149,17 @@ impl PyRunner {
     fn new(factory: &PyFactory, workers: usize) -> PyResult<Self> {
         let unit: Arc<Factory<N, T, D>> = factory.unit.clone();
 
+        // Without the `parallel` feature there is one worker, whoever called,
+        // and asking the platform how many CPUs it has is both meaningless and
+        // unanswerable - a WebAssembly build has no threads to count.
+        #[cfg(not(feature = "parallel"))]
+        let workers: usize = {
+            let _ = workers;
+
+            1
+        };
+
+        #[cfg(feature = "parallel")]
         let workers: usize = if workers == 0 {
             std::thread::available_parallelism()
                 .map(|n| n.get())
@@ -200,7 +211,7 @@ impl PyRunner {
         let draft = draft_from_py(spec)?;
         let factory: Arc<Factory<N, T, D>> = self.factory.clone();
 
-        let Some(index_id) = py.allow_threads(move || factory.create(&draft)) else {
+        let Some(index_id) = py.detach(move || factory.create(&draft)) else {
             return Ok(None);
         };
 
@@ -212,7 +223,7 @@ impl PyRunner {
     fn spawn_many(&mut self, py: Python<'_>, items: &Bound<'_, PyAny>) -> PyResult<Vec<u64>> {
         let mut requests: Vec<Request<Payload>> = Vec::new();
 
-        for item in items.iter()? {
+        for item in items.try_iter()? {
             let item = item?;
             let spec = item.get_item(0)?;
             let payload: Payload = item.get_item(1)?.unbind();
@@ -222,7 +233,7 @@ impl PyRunner {
 
         let runner: &mut Runner<N, T, D, Payload> = &mut self.runner;
 
-        Ok(py.allow_threads(move || runner.spawn_many(requests)))
+        Ok(py.detach(move || runner.spawn_many(requests)))
     }
 
     /// Consume a token, advancing every head and resolving the ones that reach
@@ -236,7 +247,7 @@ impl PyRunner {
         let bridge: Bridge<'_> = Bridge::new(&callback);
         let runner: &mut Runner<N, T, D, Payload> = &mut self.runner;
 
-        let accepted: bool = py.allow_threads(|| runner.feed(token, &bridge));
+        let accepted: bool = py.detach(|| runner.feed(token, &bridge));
 
         if let Some(error) = bridge.take_error() {
             return Err(error);
@@ -255,7 +266,7 @@ impl PyRunner {
         let bridge: Bridge<'_> = Bridge::new(&callback);
         let runner: &mut Runner<N, T, D, Payload> = &mut self.runner;
 
-        py.allow_threads(|| runner.settle(&bridge));
+        py.detach(|| runner.settle(&bridge));
 
         match bridge.take_error() {
             Some(error) => Err(error),
@@ -266,9 +277,9 @@ impl PyRunner {
     /// Every token id at least one live head would accept.
     fn routes<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<u64>> {
         let runner: &Runner<N, T, D, Payload> = &self.runner;
-        let routes: Vec<T> = py.allow_threads(|| runner.routes());
+        let routes: Vec<T> = py.detach(|| runner.routes());
 
-        PyArray1::from_vec_bound(
+        PyArray1::from_vec(
             py,
             routes.iter().map(|&id| id.to_usize() as u64).collect(),
         )

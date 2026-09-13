@@ -15,7 +15,10 @@
 //! enough of them to pay for the dispatch, so the parallelism of the runner
 //! continues down into the groups instead of stopping at the head.
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
+
+use crate::runtime::pool;
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -126,17 +129,29 @@ where
         // it is anchored at the start of the word, so it can never match again.
         // Its `feed` returning false is therefore not a failure of the group,
         // which is why only the inclusion's answer is propagated.
-        let accepted: bool = if excludes.len() >= GROUP_PARALLEL_THRESHOLD {
-            let (accepted, _) = rayon::join(
-                || include[0].feed(token_id),
-                || {
-                    excludes.par_iter_mut().for_each(|exclude| {
-                        exclude.feed(token_id);
-                    })
-                },
-            );
+        #[cfg(not(feature = "parallel"))]
+        let parallel: bool = false;
 
-            accepted
+        #[cfg(feature = "parallel")]
+        let parallel: bool = excludes.len() >= GROUP_PARALLEL_THRESHOLD;
+
+        let accepted: bool = if parallel {
+            #[cfg(feature = "parallel")]
+            {
+                let (accepted, _) = pool::join(
+                    || include[0].feed(token_id),
+                    || {
+                        excludes.par_iter_mut().for_each(|exclude| {
+                            exclude.feed(token_id);
+                        })
+                    },
+                );
+
+                accepted
+            }
+
+            #[cfg(not(feature = "parallel"))]
+            unreachable!()
         } else {
             let accepted: bool = include[0].feed(token_id);
 

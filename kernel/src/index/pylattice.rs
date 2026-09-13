@@ -21,7 +21,7 @@ type T = u32;
 
 const AC_KIND: AhoCorasickKind = AhoCorasickKind::ContiguousNFA;
 
-#[pyclass(name = "AhoCorasick")]
+#[pyclass(name = "AhoCorasick", from_py_object)]
 #[derive(Clone)]
 pub struct PyAhoCorasick {
     pub unit: Arc<AhoCorasick>,
@@ -35,14 +35,14 @@ impl PyAhoCorasick {
 
         // Building the base scans the whole vocabulary, so let other Python
         // threads run while it happens.
-        let ac = py.allow_threads(move || Lattice::<N, T>::base(AC_KIND, vocabulary))
+        let ac = py.detach(move || Lattice::<N, T>::base(AC_KIND, vocabulary))
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to build AhoCorasick base"))?;
 
         Ok(PyAhoCorasick { unit: Arc::new(ac) })
     }
 }
 
-#[pyclass(name = "Lattice")]
+#[pyclass(name = "Lattice", from_py_object)]
 #[derive(Clone)]
 pub struct PyLattice {
     unit: Arc<Lattice<N, T>>,
@@ -58,7 +58,7 @@ impl PyLattice {
 
         // Index construction touches no Python state, so the GIL is released
         // for its duration and callers may build indexes in parallel.
-        let lattice = py.allow_threads(move || Lattice::<N, T>::new(&input, vocabulary, &ac_base))
+        let lattice = py.detach(move || Lattice::<N, T>::new(&input, vocabulary, &ac_base))
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to create Lattice"))?;
 
         Ok(PyLattice { unit: Arc::new(lattice) })
@@ -72,7 +72,7 @@ impl PyLattice {
         let v: Vec<u64> = self.unit.transitions(node_id as N)
             .map_or(Vec::new(), |c| c.iter().map(|&x| x as u64).collect());
 
-        Ok(PyArray1::from_vec_bound(py, v))
+        Ok(PyArray1::from_vec(py, v))
     }
 
     fn next(&self, node_id: u64, token_id: u64) -> Option<u64> {

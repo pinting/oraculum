@@ -54,7 +54,7 @@ pub fn draft_from_py(spec: &Bound<'_, PyAny>) -> PyResult<Draft> {
 fn drafts_from_py(specs: &Bound<'_, PyAny>) -> PyResult<Vec<Draft>> {
     let mut drafts: Vec<Draft> = Vec::new();
 
-    for spec in specs.iter()? {
+    for spec in specs.try_iter()? {
         drafts.push(draft_from_py(&spec?)?);
     }
 
@@ -66,7 +66,7 @@ fn drafts_from_py(specs: &Bound<'_, PyAny>) -> PyResult<Vec<Draft>> {
 /// `Lattice` and `Expression` are still there for callers that want to own an
 /// index outright. The factory is for callers that do not: it builds the index,
 /// keeps it, and answers with an id.
-#[pyclass(name = "Factory")]
+#[pyclass(name = "Factory", from_py_object)]
 #[derive(Clone)]
 pub struct PyFactory {
     pub unit: Arc<Factory<N, T, D>>,
@@ -82,7 +82,7 @@ impl PyFactory {
         let vocabulary = vocabulary.unit.clone();
 
         let factory = py
-            .allow_threads(move || Factory::<N, T, D>::new(vocabulary, cache))
+            .detach(move || Factory::<N, T, D>::new(vocabulary, cache))
             .ok_or_else(|| PyValueError::new_err("Failed to create Factory"))?;
 
         Ok(PyFactory {
@@ -126,7 +126,7 @@ impl PyFactory {
         let draft: Draft = draft_from_py(spec)?;
         let factory: Arc<Factory<N, T, D>> = self.unit.clone();
 
-        Ok(py.allow_threads(move || factory.create(&draft)))
+        Ok(py.detach(move || factory.create(&draft)))
     }
 
     /// Build a batch, spread over the worker pool.
@@ -134,27 +134,27 @@ impl PyFactory {
         let drafts: Vec<Draft> = drafts_from_py(specs)?;
         let factory: Arc<Factory<N, T, D>> = self.unit.clone();
 
-        Ok(py.allow_threads(move || factory.create_many(&drafts)))
+        Ok(py.detach(move || factory.create_many(&drafts)))
     }
 
     fn lattice(&self, py: Python<'_>, word: &str) -> Option<u64> {
         let word: String = word.to_string();
         let factory: Arc<Factory<N, T, D>> = self.unit.clone();
 
-        py.allow_threads(move || factory.create_lattice(&word))
+        py.detach(move || factory.create_lattice(&word))
     }
 
     fn expression(&self, py: Python<'_>, pattern: &str) -> Option<u64> {
         let pattern: String = pattern.to_string();
         let factory: Arc<Factory<N, T, D>> = self.unit.clone();
 
-        py.allow_threads(move || factory.create_expression(&pattern))
+        py.detach(move || factory.create_expression(&pattern))
     }
 
     fn group(&self, py: Python<'_>, include: u64, excludes: Vec<u64>) -> Option<u64> {
         let factory: Arc<Factory<N, T, D>> = self.unit.clone();
 
-        py.allow_threads(move || factory.create_group(include, excludes))
+        py.detach(move || factory.create_group(include, excludes))
     }
 
     /// Whether `create` would return without building anything.

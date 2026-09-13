@@ -22,7 +22,7 @@ type N = u32;
 type T = u32;
 type D = FlatDFA<N, T>;
 
-#[pyclass(name = "TokTrie")]
+#[pyclass(name = "TokTrie", from_py_object)]
 #[derive(Clone)]
 pub struct PyTokTrie {
     pub unit: Arc<TokTrie>,
@@ -36,14 +36,14 @@ impl PyTokTrie {
 
         // Building the base scans the whole vocabulary, so let other Python
         // threads run while it happens.
-        let trie = py.allow_threads(move || Expression::<N, T, D>::base(vocabulary))
+        let trie = py.detach(move || Expression::<N, T, D>::base(vocabulary))
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to build TokTrie base"))?;
 
         Ok(PyTokTrie { unit: Arc::new(trie) })
     }
 }
 
-#[pyclass(name = "Expression")]
+#[pyclass(name = "Expression", from_py_object)]
 #[derive(Clone)]
 pub struct PyExpression {
     unit: Arc<Expression<N, T, D>>,
@@ -59,7 +59,7 @@ impl PyExpression {
 
         // Index construction touches no Python state, so the GIL is released
         // for its duration and callers may build indexes in parallel.
-        let e = py.allow_threads(move || Expression::<N, T, D>::new(&input, vocabulary, &toktrie_base))
+        let e = py.detach(move || Expression::<N, T, D>::new(&input, vocabulary, &toktrie_base))
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to create Expression"))?;
 
         Ok(PyExpression { unit: Arc::new(e) })
@@ -77,7 +77,7 @@ impl PyExpression {
             None => Vec::new(),
         };
 
-        Ok(PyArray1::from_vec_bound(py, v))
+        Ok(PyArray1::from_vec(py, v))
     }
 
     fn next(&self, node_id: u64, token_id: u64) -> Option<u64> {

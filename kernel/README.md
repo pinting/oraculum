@@ -135,6 +135,97 @@ thread belongs to, so a resolver that reaches back into the factory shares these
 workers instead of starting a second pool, and a group with enough members fans
 its own feed out over them too.
 
+## The modelling structures
+
+Two structures that have nothing to do with tokens. They are here because the
+library on the other side - seer - spends its time *copying* them, once per
+branch of the syntax graph it is expanding, and because what it wants out of
+them is narrow enough to be worth building for rather than reaching for a
+general purpose library. Both are ports of what SageMath was doing.
+
+### `BooleanPolynomialRing` - conflicts
+
+Which table an unqualified column came from is a boolean function over one
+variable per table. A column living in `k` tables contributes "exactly one of
+these `k`", and selecting columns multiplies those together; the question then
+asked of the product is whether it is zero, whether the all-zero assignment
+satisfies it, which variables it still depends on, and what happens when one of
+them is set.
+
+That is a boolean polynomial over `GF(2)[t..]/(t^2 - t)`, which is what
+SageMath's `BooleanPolynomialRing` is, and underneath SageMath that is PolyBoRi,
+which holds one as a *zero-suppressed decision diagram*. `algebra/zdd.rs` is
+that diagram rebuilt without CUDD under it - hash consed, so equal polynomials
+are equal `u32`s, with a memo table per operation and a `mul` that follows
+PolyBoRi's `dd_multiply` including the rearrangement that gets a product's three
+cross terms out of two recursive calls. `algebra/ring.rs` is the ring around it.
+
+The diagram is the whole point. "Exactly one of `k`" expands to `2^(k-1)`
+monomials - every odd-sized subset survives over GF(2) - and a column named `id`
+lives in every table there is. The ZDD for every odd-sized subset is two nodes
+per level.
+
+```python
+ring = kl.BooleanPolynomialRing(["users", "posts", "comments"])
+
+body = ring.mutual_exclusion(["posts", "comments"])   # `body` is on both
+title = ring.mutual_exclusion(["posts"])              # `title` is only on posts
+
+current = ring.product(ring.one(), body)
+current = ring.product(current, title)
+
+ring.render(current)         # 'posts & ~comments'
+ring.constrained(current)    # frozenset({'posts', 'comments'})
+ring.viable(current)         # frozenset({'posts', 'users'})
+ring.holds_empty(current)    # False - the FROM clause is not settled yet
+```
+
+A polynomial crosses to Python as the `int` id of a node, because a polynomial
+is a value: it is copied into every branch and compared constantly, and an `int`
+is the cheapest value Python has. `nonzero` and `viable` are batches with no
+SageMath counterpart - they are the two loops the caller would otherwise run
+after every selection, moved across the boundary.
+
+### `Multigraph` - joins
+
+The FROM clause walks a foreign key graph: it opens at some table and every join
+folds a neighbour into it, after which the pair behaves as one vertex. That is
+vertex contraction, and it is the only mutation - nothing is ever added once the
+graph has been built from the schema.
+
+Which is what makes it worth writing down, because the operation that dominates
+is `copy`. Every branch of the syntax graph needs its own graph and most of them
+are thrown away unexamined. So the edges sit in an immutable base that every
+copy shares, and the whole of the mutable state is one array saying which vertex
+each vertex has been folded into - itself, until something folds it.
+
+```
+copy              two reference count bumps, no allocation
+merge_vertices    one clone of an array of u32, then a linear pass
+edges             the class members' base incidence, mapped through it
+```
+
+A branch that joins nothing allocates nothing at all. Dropped loops need no
+handling either: an edge whose far end is in the same class as its near end is
+simply not reported.
+
+```python
+graph = kl.Multigraph([
+    ("users", "posts", "posts.user_id = users.id"),
+    ("posts", "comments", "comments.post_id = posts.id"),
+])
+
+branch = graph.copy()
+branch.edges("users")          # [('posts', 'posts.user_id = users.id')]
+branch.merge_vertices("users", "posts")
+branch.edges("users")          # [('comments', 'comments.post_id = posts.id')]
+"posts" in branch              # False - it is part of `users` now
+graph.nodes()                  # ['comments', 'posts', 'users'] - untouched
+```
+
+Labels are opaque: stored and handed back, never examined, the same contract a
+head's payload has.
+
 ## Setup
 
 ### Python API
