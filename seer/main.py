@@ -1,16 +1,3 @@
-"""Driver for the seer syntax graph.
-
-Two modes over the same engine:
-
-* **interactive** - print the tokens the graph would accept next and read one
-  from stdin, a token at a time.
-* **live** (`--live`) - load a GGUF model through llama.cpp and let it sample,
-  with `processor.LogitsProcessor` masking away everything the graph rejects.
-
-Both build their engine through `core.init_engine` and leave the resolver
-tracing of `src.debug` on unless `--no-debug` is given.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -236,7 +223,7 @@ def run_live(args: argparse.Namespace) -> int:
     try:
         from llama_cpp import Llama, LogitsProcessorList
     except ImportError:
-        print("llama-cpp-python is not installed; run `make model`", file=sys.stderr)
+        print("llama-cpp-python is not installed; run `make live`", file=sys.stderr)
 
         return 1
 

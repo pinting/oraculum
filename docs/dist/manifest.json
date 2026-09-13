@@ -1,0 +1,11 @@
+{
+  "python": "3.14.7",
+  "pyodide": "314.0.6",
+  "pyodide_cdn": "https://cdn.jsdelivr.net/pyodide/v314.0.6/full",
+  "pyodide_build": "0.39.0",
+  "xbuildenv": "314.0.6",
+  "emscripten": "5.0.3",
+  "kernel_wheel": "kernel-0.1.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+  "sqlglot_wheel": "sqlglot-30.18.0-py3-none-any.whl",
+  "numpy": "2.5.3"
+}

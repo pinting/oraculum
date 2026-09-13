@@ -1,3 +1,10 @@
+# 7th - Performance comparisons between `FastHashDFA` vs. `DoubleHashDFA` vs. `FlatDFA`
+
+The benchmarks demonstrate a space-time trade-off where the flat structures achieves the fastest performance for scanning and hash structures for lookups; while hybrid solutions are the fastest, they require the largest memory allocation. Ultimately, the `DoubleHashDFA` (the implementation `outlines-core` uses) proves to be a good universal solution, average in both lookups and scans, but only suffering (worst case) 2x memory usage compared to `FlatDFA` which is the most compact, but having a slow lookup algorithm due to its linearity (optimized by binary tree search on a CSR data structure, but still lacking the jump capabilities of hash functions). The heavily optimized `FastHashDFA` tries to combine both of the two worlds and outperforms other candidates in lookup and scan speeds, but suffers a high memory usage.
+
+## Output
+
+```
 Benchmarking with nodes_count = 200, min_links = 25, max_links = 75, vocabulary_size = 256000, lookup_count = 100000, scan_count = 100000
 Generating...
 Generated 9943 edges
@@ -88,3 +95,4 @@ Memory placements:
 	FlatDFA - 572.93673 MB
 	DoubleHashDFA - 1001.93997 MB
 	FastHashDFA - 1678.20963 MB
+```

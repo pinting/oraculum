@@ -1,3 +1,14 @@
+# 6th - Ahead-of-time lattice building for regular expressions using `microsoft/toktrie` and `guidance-ai/derivre`
+
+Measured over the Gemma 3 vocabulary with the regular expression
+`(monday|tuesday|wednesday|thursday|friday)+`, feeding the tokens
+`we -> d -> ne -> s -> day`.
+
+The combination of AOT index building with TokTrie - Derivre: faster build time, same number of token matching per step as Outlines. 399.975656 ms trie building time (needed only once for a given vocabulary), 4.334894 ms index building time for the example regular expression and 7-21 µs per step.
+
+## Output
+
+```
 Loaded vocabulary in 786.150486ms
 Built trie in 399.975656ms
 Enter regex pattern (press Enter for default): 
@@ -26,3 +37,4 @@ Input: day
 Current: `wednesday`
 Time taken: 21.28µs
 Possible next tokens: ["thu", "friday", "w", "wed", "fri", "fr", "mond", "frid", "thur", "monday", "t", "tu", "m", "th", "w", "m", "mo", "f", "mon", "EOS", "f", "we", "t"]
+```

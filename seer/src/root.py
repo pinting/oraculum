@@ -7,14 +7,10 @@ running product `P <- P * C(f)` accumulates the selection: `P = 0` means the
 selection is contradictory, asserting a table asks whether it is still viable,
 and the all-zero assignment holding asks whether the query is settled.
 
-The algebra itself is `backend.py`'s business - the kernel's port of what
-PolyBoRi gives SageMath's `BooleanPolynomialRing`, with the polynomial held as
-a zero-suppressed decision diagram. Nothing in this module depends on that.
-
-What this module does depend on is that the questions come in batches. A
-selection changes one thing and invalidates every field name and every table at
-once, so `nonzero` and `viable` ask for the whole answer rather than looping
-here: the loop was the cost, not the algebra.
+The algebra itself is `backend.py`'s business. What this module does depend on
+is that the questions come in batches: a selection invalidates every field name
+and every table at once, so `nonzero` and `viable` ask for the whole answer
+rather than looping here.
 
 Two properties the token driven engine depends on, both explained in the
 README: selections report failure with a bool rather than raising, and `copy()`
@@ -61,9 +57,8 @@ class Root:
             for name, field_tables in tables_by_field.items()
         }
 
-        # The same table, in the order `nonzero` answers in. Kept as two
-        # parallel tuples rather than rebuilt per refresh, because a refresh
-        # happens after every single selection.
+        # The constraint table in the order `nonzero` answers in, kept rather
+        # than rebuilt per refresh.
         self._names: tuple[str, ...] = tuple(self._constraints)
         self._polys: tuple[Poly, ...] = tuple(self._constraints.values())
 
@@ -97,11 +92,7 @@ class Root:
         return clone
 
     def _refresh_fields(self) -> None:
-        """Split the field names by whether they still have a product.
-
-        One call, and both halves fall out of it - the excluded set is what is
-        left over, so nothing recomputes it later.
-        """
+        """Split the field names by whether they still have a product."""
 
         surviving: Sequence[bool] = self._algebra.nonzero(self._current, self._polys)
 

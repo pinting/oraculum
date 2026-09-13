@@ -1,0 +1,4 @@
+# Everything here is built. The directory is tracked so that a build has
+# somewhere to land; nothing in it ever is.
+*
+!.gitignore

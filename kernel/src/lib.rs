@@ -19,12 +19,9 @@
 //!
 //! Alongside the indexes sit the two structures the *caller's* model is built
 //! out of, which have nothing to do with tokens and everything to do with being
-//! copied a great many times per generated statement:
-//!
-//! * `algebra` - boolean polynomials over `GF(2)` as zero-suppressed decision
-//!   diagrams, which is how SageMath's `BooleanPolynomialRing` holds one;
-//! * `graph` - an undirected multigraph whose only mutation is contraction, so
-//!   that a copy of it costs two reference count bumps.
+//! copied a great many times per generated statement: `algebra`, boolean
+//! polynomials over `GF(2)` as zero-suppressed decision diagrams, and `graph`,
+//! an undirected multigraph whose only mutation is contraction.
 
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;

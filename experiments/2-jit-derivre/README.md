@@ -1,3 +1,14 @@
+# 2nd - Just-in-time lattice generation using only `guidance-ai/derivre`
+
+Measured over the Gemma 3 vocabulary with the regular expression
+`(monday|tuesday|wednesday|thursday|friday)+`, feeding the tokens
+`we -> d -> ne -> s -> day`.
+
+Pure regex-based matching with derivative automata. 257 µs build time for the example regular expression. Slow next token filtering because of the exhaustive token matching, around 39 ms per step.
+
+## Output
+
+```
 Loaded vocabulary in 1.006405324s
 Enter regex pattern (press Enter for default): 
 Using pattern: (monday|tuesday|wednesday|thursday|friday)+
@@ -25,3 +36,4 @@ Input: day
 Current: `wednesday`
 Time taken: 39.482404ms
 Possible next tokens: ["f", "m", "t", "w", "th", "we", "fr", "mo", "mon", "tu", "mond", "thur", "wed", "fri", "thu", "frid", "friday", "monday", "t", "m", "f", "w"]
+```

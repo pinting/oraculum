@@ -25,9 +25,9 @@ Gemma vocabulary does supply for the whole of printable ASCII. A character it
 does not spell is reported as a broken record rather than as a failure of the
 engine.
 
-    python tests/main.py
-    python tests/main.py --verbose
-    python tests/main.py --queries other.yaml --schema other.sql
+    python test.py
+    python test.py --verbose
+    python test.py --queries other.yaml --schema other.sql
 
 The exit status is the number of records that misbehaved, capped at 125, so
 `make test` fails the build when any of them does.
@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
-ROOT: Path = Path(__file__).resolve().parent.parent
+ROOT: Path = Path(__file__).resolve().parent
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -58,7 +58,7 @@ from src.schema import Schema, parse_schema
 
 VOCABULARY_PATH: Path = ROOT.parent / "vocabulary.tiktoken"
 SCHEMA_PATH: Path = ROOT / "schema.sql"
-QUERIES_PATH: Path = Path(__file__).resolve().parent / "cases.yaml"
+QUERIES_PATH: Path = ROOT / "cases.yaml"
 
 EOS_ID: int = 1
 

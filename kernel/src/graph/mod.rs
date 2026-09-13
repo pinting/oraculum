@@ -1,8 +1,6 @@
 //! The graph half of the modelling layer.
 //!
-//! One structure, `Multigraph`: undirected, parallel edges allowed, labels
-//! opaque, and contraction as its only mutation. That last restriction is what
-//! lets a copy cost nothing, which is the operation join resolution spends all
-//! its time on.
+//! One structure: undirected, parallel edges allowed, labels opaque, and
+//! contraction as its only mutation - which is what lets a copy cost nothing.
 
 pub mod multigraph;

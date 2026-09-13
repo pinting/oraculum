@@ -1,3 +1,14 @@
+# 1st - Ahead-of-time lattice building for constants using the Aho-Corasick algorithm
+
+Measured over the Gemma 3 vocabulary with the regular expression
+`(monday|tuesday|wednesday|thursday|friday)+`, feeding the tokens
+`we -> d -> ne -> s -> day`.
+
+Token lattice approach for breaking up text into a Directed Acyclic Graph (forming all possible routes to build the text using the given vocabulary). The initial (one-time) build time (against the vocabulary) takes 2.3 s with extremely fast lattice construction (e.g. 80 µs for `It has snowed a lot in Europe`) and between 3-10 µs to traverse in the DAG. **No regular expression support**, but good for constant values!
+
+## Output
+
+```
 Loaded vocabulary in 1.013934923s
 Vocabulary size: 255386 tokens
 Define constant: 
@@ -72,3 +83,6 @@ Time taken: 910ns
 Number of possible transitions: 0
 Possible next tokens: []
 No routes, exiting
+```
+
+[NOTES.txt](NOTES.txt) works the lattice through by hand.
