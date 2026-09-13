@@ -20,7 +20,7 @@ An SQL autocomplete framework which guarantees grammatical and semantical correc
 <operand>   := <column> | <qualifier>.<column>
 ```
 
-## Running it in the browser
+## WASM
 
 <p align="center">
   <a href="https://pinting.github.io/oraculum/">
@@ -28,7 +28,7 @@ An SQL autocomplete framework which guarantees grammatical and semantical correc
   </a>
 </p>
 
-## Building & running locally
+## Setup
 
 Needs [Rust](https://rustup.rs), [UV](https://docs.astral.sh/uv/getting-started/installation)
 and Python 3.14. Everything else is downloaded at a version this repository
