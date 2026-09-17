@@ -49,7 +49,7 @@ make docs        # the browser build, into docs/
 
 ## Introduction
 
-Imagine a text box where you type SQL and the system only ever offers you tokens that lead to a valid, answerable query. You write `SELECT em` and it completes `email` but not `body` if the table you are heading towards does not have a `body`. You have not typed `FROM` yet but the system already knows which tables are still possible. When you do get to `FROM`, only the tables that can actually answer your projection show up, the `ON` clause of a join writes itself from the foreign keys and the `WHERE` clause only offers operators that make sense for the column's type. Every token the model produces is guaranteed correct - grammatically and semantically - without any post validation.
+Imagine a text box where you type SQL and the system only ever offers you tokens that lead to a valid, answerable query. You write `SELECT em` and it completes `email` but not `body` if the table you are heading towards does not have a `body`. You have not typed `FROM` yet but the system already knows which tables are still possible. When you do get to `FROM`, only the tables that can actually answer your projection show up, the `ON` clause of a join writes itself from the foreign keys and the `WHERE` clause only offers operators that make sense for the column's type. Every token the model produces is guaranteed correct, grammatically and semantically, without any post validation.
 
 ### WASM based demo
 
@@ -62,7 +62,7 @@ Imagine a text box where you type SQL and the system only ever offers you tokens
 
 ### Layers
 
-**Token trees:** A language model does not emit characters - it emits tokens, fixed pieces drawn from a vocabulary of hundreds of thousands of entries. The same keyword can arrive as one piece or many and every way of spelling it forms a path through a graph over the character positions in the string:
+**Token trees:** A language model writes in tokens, fixed pieces drawn from a vocabulary of hundreds of thousands of entries, each covering one or more characters. The same keyword can arrive as one piece or many and every way of spelling it forms a path through a graph over the character positions in the string:
 
 ```mermaid
 graph LR
@@ -82,9 +82,9 @@ graph LR
     class p4 accent
 ```
 
-Each edge is a vocabulary token whose text covers exactly those positions. A path from 0 to 4 is one valid tokenisation of `FROM`. To enforce grammar at the token level every grammatical element - a keyword, an identifier pattern, a literal format - has to become an automaton that accepts exactly the token sequences spelling it.
+Each edge is a vocabulary token whose text covers exactly those positions. A path from 0 to 4 is one valid tokenisation of `FROM`. To enforce grammar at the token level every grammatical element (a keyword, an identifier pattern, a literal format) has to become an automaton that accepts exactly the token sequences spelling it.
 
-**Constants and patterns as automata:** A fixed keyword like `FROM` is the position graph above - already a DFA over tokens: acyclic, one accepting state, found by a single Aho-Corasick sweep of the vocabulary. A regular expression cannot be drawn as positions. Instead the states are the **derivatives** of the regex: strip one character and see what regex is left. The identifier pattern `[a-z_][a-z0-9_]*` has exactly two live states:
+**Constants and patterns as automata:** A fixed keyword like `FROM` is the position graph above, already a DFA over tokens: acyclic, one accepting state, found by a single Aho-Corasick sweep of the vocabulary. A regular expression cannot be drawn as positions. Instead the states are the **derivatives** of the regex: strip one character and see what regex is left. The identifier pattern `[a-z_][a-z0-9_]*` has exactly two live states:
 
 ```mermaid
 graph LR
@@ -122,9 +122,9 @@ graph LR
     class q7 accent
 ```
 
-Every edge label is one of the automata from the previous step - a constant, a pattern or a difference of patterns. Walking an edge means feeding tokens into that automaton until it accepts, then following the grammar arc. Multiple edges out of one node are multiple live branches - an NFA. The system determinises lazily, one token at a time, rather than building the exponential product machine up front.
+Every edge label is one of the automata from the previous step: a constant, a pattern or a difference of patterns. Walking an edge means feeding tokens into that automaton until it accepts, then following the grammar arc. Multiple edges out of one node are multiple live branches, which makes the graph an NFA. The system determinises lazily, one token at a time, rather than building the exponential product machine up front.
 
-**Latent state: enabling and disabling routes:** The grammar graph is static: it knows that *a* field follows `SELECT` and *a* table follows `FROM`, but not which ones. A second layer - the latent state - rides alongside the walk and gates edges as the query grows.
+**Latent state: enabling and disabling routes:** The grammar graph is static: it knows that *a* field follows `SELECT` and *a* table follows `FROM`, but not which ones. A second layer, the latent state, rides alongside the walk and gates edges as the query grows.
 
 Take a minimal schema:
 
@@ -133,7 +133,7 @@ Take a minimal schema:
 | **t1** | f1, f2, f3 |
 | **t2** | f4, f2, f5 |
 
-Suppose `f1` has been selected. Since `f1` lives only in `t1`, the latent state knows that `t1` is required and `t2` alone cannot satisfy the query. Every route that would need `t2` without `t1` is disabled:
+Suppose `f1` and `f2` have been selected. `f1` lives only in `t1`, so `t1` is required. `f2` lives in both, so writing it root means exactly one table may supply it and `t2` is ruled out: with both tables in the query the root `f2` would be ambiguous. Every route that needs `t2` is disabled:
 
 ```mermaid
 graph LR
@@ -152,7 +152,7 @@ graph LR
     class q5 accent
 ```
 
-Solid edges are live, dashed edges are disabled. `f4` and `f5` (exclusive to `t2`) are withdrawn. `t2` alone is not offered as a FROM target. `f2` survives because `t1` has it too.
+Solid edges are live, dashed edges are disabled. `f4` and `f5` belong to `t2` alone, so both are withdrawn; `t2` stops being offered as a FROM target. `f2` survives because `t1` has it too.
 
 **Conflict management as Boolean algebra:** The gating is computed in $\mathbb{F}_2$, the two-element field where addition is XOR and multiplication is AND. Each field carries a constraint polynomial encoding "exactly one of my tables supplies me":
 
@@ -160,7 +160,7 @@ Solid edges are live, dashed edges are disabled. `f4` and `f5` (exclusive to `t2
 C(\text{f1}) = t_1 \qquad C(\text{f2}) = t_1 + t_2 \qquad C(\text{f5}) = t_2
 ```
 
-$C(\text{f2}) = t_1 + t_2$ is XOR - exactly one of the two must supply it. Selecting a field multiplies its constraint into a running product $P$:
+$C(\text{f2}) = t_1 + t_2$ is XOR: exactly one of the two must supply it. Selecting a field multiplies its constraint into a running product $P$:
 
 ```math
 P \;\leftarrow\; 1 \;\cdot\; C(\text{f1}) \;\cdot\; C(\text{f2}) \;=\; t_1(t_1 + t_2) \;=\; t_1 + t_1 t_2
@@ -175,9 +175,9 @@ using $t_1^2 = t_1$ in $\mathbb{F}_2$. Evaluating $P$ answers every question the
 | $P$ at $t_1{=}1,\; t_2{=}1$ | $0$ | both tables, but root `f2` becomes ambiguous |
 | $P \cdot C(\text{f5})$ | $0$ | `f5` can no longer be selected |
 
-The last two rows are worth pausing on. Having both tables makes the root `f2` ambiguous - each would claim it - so the polynomial zeros out. And $P \cdot C(\text{f5}) = (t_1 + t_1 t_2) \cdot t_2 = t_1 t_2 + t_1 t_2 = 0$ in $\mathbb{F}_2$: the product kills it outright, so `f5` is never offered. The polynomial decides without enumeration which tables, fields and routes remain viable.
+The last two rows are worth pausing on. Having both tables makes the root `f2` ambiguous, since each would claim it, so the polynomial zeros out. And $P \cdot C(\text{f5}) = (t_1 + t_1 t_2) \cdot t_2 = t_1 t_2 + t_1 t_2 = 0$ in $\mathbb{F}_2$: the product kills it outright, so `f5` is never offered. The polynomial decides without enumeration which tables, fields and routes remain viable.
 
-**The join graph.** When two tables are both required - say `f1` and `f5` are selected, giving $P = t_1 \cdot t_2$ - the FROM clause must connect them. Foreign keys form a graph whose edges carry the columns to join on:
+**The join graph.** When two tables are both required, say after selecting `f1` and `f5` instead, which gives $P = t_1 \cdot t_2$, the FROM clause must connect them. Foreign keys form a graph whose edges carry the columns to join on:
 
 ```mermaid
 graph LR
@@ -187,9 +187,9 @@ graph LR
     class T1,T2 plain
 ```
 
-The edge label determines the `ON` clause - it is not chosen by the model but read off the schema. Joining is vertex contraction: `t1` and `t2` merge into one node that inherits both neighbourhoods, so a table two foreign keys away becomes reachable only after the intermediate one has been joined in. With more tables the problem is which contraction sequence connects the required set and the edges fix every `ON` clause along the way.
+The edge label determines the `ON` clause. The schema writes it; the model only picks which edge to walk. Joining is vertex contraction: `t1` and `t2` merge into one node that inherits both neighbourhoods, so a table two foreign keys away becomes reachable only after the intermediate one has been joined in. With more tables the problem is which contraction sequence connects the required set and the edges fix every `ON` clause along the way.
 
-**The WHERE clause: a phase boundary.** Everything above runs in one direction: fields are chosen, tables follow, joins connect them. The `WHERE` keyword reverses the flow. By the time it is reached the FROM clause is finished and what a condition may name is no longer something to be solved - it is a fixed set. Call it the **virtual table**: every column of every source the clause placed, whether it arrived as a root entry or was contracted in by a join.
+**The WHERE clause: a phase boundary.** Everything above runs in one direction: fields are chosen, tables follow, joins connect them. The `WHERE` keyword reverses the flow. By the time it is reached the FROM clause is finished and what a condition may name is no longer something to be solved: it is a fixed set. Call it the **virtual table**: every column of every source the clause placed, whether it arrived as a root entry or was contracted in by a join.
 
 Continuing the example, suppose the FROM clause settled on `t1 INNER JOIN t2 ON t1.f1 = t2.f4`. The virtual table is:
 
@@ -198,7 +198,7 @@ Continuing the example, suppose the FROM clause settled on `t1 INNER JOIN t2 ON 
 | `t1` | f1, f2, f3 |
 | `t2` | f4, f2, f5 |
 
-A column reachable as `t1.f1` is always offered scoped. A column like `f3` is offered root too, because exactly one source supplies it. But `f2` lives in both - it can only be written as `t1.f2` or `t2.f2`, never root, since root `f2` would be ambiguous. This is SQL's own resolution rule, applied to the nodes of *this clause*, not the whole schema.
+A column reachable as `t1.f1` is always offered scoped. A column like `f3` is offered root too, because exactly one source supplies it. But `f2` lives in both, so it can only be written as `t1.f2` or `t2.f2`: root `f2` would be ambiguous. This is SQL's own resolution rule, applied to the nodes of *this clause* rather than to the whole schema.
 
 On top of that sits the type, which dictates the permitted operators and whether the right-hand side can be a literal pattern or another column of the same class.
 
@@ -236,8 +236,8 @@ CREATE TABLE comments (
 
 **The projection:** One or more columns, each written root or scoped by an
 alias. An alias is invented by whoever is generating, since nothing in the
-schema names it, so it may be any identifier that is not a keyword, a table
-name or a column name - `users2` is available, `users` is not. Aliases are
+schema names it, so it may be any identifier that no keyword, table or column
+already spells: `users2` is available, `users` is taken. Aliases are
 introduced here and nowhere else: `FROM users AS u` is reachable only once
 something has written `u.` in the projection.
 
@@ -247,10 +247,12 @@ SELECT u.email, u.first_name FROM users AS u;
 ```
 
 What may be written is what the schema can still answer. `email` is on `users`
-alone, so writing it settles the FROM clause; `body` is on `posts` and
-`comments`, so it leaves both open until something else decides between them,
-and `first_name` stops being offered the moment the query has committed to a
-table that has no such column. Section 6a is how that is computed.
+alone, so writing it settles which table the clause needs. `body` is on `posts`
+and `comments`, so it leaves both open until something else decides between
+them. A name drops out once nothing that could supply it is left: after
+`SELECT id, title` the root `id` has to come from exactly one source and
+`title` has pinned that source to `posts`, so `users` is out and `first_name`
+is no longer offered. Section 6a is how that is computed.
 
 **The FROM clause:** One or more entries, comma separated, each a table
 optionally renamed by `AS`. Only tables the projection actually requires are
@@ -263,8 +265,8 @@ SELECT email, body FROM users, comments;
 
 **Joins:** Any entry may be grown by any number of joins, in all four types.
 The target has to be a foreign key neighbour of the entry as it now stands and
-that settles the `ON` columns outright - they are read off the foreign key
-rather than chosen.
+that settles the `ON` columns outright, since they are read off the foreign
+key.
 
 ```sql
 SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id;
@@ -303,16 +305,10 @@ INNER JOIN posts ON users.id = posts.user_id
 WHERE created_at < published_at;
 ```
 
-Which operators a column takes is fixed by its type. Everything may be compared
-for equality, only the classes that have an order may be ranged over, only text
-may be matched against a pattern and only a column that can actually be null
-may be tested for it.
-
-
-The other side of an operator is either a literal of that shape or another
-column of the same class, which is what makes `created_at < published_at` a
-statement about two timestamps and `email = users.id` no statement at all.
-Sections 6d and 6e are the relation and this gating.
+A column's type fixes which operators it may take and what may stand on the
+other side of them, which is what makes `created_at < published_at` a statement
+about two timestamps and `email = users.id` no statement at all. Sections 6d
+and 6e are the relation and this gating.
 
 Conditions combine with `AND` and `OR`, take a `NOT` in front and nest three
 brackets deep:
@@ -323,11 +319,11 @@ SELECT email FROM users WHERE NOT email LIKE 'a%';
 SELECT email FROM users WHERE (email = 'a' OR email = 'b') AND NOT users.id = 1;
 ```
 
-Two things have to be true of every statement the system produces. It has to be **grammatical** - a well-formed word or phrase. And it has to be **meaningful** - something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
+Two things have to be true of every statement the system produces. It has to be **grammatical**: a well-formed word or phrase. It also has to be **meaningful**: something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
 
 ## Architecture
 
-### 1. Tokens - characters, words, pieces of text
+### 1. Tokens: characters, words, pieces of text
 
 A grammar talks about text: the word `tiger`, a comma, an identifier. A language model emits **tokens** drawn from a fixed vocabulary and the same text can arrive many ways.
 
@@ -375,13 +371,13 @@ c^{-1}(L) \;=\; \{\, w \in V^{*} \;:\; c(w) \in L \,\}
 
 That is every way of spelling something in $L$ with this vocabulary. For $L = \{\texttt{"tiger"}\}$ that is the handful of chops above; for an infinite $L$ it is infinite.
 
-$c$ is many-to-one wherever it is defined at all, so for any $L$ this vocabulary can spell, $c^{-1}(L)$ is larger than $L$ and can never be listed; it has to be a machine. And regular languages survive inverse homomorphism, so whenever $L$ is regular that machine is a finite automaton over $V$. It is what `kernel` calls an **index** and sections 2 to 4 are three ways of building one.
+$c$ is many-to-one, so $c^{-1}(L)$ is the wider of the two. For an infinite $L$ there is nothing to list at all, so it has to be a machine. Regular languages survive inverse homomorphism, so whenever $L$ is regular that machine is a finite automaton over $V$. It is what `kernel` calls an **index** and sections 2 to 4 are three ways of building one.
 
 ```
 NOTE: What an index is from outside
 
-You hand the factory a description - a constant, a pattern, or a
-difference of other indexes - and get back an id. After that the only
+You hand the factory a description (a constant, a pattern, or a
+difference of other indexes) and get back an id. After that the only
 thing anyone says is "advance index 7 by token 1204" and which of the
 three kinds it happens to be stops mattering.
 
@@ -393,7 +389,7 @@ why one automaton can sit behind every active index using it.
 
 ### 2. Constants: a graph over the gaps in a string
 
-Take the constant `tiger`. Put a node at every position in it - before the `t`, between each pair of letters, after the `r`. Six nodes for five characters, because `tiger` is ASCII: positions are byte offsets, so a multi-byte character spans several nodes rather than one. Then draw an edge from $i$ to $j$ whenever some vocabulary token spells exactly the characters between them.
+Take the constant `tiger`. Put a node at every position in it: before the `t`, between each pair of letters, after the `r`. Six nodes for five characters, because `tiger` is ASCII: positions are byte offsets, so a multi-byte character spans several nodes rather than one. Then draw an edge from $i$ to $j$ whenever some vocabulary token spells exactly the characters between them.
 
 A **path from 0 to 5 is one way of spelling `tiger`** and every way appears as a path. So this graph *is* $c^{-1}(\{\texttt{tiger}\})$, drawn out. It is acyclic because every edge moves right and it has one accepting node, the last one.
 
@@ -404,13 +400,13 @@ The encoding follows from the picture. Group the edges by their source node and 
 
 The second one turns on reaching the end of the constant, which is a stronger condition than having no outgoing edges: a byte offset in the middle of a multi-byte character has none either and it must not accept.
 
-What is left is the out-edge labels, grouped by source - two arrays. Finding the edges in the first place is one **Aho-Corasick** pass: a single automaton holding all 255,386 tokens as patterns, built once per vocabulary, which reports every token occurring anywhere in `tiger` in one sweep. A standalone Go implementation example of this can be found in [`experiments/1-aot-ahocorasick/ahocorasick.go`](experiments/1-aot-ahocorasick/ahocorasick.go).
+What is left is the out-edge labels, grouped by source, which is two arrays. Finding the edges in the first place is one **Aho-Corasick** pass: a single automaton holding all 255,386 tokens as patterns, built once per vocabulary, which reports every token occurring anywhere in `tiger` in one sweep. A standalone Go implementation example of this can be found in [`experiments/1-aot-ahocorasick/ahocorasick.go`](experiments/1-aot-ahocorasick/ahocorasick.go).
 
 ```
 NOTE: What a lattice answers
 
 Ask it which tokens leave position i and it hands back a slice of an
-array it already holds - no allocation, no search. That is the only
+array it already holds, with no allocation and no search. That is the only
 question it needs to answer: the target is i plus the token's length in
 bytes and reaching the end of the constant is what accepting means, so
 neither is stored.
@@ -430,7 +426,7 @@ The *derivative* of a regex $r$ by a character $b$, written $\partial_b r$, is e
 \partial_b r \;=\; \{\, w \;:\; bw \in L(r) \,\}
 ```
 
-Counted up to similarity - treating union as associative, commutative and idempotent - a regular expression has only finitely many distinct derivatives. So the derivatives close into the state set of a finite automaton.
+Counted up to similarity, which treats union as associative, commutative and idempotent, a regular expression has only finitely many distinct derivatives. So the derivatives close into the state set of a finite automaton.
 
 Take the identifier pattern `[a-zA-Z_][a-zA-Z0-9_]*`. Reading a `t` consumes the first character class and leaves the starred tail. Reading another letter from the starred tail leaves the exact same starred tail again:
 
@@ -440,7 +436,7 @@ Take the identifier pattern `[a-zA-Z_][a-zA-Z0-9_]*`. Reading a `t` consumes the
   d_i(d_t(r))= [a-zA-Z0-9_]* -> The same regex, no new state
 ```
 
-Two live derivatives means exactly **two states** - which is what the built automaton reports. There is a third, $\emptyset$, reached by starting with a digit; it is the dead state and nothing stores it. Brzozowski's theorem guarantees the search terminates: up to similarity the derivatives are finite in number, so the states run out. `derivre` computes them lazily, materialising a state the first time it is reached. A standalone Go implementation example of this derivation process can be found in [`experiments/2-jit-derivre/brzozowski.go`](experiments/2-jit-derivre/brzozowski.go).
+Two live derivatives means exactly **two states**, which is what the built automaton reports. There is a third, $\emptyset$, reached by starting with a digit; it is the dead state and nothing stores it. Brzozowski's theorem guarantees the search terminates: up to similarity the derivatives are finite in number, so the states run out. `derivre` computes them lazily, materialising a state the first time it is reached. A standalone Go implementation example of this derivation process can be found in [`experiments/2-jit-derivre/brzozowski.go`](experiments/2-jit-derivre/brzozowski.go).
 
 That gives an automaton over *characters*. One more step turns it into one over tokens: to take a token $v$, walk all of its characters at once.
 
@@ -461,7 +457,7 @@ The automata that come out are tiny in states and enormous in edges:
 
 ### 4. Difference without a product
 
-A name is any identifier that is not something else - not a reserved word, not a known noun, not a known attribute. That is a set difference:
+A name is any identifier the language and the schema have not already claimed: no reserved word, no table name, no column name. That is a set difference:
 
 ```math
 L(G) \;=\; L(\mathrm{inc}) \;\setminus\; \bigl( L(\mathrm{exc}_1) \cup \cdots \cup L(\mathrm{exc}_k) \bigr)
@@ -473,7 +469,7 @@ Regular languages are closed under difference, so an automaton for this exists: 
 |Q_G| \;\le\; |Q_{\mathrm{inc}}| \times |Q_{\mathrm{exc}_1}| \times \cdots \times |Q_{\mathrm{exc}_k}|
 ```
 
-In a typical configuration $k$ is 85 and it grows with the input, so that product is never built. Instead the members stay separate automata, all of them are fed the same token and the difference is taken **when the word is asked whether it may end** rather than in the state space:
+For the example schema above $k$ is 88, growing with the schema, so that product is never built. Instead the members stay separate automata, all of them are fed the same token and the difference is taken **when the word is asked whether it may end** rather than in the state space:
 
 ```math
 \begin{aligned}
@@ -482,7 +478,7 @@ F_G &= F_{\mathrm{inc}} \setminus \bigl( F_1 \cup \cdots \cup F_k \bigr) && \tex
 \end{aligned}
 ```
 
-The asymmetry is what the situation calls for. An exclusion must never restrict the *next* token, because a longer word escapes it - `tiger` is excluded but `tiger2` is fine. An exclusion only ever removes the right to **stop**. So a group whose inclusion accepts while some exclusion also accepts is *blocked*: it withholds the terminating token and stays unfinished, forcing generation onward.
+The asymmetry is what the situation calls for. An exclusion must never restrict the *next* token, because a longer word escapes it: `tiger` is excluded while `tiger2` is fine. An exclusion only ever removes the right to **stop**. So a group whose inclusion accepts while some exclusion also accepts is *blocked*: it withholds the terminating token and stays unfinished, forcing generation onward.
 
 ```
 t        include accepts, no exclusion does             -> accepted
@@ -490,9 +486,9 @@ tiger    include accepts, the `tiger` exclusion does    -> blocked
 tiger2   the `tiger` exclusion died on the `2`          -> accepted
 ```
 
-One fact keeps this cheap. Every member is anchored at the start of the word, so an exclusion that rejects a token can never match again. Exclusion liveness only ever decreases, dead members are dropped and against a real vocabulary nearly all 85 die on the first token.
+One fact keeps this cheap. Every member is anchored at the start of the word, so an exclusion that rejects a token can never match again. Exclusion liveness only ever decreases, dead members are dropped and against a real vocabulary nearly all 88 die on the first token.
 
-The trade is explicit. The member automata cost $O\bigl(\sum_i |Q_i|\bigr)$ once and every head shares them; an active name adds only $O(k)$ on top of that - one node id per member still standing, which the dropping drives towards $O(1)$. The alternative is $O\bigl(\prod_i |Q_i|\bigr)$ of automaton, per input, up front.
+The trade is explicit. The member automata cost $O\bigl(\sum_i |Q_i|\bigr)$ once and every head shares them; an active name adds only $O(k)$ on top of that, one node id per member still standing, which the dropping drives towards $O(1)$. The alternative is $O\bigl(\prod_i |Q_i|\bigr)$ of automaton, per input, up front.
 
 ### 5. The graph: lazy determinization of an automaton nobody can build
 
@@ -521,7 +517,7 @@ graph LR
     j3 -->|"a = b"| head
 
     head -.->|","| entry
-    head -->|";"| accept(((accept)))
+    head -.->|";"| accept(((accept)))
 
     head -->|WHERE| cond
     cond(["next condition"]) -->|operand| w1(( ))
@@ -530,7 +526,7 @@ graph LR
     w1 -->|"IS [NOT] NULL"| done
 
     done -->|"AND, OR"| cond
-    done -->|";"| accept
+    done -.->|";"| accept
 
     classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
     classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
@@ -544,7 +540,7 @@ If it were just this static structure, the language could be compiled ahead of t
 
 But it isn't static. The four heavy states are the ones whose alternatives come from the latent context rather than from the grammar. Whether `head` may take the `;` or has to open another table entry depends on what has *already been selected*, the `field` edge out of `ref` ranges over the fields that are *still selectable in the current latent state* and the `operand` edge out of `cond` ranges over the columns the FROM clause *actually placed*, with the operator that follows it fixed by that column's type. 
 
-Every node evaluates a Boolean function over the latent context (the constraints on tables, aliases and selected fields). 
+Each of the four is a thunk: hand it the latent context (the constraints on tables, the aliases opened so far, the relation the FROM clause produced) and it answers with the alternatives that context still allows. 
 
 Because of this, the determinized machine is built lazily while it is walked. A **configuration** is a finite set of heads:
 
@@ -556,9 +552,9 @@ Because of this, the determinized machine is built lazily while it is walked. A 
 \end{aligned}
 ```
 
-$\mathrm{routes}$ evaluates the transition function over the live frontier - effectively performing the subset construction one token at a time instead of tabulating it in advance. $\mathrm{expand}$ resolves the fixpoint: whenever a head reaches the end of its index, it yields its continuation $k_i$, applying it to the updated state $\mathit{ctx}_i$, spawning the next set of required indexes until nothing new appears.
+$\mathrm{routes}$ evaluates the transition function over the live frontier, performing the subset construction one token at a time instead of tabulating it in advance. $\mathrm{expand}$ resolves the fixpoint: whenever a head reaches the end of its index, it yields its continuation $k_i$, applying it to the updated state $\mathit{ctx}_i$, spawning the next set of required indexes until nothing new appears.
 
-For a fixed schema the reachable configurations are technically finite, so the DFA does theoretically exist. But with $n$ tables carrying $2^{2^n}$ boolean functions, plus alias resolutions and join graphs, it is strictly unbuildable, so the determinization stays lazy.
+For a fixed schema the language is still regular, so the DFA does exist in theory. But with $n$ tables carrying $2^{2^n}$ boolean functions, plus alias resolutions and join graphs, it is strictly unbuildable, so the determinization stays lazy.
 
 ```
 NOTE: The layers that meet at a head
@@ -566,7 +562,7 @@ NOTE: The layers that meet at a head
 A head is one active index and three layers stack at it. Underneath is
 the automaton: immutable, positionless, shared by every head walking it.
 Over that sits a single walk, private to this head, shaped like the
-automaton - a node id for a flat index, or one sub-walk per member for a
+automaton: a node id for a flat index, or one sub-walk per member for a
 group. Over that sits a payload the kernel stores and never opens.
 
 From outside, the loop is: spawn a head with an index and a payload, feed
@@ -607,7 +603,7 @@ A field $f$ that lives in the tables $T(f)$ says *exactly one of those is where 
 \end{aligned}
 ```
 
-For two tables, "exactly one" *is* XOR. For three it is not: $a + b + c$ over $\mathbb{F}_2$ is the **parity** function - it is $1$ when an odd number of tables are on. That is right for one table and wrong for three. The $abc$ term is there to cancel the all-three case and nothing else, since it is $0$ everywhere else.
+For two tables, "exactly one" *is* XOR. For three it is not: $a + b + c$ over $\mathbb{F}_2$ is the **parity** function, which is $1$ when an odd number of tables are on. That is right for one table and wrong for three. The $abc$ term is there to cancel the all-three case and nothing else, since it is $0$ everywhere else.
 
 The pattern that falls out is clean. $C(f)$ is the sum of **every odd-sized subset** of $T(f)$:
 
@@ -615,7 +611,7 @@ The pattern that falls out is clean. $C(f)$ is the sum of **every odd-sized subs
 C(f) \;=\; \sum_{\substack{S \subseteq T(f) \\ |S| \text{ odd}}} \;\; \prod_{i \in S} t_i
 ```
 
-and it is exactly-one for a one-line reason: if $m$ tables are on, the terms that survive are the odd-sized subsets of those $m$ and for $m \ge 1$ there are $2^{m-1}$ of them - even for every $m \ge 2$, so they cancel. The sum is $1$ only when $m = 1$ and empty, hence $0$, when $m = 0$.
+and it is exactly-one for a one-line reason: if $m$ tables are on, the terms that survive are the odd-sized subsets of those $m$ and for $m \ge 1$ there are $2^{m-1}$ of them, which is even for every $m \ge 2$, so they cancel. The sum is $1$ only when $m = 1$ and empty, hence $0$, when $m = 0$.
 
 Selecting a field multiplies its constraint into a running product, which is AND:
 
@@ -635,9 +631,9 @@ P \cdot C(f) = 0 \quad&\Longleftrightarrow\quad \text{field } f \text{ is exclud
 \end{aligned}
 ```
 
-Two of those lines need care. The last one ranges over the variables $P$ still mentions rather than over every table: a table $P$ has stopped depending on is *compatible* with the selection but not *required* by it and only what $P$ still depends on belongs in the FROM clause. Selecting `email` leaves $P = u$ and it is `users` alone that is outstanding - `posts` and `comments` pass the $P|_{t=1} \neq 0$ test but appear nowhere in $P$. The second line has the mirror image of the same subtlety: a table already named has been substituted away and no longer appears in $P$, so the test can never flag it again and the excluded set carries the used tables alongside.
+Two of those lines need care. The last one ranges over the variables $P$ still mentions rather than over every table: a table $P$ has stopped depending on is *compatible* with the selection but not *required* by it and only what $P$ still depends on belongs in the FROM clause. Selecting `email` leaves $P = u$ and it is `users` alone that is outstanding: `posts` and `comments` pass the $P|_{t=1} \neq 0$ test yet appear nowhere in $P$. The second line has the mirror image of the same subtlety: a table already named has been substituted away and no longer appears in $P$, so the test can never flag it again and the excluded set carries the used tables alongside.
 
-Idempotence earns its keep. Selecting `body` and then `user_id`, both living in exactly `{comments, posts}`, leaves $P = c + p$ unchanged, because $(c+p)^2 = c+p$ - the second field adds no information and the algebra says so with no special case. Naming a table is substitution: setting $u = 1$ discharges the demand of every constraint mentioning it. What is left is rarely the constant $1$ - selecting `body` and then naming `posts` leaves $P = c + 1$, which goes on forbidding `comments` - but its value at the origin is $1$ and that evaluation is what satisfaction tests.
+Idempotence earns its keep. Selecting `body` and then `user_id`, both living in exactly `{comments, posts}`, leaves $P = c + p$ unchanged, because $(c+p)^2 = c+p$: the second field adds no information and the algebra says so with no special case. Naming a table is substitution: setting $u = 1$ discharges the demand of every constraint mentioning it. What is left is rarely the constant $1$. Selecting `body` and then naming `posts` leaves $P = c + 1$, which goes on forbidding `comments`, yet its value at the origin is $1$ and that evaluation is what satisfaction tests.
 
 #### 6b. Aliased fields: intersection
 
@@ -651,7 +647,7 @@ A selection that would empty $\mathit{cand}$ is refused outright and leaves it u
 
 #### 6c. The FROM clause: graph contraction
 
-Once the fields are chosen, the required tables have to be **connected**. `Relationships` builds a multigraph whose vertices are the tables - plus aliased nodes like `"users u"` - and whose edges are the foreign keys, each labelled with the column pair it joins on.
+Once the fields are chosen, the required tables have to be **connected**. `Relationships` builds a multigraph whose vertices are the tables (together with aliased nodes like `"users u"`) and whose edges are the foreign keys, each labelled with the column pair it joins on.
 
 One FROM entry is a connected piece being grown from a head vertex $h$. Joining a neighbour $x$ is **vertex contraction**:
 
@@ -659,7 +655,7 @@ One FROM entry is a connected piece being grown from a head vertex $h$. Joining 
 \mathrm{join}(h, x) : \qquad G \;\leftarrow\; G \,/\, \{h, x\}
 ```
 
-Contraction is the right operation because it reproduces SQL's own rule: after a join the pair behaves as one relation, every column of either is reachable and the merged vertex inherits both neighbourhoods - so a table two foreign keys away only becomes joinable once the table between them has been joined in.
+Contraction is the right operation because it reproduces SQL's own rule: after a join the pair behaves as one relation, every column of either is reachable and the merged vertex inherits both neighbourhoods, so a table two foreign keys away only becomes joinable once the table between them has been joined in.
 
 The `ON` columns are the label on the edge, so choosing the target determines them.
 
@@ -678,9 +674,9 @@ into it.
 
 Contraction being the *only* mutation is worth saying out loud, because
 it is what makes the structure cheap. Nothing is ever added after the
-schema has been read, so the quotient is determined by which vertex each
-vertex has been folded into - one array - and everything else can be
-shared by every copy. A branch that joins nothing allocates nothing and
+schema has been read, so the quotient is determined by one array, saying
+which vertex each vertex has been folded into; everything else is shared
+by every copy. A branch that joins nothing allocates nothing and
 a dropped loop needs no handling: an edge whose far end is in the same
 class as its near end is simply not reported.
 ```
@@ -695,7 +691,7 @@ discharged.
 
 A filter runs the other way. By the time the `WHERE` keyword is taken the FROM
 clause is finished and what a condition may name is no longer something to be
-solved - it is a set. Call it the **virtual table**: every column of every node
+solved: it is a set. Call it the **virtual table**: every column of every node
 the clause placed, whether that node arrived as a static entry or was contracted
 in by a join. A filter cannot tell the two apart, which is exactly what a join
 means.
@@ -711,34 +707,32 @@ to a resolver into counting problems:
 \end{aligned}
 ```
 
-with $\text{name}(source)$ the alias where the source carries one and the table name
-otherwise - the same function the `ON` clause is written from. `users INNER JOIN
-posts` offers `users.id` and `posts.id` but no root `id` and offers `email`
-root because one source supplies it. Note what the second line is quantified
-over: the sources of *this clause*, not the tables of the schema. `title` lives on
-two tables, yet it is unambiguous in any clause that names only one of them.
+with $\text{name}(source)$ the alias where the source carries one and the table
+name otherwise, which is the same function the `ON` clause is written from.
+`users INNER JOIN posts` offers `users.id` and `posts.id` but no root `id`,
+while `email` is offered root because one source supplies it. Note what the second line
+is quantified over: the sources of *this clause* rather than the tables of the
+schema. `title` lives on two tables, yet it is unambiguous in any clause that
+names only one of them.
 
 #### 6e. Conditions: the type rides in the continuation
 
 On top of the virtual table sits the restriction proper. Every column carries a
 `Type` the schema parser has always produced and nothing ever read; the
-condition grammar is the first consumer. Types are partitioned into classes -
-numeric, text, temporal, boolean, binary and `UNKNOWN` for a name the parser
-did not recognise - and each class fixes two things:
+condition grammar is the first consumer. Types are partitioned into six
+classes (numeric, text, temporal, boolean, binary, plus `UNKNOWN` for a name
+the parser did not recognise) and the class of the left operand fixes the two
+things a condition still has open: which operator may follow it and what may
+stand on the other side of that operator.
 
 ```math
 \begin{aligned}
-\text{Operators}(col) &= \text{OpsFor}(\text{type of } col) \;\cup\; \{\,\texttt{IS NULL}, \texttt{IS NOT NULL}\,\} \text{ if } col \text{ is nullable} \\
-\text{RightSide}(col) &= \{\, \text{other } col_2 : \text{type}(col_2) = \text{type}(col) \,\} \;\cup\; \text{Literal}(\text{type of } col)
+\text{Operators}(col) &= \text{OpsFor}(\text{class of } col) \;\cup\; \{\,\texttt{IS NULL}, \texttt{IS NOT NULL}\,\} \text{ if } col \text{ is nullable} \\
+\text{RightSide}(col) &= \{\, \text{other } col_2 : \text{class}(col_2) = \text{class}(col) \,\} \;\cup\; \text{Literal}(\text{class of } col)
 \end{aligned}
 ```
 
-Ordering belongs to the classes that have an order, matching to text alone and
-equality to all of them. `UNKNOWN` is a class rather than a wildcard, so a type
-nobody recognised compares to nothing but another of its kind - a refusal is
-the safe direction to be wrong in. Values are not modelled at all: $\text{Literal}$
-is a *pattern*, one per class and what a literal spells inside it is its own
-business. That is the whole of what typed means here.
+One branch per class, with the right hand side following from the same choice:
 
 ```mermaid
 graph LR
@@ -759,32 +753,35 @@ graph LR
     class n_ops,t_ops,d_ops,b_ops,null_ops,rhs_n,rhs_t,rhs_d,rhs_b plain
 ```
 
+Ordering belongs to the classes that have an order, matching to text alone and
+equality to all of them. Nullability cuts across the classes instead of
+forming one, adding `IS NULL` and `IS NOT NULL` on top of whatever the column
+already allows. Those two are also the only operators that end a condition by
+themselves. Spelled out over the SQL types the schema parser reads:
+
 | type | operators | literal | example |
 |---|---|---|---|
 | `BIGINT`, `INT`, `DECIMAL`, ... | `=` `!=` `<` `<=` `>` `>=` | `-?[0-9]+(\.[0-9]+)?` | `users.id >= -1` |
 | `VARCHAR`, `TEXT`, `CHAR`, ... | `=` `!=` `<` `<=` `>` `>=` `LIKE` `NOT LIKE` | `'...'` | `email LIKE '%keyword%'` |
 | `TIMESTAMP`, `DATE`, `TIME`, ... | `=` `!=` `<` `<=` `>` `>=` | `'2024-01-31 12:30:00'` | `created_at > '2024-01-31'` |
 | `BOOLEAN`, `BIT` | `=` `!=` | `TRUE`, `FALSE` | `verified != FALSE` |
-| `BLOB`, `BYTEA`, unrecognised | `=` `!=` | none - columns only | |
+| `BLOB`, `BYTEA`, unrecognised | `=` `!=` | none, columns only | |
 | any of them, where nullable | `IS NULL`, `IS NOT NULL` | | `published_at IS NULL` |
 
-```
-SELECT email FROM users WHERE created_at
-    -> = != < <= > >= IS NULL IS NOT NULL      temporal and it may be null
+`UNKNOWN` is a class rather than a wildcard, so a type nobody recognised
+compares to nothing but another of its kind: a refusal is the safe direction
+to be wrong in. Values are left out entirely. $\text{Literal}$ is a *pattern*,
+one per class, so the literal column above gives a shape and the example beside
+it one word that shape admits; what a literal spells inside it is its own
+business. That is the whole of what typed means here.
 
-SELECT email FROM users WHERE users.id
-    -> = != < <= > >=                          numeric; a primary key is never null
-
-SELECT email FROM users WHERE email
-    -> = != < <= > >= LIKE NOT LIKE            text alone may be matched
-```
-
-None of this is state. The virtual table is - it depends on what the FROM
+None of this is state. The virtual table is: it depends on what the FROM
 clause committed to, so it is built at the boundary and copied per branch like
-everything else. But the type is not: by the time a condition's alternatives
-are enumerated its left operand is already fixed, so the class is a constant of
-the continuation, in the same way the `ON` columns are a constant of the join
-clause that carries them. Nothing about types is ever asked of the context.
+everything else. The type stays outside the context. By the time a condition's
+alternatives are enumerated its left operand is already fixed, so the class is
+a constant of the continuation, in the same way the `ON` columns are a constant
+of the join clause that carries them. Nothing about types is ever asked of the
+context.
 
 ```
 NOTE: Why the conditions cost nothing extra
@@ -797,9 +794,9 @@ emitted once and its operators open only behind it, so choosing the
 column is what prunes them.
 
 The indexes themselves are built once per schema and then shared. An
-operand is a constant, so it is a lattice and a literal is one
-expression per class - a second pass over the same registry builds
-nothing at all.
+operand is a constant, so it is a lattice; a literal is one expression
+per class, so a second pass over the same registry builds nothing at
+all.
 ```
 
 ## License
