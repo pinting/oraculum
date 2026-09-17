@@ -200,28 +200,7 @@ Continuing the example, suppose the FROM clause settled on `t1 INNER JOIN t2 ON 
 
 A column reachable as `t1.f1` is always offered scoped. A column like `f3` is offered root too, because exactly one source supplies it. But `f2` lives in both - it can only be written as `t1.f2` or `t2.f2`, never root, since root `f2` would be ambiguous. This is SQL's own resolution rule, applied to the nodes of *this clause*, not the whole schema.
 
-On top of that sits the type. Every column carries one and the type gates what may follow it:
-
-```mermaid
-graph LR
-    col(["column"]) -->|"numeric"| n_ops["= != < <= > >="]
-    col -->|"text"| t_ops["= != < <= > >= LIKE NOT LIKE"]
-    col -->|"temporal"| d_ops["= != < <= > >="]
-    col -->|"boolean"| b_ops["= !="]
-    col -->|"nullable"| null_ops["IS NULL, IS NOT NULL"]
-
-    n_ops --> rhs_n["number or same-class column"]
-    t_ops --> rhs_t["string or same-class column"]
-    d_ops --> rhs_d["timestamp or same-class column"]
-    b_ops --> rhs_b["TRUE / FALSE or same-class column"]
-
-    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
-    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
-    class col accent
-    class n_ops,t_ops,d_ops,b_ops,null_ops,rhs_n,rhs_t,rhs_d,rhs_b plain
-```
-
-Choosing the column determines the operators; choosing the operator determines whether the right-hand side is a literal pattern or another column of the same class. None of this is latent state - the type is a constant of the column the model has already picked, so it rides in the continuation rather than the context.
+On top of that sits the type, which dictates the permitted operators and whether the right-hand side can be a literal pattern or another column of the same class.
 
 The key property is that the WHERE clause **never feeds back**. A filter can neither require a table nor discharge one, so the polynomial $P$ and the join graph are frozen at the `WHERE` boundary. Conditions combine with `AND` and `OR`, take a `NOT` and nest behind brackets, but nothing they say alters which tables are in the query.
 
@@ -329,14 +308,6 @@ for equality, only the classes that have an order may be ranged over, only text
 may be matched against a pattern and only a column that can actually be null
 may be tested for it.
 
-| type | operators | literal | example |
-|---|---|---|---|
-| `BIGINT`, `INT`, `DECIMAL`, ... | `=` `!=` `<` `<=` `>` `>=` | `-?[0-9]+(\.[0-9]+)?` | `users.id >= -1` |
-| `VARCHAR`, `TEXT`, `CHAR`, ... | `=` `!=` `<` `<=` `>` `>=` `LIKE` `NOT LIKE` | `'...'` | `email LIKE '%keyword%'` |
-| `TIMESTAMP`, `DATE`, `TIME`, ... | `=` `!=` `<` `<=` `>` `>=` | `'2024-01-31 12:30:00'` | `created_at > '2024-01-31'` |
-| `BOOLEAN`, `BIT` | `=` `!=` | `TRUE`, `FALSE` | `verified != FALSE` |
-| `BLOB`, `BYTEA`, unrecognised | `=` `!=` | none - columns only | |
-| any of them, where nullable | `IS NULL`, `IS NOT NULL` | | `published_at IS NULL` |
 
 The other side of an operator is either a literal of that shape or another
 column of the same class, which is what makes `created_at < published_at` a
@@ -768,6 +739,34 @@ nobody recognised compares to nothing but another of its kind - a refusal is
 the safe direction to be wrong in. Values are not modelled at all: $\text{Literal}$
 is a *pattern*, one per class and what a literal spells inside it is its own
 business. That is the whole of what typed means here.
+
+```mermaid
+graph LR
+    col(["column"]) -->|"numeric"| n_ops["= != < <= > >="]
+    col -->|"text"| t_ops["= != < <= > >= LIKE NOT LIKE"]
+    col -->|"temporal"| d_ops["= != < <= > >="]
+    col -->|"boolean"| b_ops["= !="]
+    col -->|"nullable"| null_ops["IS NULL, IS NOT NULL"]
+
+    n_ops --> rhs_n["number or same-class column"]
+    t_ops --> rhs_t["string or same-class column"]
+    d_ops --> rhs_d["timestamp or same-class column"]
+    b_ops --> rhs_b["TRUE / FALSE or same-class column"]
+
+    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
+    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
+    class col accent
+    class n_ops,t_ops,d_ops,b_ops,null_ops,rhs_n,rhs_t,rhs_d,rhs_b plain
+```
+
+| type | operators | literal | example |
+|---|---|---|---|
+| `BIGINT`, `INT`, `DECIMAL`, ... | `=` `!=` `<` `<=` `>` `>=` | `-?[0-9]+(\.[0-9]+)?` | `users.id >= -1` |
+| `VARCHAR`, `TEXT`, `CHAR`, ... | `=` `!=` `<` `<=` `>` `>=` `LIKE` `NOT LIKE` | `'...'` | `email LIKE '%keyword%'` |
+| `TIMESTAMP`, `DATE`, `TIME`, ... | `=` `!=` `<` `<=` `>` `>=` | `'2024-01-31 12:30:00'` | `created_at > '2024-01-31'` |
+| `BOOLEAN`, `BIT` | `=` `!=` | `TRUE`, `FALSE` | `verified != FALSE` |
+| `BLOB`, `BYTEA`, unrecognised | `=` `!=` | none - columns only | |
+| any of them, where nullable | `IS NULL`, `IS NOT NULL` | | `published_at IS NULL` |
 
 ```
 SELECT email FROM users WHERE created_at
