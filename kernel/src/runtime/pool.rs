@@ -8,12 +8,9 @@
 //! than degrading, even when asked for a single worker.
 //!
 //! With the feature on this is rayon, unchanged. With it off `install` calls
-//! the closure where it stands and `join` runs the two in order; the iterator
-//! sites are `cfg`'d individually, because a serial `par_iter` cannot be
-//! written as a shim - the trait it comes from is the parallelism.
-
-#[cfg(feature = "parallel")]
-pub use rayon::join;
+//! the closure where it stands; the iterator sites are `cfg`'d individually,
+//! because a serial `par_iter` cannot be written as a shim - the trait it comes
+//! from is the parallelism.
 
 #[cfg(feature = "parallel")]
 pub type Pool = rayon::ThreadPool;
@@ -48,13 +45,4 @@ impl Pool {
 #[cfg(not(feature = "parallel"))]
 pub fn build(_workers: usize) -> Option<Pool> {
     Some(Pool)
-}
-
-#[cfg(not(feature = "parallel"))]
-pub fn join<A, B, RA, RB>(a: A, b: B) -> (RA, RB)
-where
-    A: FnOnce() -> RA,
-    B: FnOnce() -> RB,
-{
-    (a(), b())
 }
