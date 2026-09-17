@@ -11,14 +11,13 @@
 //! each member where *it* stands. That recursion is the whole reason this layer
 //! exists, and it nests: a member may itself be a group.
 //!
-//! Feeding a group fans its members out over the worker pool once there are
-//! enough of them to pay for the dispatch, so the parallelism of the runner
-//! continues down into the groups instead of stopping at the head.
+//! Feeding a group walks its members here, on the calling thread. It used to
+//! fan them out over the worker pool, which never paid: one member step is a
+//! handful of comparisons, and `prune` drops nearly every exclusion on the
+//! first token, so the fan-out was dispatching a task per member for work that
+//! had already evaporated. Measured on 16 workers it cost between 1.07x at 16
+//! exclusions and 1.72x at 1024, against simply walking them.
 
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
-
-use crate::runtime::pool;
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -26,14 +25,6 @@ use crate::dfa::dfa::DFA;
 use crate::index::index::Accepting;
 use crate::index::unit::Unit;
 use crate::number::Number;
-
-/// Number of exclusions below which a group is fed on the calling thread.
-///
-/// One `next` over a lattice is a handful of comparisons, so dispatching a
-/// task per member only pays once a group has many of them - which is exactly
-/// the shape alias resolution produces, one exclusion per reserved word, table
-/// and field.
-pub const GROUP_PARALLEL_THRESHOLD: usize = 16;
 
 pub struct Memory<N, T, D>
 where
@@ -129,38 +120,11 @@ where
         // it is anchored at the start of the word, so it can never match again.
         // Its `feed` returning false is therefore not a failure of the group,
         // which is why only the inclusion's answer is propagated.
-        #[cfg(not(feature = "parallel"))]
-        let parallel: bool = false;
+        let accepted: bool = include[0].feed(token_id);
 
-        #[cfg(feature = "parallel")]
-        let parallel: bool = excludes.len() >= GROUP_PARALLEL_THRESHOLD;
-
-        let accepted: bool = if parallel {
-            #[cfg(feature = "parallel")]
-            {
-                let (accepted, _) = pool::join(
-                    || include[0].feed(token_id),
-                    || {
-                        excludes.par_iter_mut().for_each(|exclude| {
-                            exclude.feed(token_id);
-                        })
-                    },
-                );
-
-                accepted
-            }
-
-            #[cfg(not(feature = "parallel"))]
-            unreachable!()
-        } else {
-            let accepted: bool = include[0].feed(token_id);
-
-            for exclude in excludes.iter_mut() {
-                exclude.feed(token_id);
-            }
-
-            accepted
-        };
+        for exclude in excludes.iter_mut() {
+            exclude.feed(token_id);
+        }
 
         if !accepted {
             self.dead = true;

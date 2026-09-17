@@ -213,6 +213,27 @@ where
         self.registry.lock().unwrap().cache.contains_key(draft)
     }
 
+    /// How many of these drafts would actually be built.
+    ///
+    /// One lock for the whole batch, because the answer decides whether the
+    /// batch is worth spreading: a draft that is already built is a table
+    /// lookup, and a batch of those costs less to serve here than to hand to
+    /// the workers. A factory that does not cache builds every one of them.
+    pub fn unbuilt(&self, drafts: &[Draft]) -> usize {
+        if !self.cached {
+            return drafts.len();
+        }
+
+        let registry = self.registry.lock().unwrap();
+
+        drafts
+            .iter()
+            .filter(|draft| {
+                !registry.cache.contains_key(*draft) && !registry.failed.contains(*draft)
+            })
+            .count()
+    }
+
     pub fn get(&self, id: IndexId) -> Option<Arc<Unit<N, T, D>>> {
         self.registry
             .lock()
@@ -283,8 +304,14 @@ where
     /// Costs differ by orders of magnitude between a `Lattice` and an
     /// `Expression`, so the batch is handed to rayon whole and left to its work
     /// stealing rather than split up front.
+    ///
+    /// Only the drafts that are not built yet count towards that decision. A
+    /// batch the cache already answers is served here: it is a lookup each,
+    /// tens of nanoseconds, against microseconds to reach the workers - which
+    /// is the batch a token driven caller asks for nearly every time, once the
+    /// shapes of its language have been seen.
     pub fn create_many(&self, drafts: &[Draft]) -> Vec<Option<IndexId>> {
-        if drafts.len() < 2 {
+        if drafts.len() < 2 || self.unbuilt(drafts) < 2 {
             return drafts.iter().map(|draft| self.create(draft)).collect();
         }
 

@@ -20,7 +20,6 @@
 use rayon::prelude::*;
 
 use crate::runtime::pool::{self, Pool};
-use rustc_hash::FxHashSet as HashSet;
 use std::sync::Arc;
 
 use crate::dfa::dfa::DFA;
@@ -30,11 +29,28 @@ use crate::number::Number;
 use crate::runtime::factory::{Draft, Factory, IndexId};
 use crate::runtime::head::{Head, HeadId};
 use crate::runtime::resolver::{Expansion, Report, Request, Resolver, Source};
+use crate::vocabulary::Vocabulary;
 
-/// Number of heads below which a stage runs on the calling thread. Advancing
-/// one head is a single DFA lookup, so a dispatch per head only pays once there
-/// are several of them.
-pub const PARALLEL_THRESHOLD: usize = 2;
+/// Bits per word of the route bitset.
+const BITS: usize = u64::BITS as usize;
+
+/// Number of heads below which `routes` runs on the calling thread.
+///
+/// Each worker the union is spread over needs a bitset of its own, which is one
+/// zeroed word per 64 token ids - 31KB against this vocabulary - so a handful
+/// of heads is answered here rather than paying for that twice over. Measured
+/// on the seer corpus, whose head count peaks at 15: raising this from 2 to 32
+/// took a 16 worker run from 2.75s to 1.93s, while the batches that make the
+/// fan-out worth having - 64 heads and up - are untouched, and still 23x on 16
+/// workers.
+pub const PARALLEL_THRESHOLD: usize = 32;
+
+/// Number of heads below which `advance` runs on the calling thread.
+///
+/// Feeding one head is a single DFA lookup, about 230ns, so a task per head
+/// costs more than the work until there are thousands of them. Measured on a
+/// 16 core machine: fanning out at 512 heads is twice as slow as not.
+pub const ADVANCE_PARALLEL_THRESHOLD: usize = 2048;
 
 pub struct Runner<N, T, D, P>
 where
@@ -49,6 +65,9 @@ where
     tokens: Vec<T>,
     next_id: HeadId,
     completed: bool,
+
+    /// Words of the route bitset, fixed by the vocabulary - see `routes`.
+    words: usize,
 
     rounds: usize,
     notified: usize,
@@ -74,6 +93,8 @@ where
     }
 
     pub fn with_pool(factory: Arc<Factory<N, T, D>>, pool: Arc<Pool>) -> Self {
+        let words: usize = Self::words(&factory);
+
         Self {
             factory,
             pool,
@@ -81,10 +102,28 @@ where
             tokens: Vec::new(),
             next_id: 0,
             completed: false,
+            words,
             rounds: 0,
             notified: 0,
             spawned: 0,
         }
+    }
+
+    /// Words of the route bitset: one bit per token id the vocabulary can
+    /// answer with, plus the terminator, which is the one id an index offers
+    /// that the table itself does not carry.
+    fn words(factory: &Factory<N, T, D>) -> usize {
+        let vocabulary: &Arc<Vocabulary<T>> = factory.vocabulary();
+
+        let highest: usize = vocabulary
+            .get_ids()
+            .iter()
+            .map(|id| id.to_usize())
+            .max()
+            .unwrap_or(0)
+            .max(vocabulary.get_eos_id().to_usize());
+
+        (highest + 1).div_ceil(BITS)
     }
 
     pub fn factory(&self) -> &Arc<Factory<N, T, D>> {
@@ -171,8 +210,13 @@ where
 
         let factory: Arc<Factory<N, T, D>> = self.factory.clone();
 
+        // Entering the pool costs several microseconds, so it is worth it only
+        // when the batch has real building to do - see `Factory::create_many`,
+        // which makes the same call about fanning out at all.
         let built: Vec<Option<IndexId>> = if drafts.is_empty() {
             Vec::new()
+        } else if factory.unbuilt(&drafts) < 2 {
+            factory.create_many(&drafts)
         } else {
             self.pool.install(|| factory.create_many(&drafts))
         };
@@ -213,37 +257,54 @@ where
     ///
     /// Sorted and deduplicated, so two runs over the same state answer
     /// identically however the work was spread over the pool.
+    ///
+    /// The union is taken as a bitset over token ids rather than by collecting
+    /// each head's routes and hashing them. Both halves of that matter: a head
+    /// offers tens of thousands of tokens and the index holds them contiguous,
+    /// so collecting meant copying every one of them out, and the hash pass
+    /// that followed was serial work behind a parallel scan - at 64 heads it
+    /// was nine tenths of the call. A bitset is a word-wise OR to merge, which
+    /// is what lets the whole union be reduced across the workers, and it comes
+    /// out in id order, which is the order this promises.
     pub fn routes(&self) -> Vec<T> {
         if self.heads.is_empty() {
             return Vec::new();
         }
 
         #[cfg(feature = "parallel")]
-        let collected: Vec<Vec<T>> = if self.heads.len() < PARALLEL_THRESHOLD {
-            self.heads.iter().map(|head| head.transitions()).collect()
+        let bits: Vec<u64> = if self.heads.len() < PARALLEL_THRESHOLD {
+            self.mark_all()
         } else {
-            self.pool
-                .install(|| self.heads.par_iter().map(|head| head.transitions()).collect())
+            self.pool.install(|| {
+                self.heads
+                    .par_iter()
+                    .fold(
+                        || vec![0u64; self.words],
+                        |mut bits, head| {
+                            mark(&mut bits, head);
+
+                            bits
+                        },
+                    )
+                    .reduce(|| vec![0u64; self.words], union)
+            })
         };
 
         #[cfg(not(feature = "parallel"))]
-        let collected: Vec<Vec<T>> =
-            self.heads.iter().map(|head| head.transitions()).collect();
+        let bits: Vec<u64> = self.mark_all();
 
-        let mut seen: HashSet<T> = HashSet::default();
-        let mut routes: Vec<T> = Vec::new();
+        expand(&bits)
+    }
 
-        for transitions in collected {
-            for token_id in transitions {
-                if seen.insert(token_id) {
-                    routes.push(token_id);
-                }
-            }
+    /// Every head's routes into one bitset, on the calling thread.
+    fn mark_all(&self) -> Vec<u64> {
+        let mut bits: Vec<u64> = vec![0u64; self.words];
+
+        for head in &self.heads {
+            mark(&mut bits, head);
         }
 
-        routes.sort_unstable();
-
-        routes
+        bits
     }
 
     /// Consume one token and settle the head pool around it.
@@ -251,15 +312,18 @@ where
     /// Returns whether any head accepted the token. As in a plain DFA walk a
     /// rejected token leaves nothing alive.
     ///
-    /// The whole feed runs inside the worker pool, not merely the stages that
-    /// fan out here. Rayon routes nested parallel work to the pool the current
-    /// thread belongs to, so a resolver that reaches back into the factory -
-    /// which is what building a wide group draft does - shares these workers
-    /// instead of starting a second pool of its own.
+    /// The feed itself is not entered through the pool. It used to be, so that
+    /// a resolver reaching back into the factory would share these workers
+    /// rather than start a pool of its own - but entering a pool costs a job
+    /// submission and a wait, and that was being paid once per token to wrap
+    /// stages that mostly run on this thread anyway: measured at 3.0x the cost
+    /// of a feed on 16 workers, and 2.5x on one. The stages that do fan out -
+    /// `advance`, `routes` and the batch build in `spawn_many` - enter the pool
+    /// themselves, which is where the cost belongs. A resolver that builds
+    /// indexes by calling the factory directly now has its nested parallelism
+    /// run on rayon's global pool instead of this one.
     pub fn feed(&mut self, token_id: T, resolver: &(dyn Resolver<P> + Sync)) -> bool {
-        let pool: Arc<Pool> = self.pool.clone();
-
-        pool.install(|| self.drive(token_id, resolver))
+        self.drive(token_id, resolver)
     }
 
     fn drive(&mut self, token_id: T, resolver: &(dyn Resolver<P> + Sync)) -> bool {
@@ -281,9 +345,7 @@ where
     /// Needed when a head is spawned onto an index that accepts straight away,
     /// which would otherwise sit unreported until the next token.
     pub fn settle(&mut self, resolver: &(dyn Resolver<P> + Sync)) {
-        let pool: Arc<Pool> = self.pool.clone();
-
-        pool.install(|| self.resolve(resolver))
+        self.resolve(resolver)
     }
 
     fn resolve(&mut self, resolver: &(dyn Resolver<P> + Sync)) {
@@ -331,7 +393,7 @@ where
         }
 
         #[cfg(feature = "parallel")]
-        if self.heads.len() < PARALLEL_THRESHOLD {
+        if self.heads.len() < ADVANCE_PARALLEL_THRESHOLD {
             for head in &mut self.heads {
                 head.feed(token_id);
             }
@@ -401,4 +463,56 @@ where
 
         id
     }
+}
+
+/// Set a bit for every token this head would accept.
+///
+/// The head's routes are read where the index holds them rather than copied
+/// out: a `Lattice` and an `Expression` both keep the route set of a node
+/// contiguous, so this walks the index's own memory.
+fn mark<N, T, D, P>(bits: &mut [u64], head: &Head<N, T, D, P>)
+where
+    N: Number,
+    T: Number,
+    D: DFA<N, T> + Send + Sync,
+{
+    let Some(transitions) = head.memory().transitions() else {
+        return;
+    };
+
+    for &token_id in transitions.iter() {
+        let id: usize = token_id.to_usize();
+
+        bits[id / BITS] |= 1u64 << (id % BITS);
+    }
+}
+
+/// Merge one worker's bitset into another's.
+fn union(mut left: Vec<u64>, right: Vec<u64>) -> Vec<u64> {
+    for (word, other) in left.iter_mut().zip(right) {
+        *word |= other;
+    }
+
+    left
+}
+
+/// The set bits as token ids, ascending.
+fn expand<T: Number>(bits: &[u64]) -> Vec<T> {
+    let total: usize = bits.iter().map(|word| word.count_ones() as usize).sum();
+    let mut routes: Vec<T> = Vec::with_capacity(total);
+
+    for (index, &word) in bits.iter().enumerate() {
+        let mut word: u64 = word;
+
+        while word != 0 {
+            let bit: usize = word.trailing_zeros() as usize;
+
+            routes.push(T::from_usize(index * BITS + bit));
+
+            // Clear the lowest set bit and go again.
+            word &= word - 1;
+        }
+    }
+
+    routes
 }
