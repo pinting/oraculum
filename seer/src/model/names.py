@@ -11,17 +11,56 @@ from __future__ import annotations
 # Words an identifier must not spell to be usable as an alias.
 #
 # Only the keywords the generated language can actually emit have to be here
-# for the grammar to stay unambiguous; the rest are listed because an alias
-# that shadows a SQL keyword is a bad alias whether or not seer would trip
-# over it. Keywords are case insensitive, so every spelling of one is
-# excluded at the point of use - see `query.names`.
-KEYWORDS: frozenset[str] = frozenset({
-    "ALL", "AND", "AS", "ASC", "BETWEEN", "BY", "CASE", "CROSS", "DESC",
-    "DISTINCT", "ELSE", "END", "EXISTS", "FROM", "FULL", "GROUP", "HAVING",
-    "IN", "INNER", "IS", "JOIN", "LEFT", "LIKE", "LIMIT", "NOT", "NULL",
-    "OFFSET", "ON", "OR", "ORDER", "OUTER", "RIGHT", "SELECT", "THEN",
-    "UNION", "WHEN", "WHERE", "WITH",
+# for the grammar to stay unambiguous; the rest are here because a statement
+# has to run where it is sent, and a dialect refuses an unquoted alias that
+# spells one of its keywords - SQLite `NOTHING`, PostgreSQL `USER`. So the set
+# is every keyword SQLite knows and every word PostgreSQL reserves, and the
+# grammar's own are among them. Keywords are case insensitive, so every
+# spelling of one is excluded at the point of use - see `query.names`.
+SQLITE_KEYWORDS: frozenset[str] = frozenset({
+    "ABORT", "ACTION", "ADD", "AFTER", "ALL", "ALTER", "ALWAYS", "ANALYZE",
+    "AND", "AS", "ASC", "ATTACH", "AUTOINCREMENT", "BEFORE", "BEGIN",
+    "BETWEEN", "BY", "CASCADE", "CASE", "CAST", "CHECK", "COLLATE", "COLUMN",
+    "COMMIT", "CONFLICT", "CONSTRAINT", "CREATE", "CROSS", "CURRENT",
+    "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "DATABASE",
+    "DEFAULT", "DEFERRABLE", "DEFERRED", "DELETE", "DESC", "DETACH",
+    "DISTINCT", "DO", "DROP", "EACH", "ELSE", "END", "ESCAPE", "EXCEPT",
+    "EXCLUDE", "EXCLUSIVE", "EXISTS", "EXPLAIN", "FAIL", "FILTER", "FIRST",
+    "FOLLOWING", "FOR", "FOREIGN", "FROM", "FULL", "GENERATED", "GLOB",
+    "GROUP", "GROUPS", "HAVING", "IF", "IGNORE", "IMMEDIATE", "IN", "INDEX",
+    "INDEXED", "INITIALLY", "INNER", "INSERT", "INSTEAD", "INTERSECT",
+    "INTO", "IS", "ISNULL", "JOIN", "KEY", "LAST", "LEFT", "LIKE", "LIMIT",
+    "MATCH", "MATERIALIZED", "NATURAL", "NO", "NOT", "NOTHING", "NOTNULL",
+    "NULL", "NULLS", "OF", "OFFSET", "ON", "OR", "ORDER", "OTHERS", "OUTER",
+    "OVER", "PARTITION", "PLAN", "PRAGMA", "PRECEDING", "PRIMARY", "QUERY",
+    "RAISE", "RANGE", "RECURSIVE", "REFERENCES", "REGEXP", "REINDEX",
+    "RELEASE", "RENAME", "REPLACE", "RESTRICT", "RETURNING", "RIGHT",
+    "ROLLBACK", "ROW", "ROWS", "SAVEPOINT", "SELECT", "SET", "TABLE",
+    "TEMP", "TEMPORARY", "THEN", "TIES", "TO", "TRANSACTION", "TRIGGER",
+    "UNBOUNDED", "UNION", "UNIQUE", "UPDATE", "USING", "VACUUM", "VALUES",
+    "VIEW", "VIRTUAL", "WHEN", "WHERE", "WINDOW", "WITH", "WITHOUT",
 })
+
+POSTGRES_RESERVED: frozenset[str] = frozenset({
+    "ALL", "ANALYSE", "ANALYZE", "AND", "ANY", "ARRAY", "AS", "ASC",
+    "ASYMMETRIC", "AUTHORIZATION", "BINARY", "BOTH", "CASE", "CAST",
+    "CHECK", "COLLATE", "COLLATION", "COLUMN", "CONCURRENTLY", "CONSTRAINT",
+    "CREATE", "CROSS", "CURRENT_CATALOG", "CURRENT_DATE", "CURRENT_ROLE",
+    "CURRENT_SCHEMA", "CURRENT_TIME", "CURRENT_TIMESTAMP", "CURRENT_USER",
+    "DEFAULT", "DEFERRABLE", "DESC", "DISTINCT", "DO", "ELSE", "END",
+    "EXCEPT", "FALSE", "FETCH", "FOR", "FOREIGN", "FREEZE", "FROM", "FULL",
+    "GRANT", "GROUP", "HAVING", "ILIKE", "IN", "INITIALLY", "INNER",
+    "INTERSECT", "INTO", "IS", "ISNULL", "JOIN", "LATERAL", "LEADING",
+    "LEFT", "LIKE", "LIMIT", "LOCALTIME", "LOCALTIMESTAMP", "NATURAL", "NOT",
+    "NOTNULL", "NULL", "OFFSET", "ON", "ONLY", "OR", "ORDER", "OUTER",
+    "OVERLAPS", "PLACING", "PRIMARY", "REFERENCES", "RETURNING", "RIGHT",
+    "SELECT", "SESSION_USER", "SIMILAR", "SOME", "SYMMETRIC", "SYSTEM_USER",
+    "TABLE", "TABLESAMPLE", "THEN", "TO", "TRAILING", "TRUE", "UNION",
+    "UNIQUE", "USER", "USING", "VARIADIC", "VERBOSE", "WHEN", "WHERE",
+    "WINDOW", "WITH",
+})
+
+KEYWORDS: frozenset[str] = SQLITE_KEYWORDS | POSTGRES_RESERVED
 
 def qualify(table: str, alias: str) -> str:
     """`"users u"` for an aliased table, `"users"` for a bare one."""

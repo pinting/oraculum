@@ -6,7 +6,7 @@ through `runtime/engine.py`: the kernel notifies seer when a head reaches the
 end of its index, and seer answers with the indexes that may follow.
 
     runtime/          the kernel boundary: drafts, thunks, the engine
-    model/            the schema, names, type classes and operators
+    model/            the schema, names, type classes, operators and functions
     resolution/       projection -> required tables -> join graph
     query/            the virtual table: the data structure of a query, and its stack
     state/            the state machines, apart from the work they trigger
@@ -14,8 +14,8 @@ end of its index, and seer answers with the indexes that may follow.
     grammar/          the SQL SELECT language, clause by clause
     debug.py          state tracing
 
-This module re-exports the public surface; `main.py`, `core.py` and `test.py`
-import from here.
+This module re-exports the public surface; `main.py`, `core.py` and the
+`test` package import from here.
 """
 
 from __future__ import annotations
@@ -59,7 +59,11 @@ from .query import (
     Selection,
     Sources,
     VirtualTable,
-    derive,
+    Expr,
+    Frame,
+    Presentation,
+    SetOperator,
+    Shape,
 )
 from .resolution import (
     JOIN_TYPES,
@@ -101,6 +105,11 @@ __all__ = [
     "EdgeLabel",
     "Engine",
     "Exclusion",
+    "Expr",
+    "Frame",
+    "Presentation",
+    "SetOperator",
+    "Shape",
     "Field",
     "FieldRef",
     "FUNCTIONS",
@@ -142,7 +151,6 @@ __all__ = [
     "Type",
     "TypeClass",
     "classify",
-    "derive",
     "is_comparable",
     "literal_for",
     "operators_for",

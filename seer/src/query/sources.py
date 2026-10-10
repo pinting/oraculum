@@ -6,10 +6,17 @@ entry or a join has to agree with both, and with one more rule neither of them
 can see: a column the projection names bare may be supplied by one placed node
 at most. The algebra already guarantees that between two different tables, but
 two nodes of the *same* table - `users` and `users AS u` - are one variable to
-it, and SQL would still refuse the bare name between them.
+it, and SQL would still refuse the bare name between them. And a node may only
+be placed where the aliases still to come can be placed after it
+(`placement.py`).
 
 Everything that might be offered is filtered by the same test that placing it
 applies, so the grammar never offers a node it would then have to refuse.
+
+A recursive member adds two rules of its own: the definition it reads may be
+placed once at most, and only by inner joins - an outer join could pad the
+recursion with rows it never produced, and both SQLite and PostgreSQL refuse
+one there.
 
 The part is bound to the selection it was opened over, because placing a node
 discharges what the selection demanded; the selection stays the owner.
@@ -20,19 +27,26 @@ from __future__ import annotations
 from typing import Iterable
 
 from ..model import Schema, unqualify
-from ..resolution import Conflicts, JoinType, Neighbor, Relationships
+from ..resolution import JOIN_TYPES, Conflicts, JoinType, Neighbor, Relationships
+from .placement import placeable
 from .selection import Selection
 
 class Sources:
-    __slots__ = ("_schema", "_selection", "_relationships")
+    __slots__ = ("_schema", "_selection", "_relationships", "_join_types")
 
-    def __init__(self, schema: Schema | None = None, selection: Selection | None = None) -> None:
+    def __init__(
+        self,
+        schema: Schema | None = None,
+        selection: Selection | None = None,
+        join_types: tuple[JoinType, ...] = tuple(JOIN_TYPES),
+    ) -> None:
         if schema is None or selection is None:
             return
 
         self._schema = schema
         self._selection = selection
         self._relationships = Relationships(schema, selection.conflicts.get_required_tables())
+        self._join_types: tuple[JoinType, ...] = join_types
 
     def copy(self, selection: Selection) -> "Sources":
         """A copy bound to `selection`, the copy of the one this was bound to."""
@@ -42,6 +56,7 @@ class Sources:
         clone._schema = self._schema
         clone._selection = selection
         clone._relationships = self._relationships.copy()
+        clone._join_types = self._join_types
 
         return clone
 
@@ -54,23 +69,41 @@ class Sources:
 
         return self._relationships.get_used_nodes()
 
+    def nullable(self) -> frozenset[str]:
+        """The placed nodes an outer join may pad with NULLs."""
+
+        return self._relationships.get_nullable_nodes()
+
     def is_satisfied(self) -> bool:
         """Whether everything the projection demanded has been placed."""
 
         return self._conflicts.is_satisfied()
 
-    def _supplies(self, node: str, column: str) -> bool:
-        table = self._schema.tables.get(unqualify(node)[0])
+    def places(self, table: str) -> bool:
+        """Whether a node of `table` has been placed, under any alias."""
 
-        return table is not None and column in table.fields
+        return any(unqualify(node)[0] == table for node in self.nodes())
 
     def _admits(self, node: str) -> bool:
-        """Whether placing `node` leaves every bare column with one supplier."""
+        """Whether placing `node` keeps every rule the clause has.
 
-        return not any(
-            self._supplies(node, column)
-            and any(self._supplies(placed, column) for placed in self.nodes())
-            for column in self._selection.projection.bare_columns()
+        Every bare column keeps one supplier, a table that may be placed once
+        is not placed twice, and the aliases still to come stay placeable.
+        """
+
+        # Placing it has to leave the aliases still to come placeable too, or
+        # the clause would be stuck waiting for a node it could never place.
+        trial: Conflicts = self._conflicts.copy()
+
+        if node in self._conflicts.get_required_tables() and not trial.use_table(node):
+            return False
+
+        return placeable(
+            self._schema,
+            trial,
+            self._selection.bare_columns(),
+            self.nodes() + (node,),
+            self._selection.once,
         )
 
     def entries(self) -> list[str]:
@@ -106,10 +139,15 @@ class Sources:
             if self._admits(neighbor.table)
         )
 
+    def join_types(self) -> tuple[JoinType, ...]:
+        """The kinds of join the clause may write."""
+
+        return self._join_types
+
     def join(self, neighbor: Neighbor, join_type: JoinType) -> bool:
         """Join `neighbor` into the current entry, satisfying it if required."""
 
-        if neighbor not in self.neighbors():
+        if neighbor not in self.neighbors() or join_type not in self._join_types:
             return False
 
         if neighbor.table in self._conflicts.get_required_tables():

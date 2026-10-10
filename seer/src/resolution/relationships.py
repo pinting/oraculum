@@ -23,7 +23,15 @@ from .joins import JoinType, Neighbor, edges
 class Relationships:
     """The FROM clause: pick a required table, then walk the foreign keys."""
 
-    __slots__ = ("_schema", "_graph", "_head", "_used_references", "_used_nodes")
+    __slots__ = (
+        "_schema",
+        "_graph",
+        "_head",
+        "_used_references",
+        "_used_nodes",
+        "_entry",
+        "_nullable",
+    )
 
     def __init__(
         self,
@@ -37,6 +45,8 @@ class Relationships:
         self._head: str | None = None
         self._used_references: tuple[str, ...] = ()
         self._used_nodes: tuple[str, ...] = ()
+        self._entry: tuple[str, ...] = ()
+        self._nullable: frozenset[str] = frozenset()
         self._graph = JoinGraph(edges(schema, required))
 
     def copy(self) -> "Relationships":
@@ -47,6 +57,8 @@ class Relationships:
         clone._head = self._head
         clone._used_references = self._used_references
         clone._used_nodes = self._used_nodes
+        clone._entry = self._entry
+        clone._nullable = self._nullable
 
         return clone
 
@@ -73,12 +85,23 @@ class Relationships:
 
         return self._used_nodes
 
+    def get_nullable_nodes(self) -> frozenset[str]:
+        """The nodes an outer join may have padded with NULLs.
+
+        A `LEFT JOIN` pads the node it brings in, a `RIGHT JOIN` everything
+        the entry held before it, a `FULL JOIN` both. Comma separated entries
+        are a cross product, so a node is only ever padded within its own.
+        """
+
+        return self._nullable
+
     def use_table(self, node: str) -> bool:
         """Open a new FROM entry at `node`, which becomes the head."""
 
         self._head = node
         self._used_references = self._used_references + (sql_name(node),)
         self._used_nodes = self._used_nodes + (node,)
+        self._entry = (node,)
 
         return True
 
@@ -108,7 +131,14 @@ class Relationships:
 
         self._graph.merge_vertices(self._head, neighbor.table)
 
+        if join_type in (JoinType.LEFT, JoinType.FULL):
+            self._nullable = self._nullable | {neighbor.table}
+
+        if join_type in (JoinType.RIGHT, JoinType.FULL):
+            self._nullable = self._nullable | frozenset(self._entry)
+
         self._used_nodes = self._used_nodes + (neighbor.table,)
+        self._entry = self._entry + (neighbor.table,)
 
         if self._used_references:
             joined: str = f"{self._used_references[-1]} {neighbor.format(join_type)}"

@@ -54,6 +54,10 @@ CLASSES: dict[str, TypeClass] = {
     name: kind for kind, names in _NAMES.items() for name in names
 }
 
+# A set of classes a value may have, which is how a position that takes only
+# some of them - a function argument, a side of a comparison - is described.
+Kinds = frozenset[TypeClass]
+
 def classify(type: Type) -> TypeClass:
     """Which class `type` falls in; `UNKNOWN` for a name not listed."""
 

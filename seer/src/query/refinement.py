@@ -13,10 +13,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from ..model import Function, TypeClass
+from ..model import TypeClass
+from .expression import Expr
 from .grouping import Grouping
 from .projection import Projection
-from .relation import Operand, Relation
+from .operand import Operand
+from .relation import Relation
 
 @dataclass(frozen=True)
 class Refinement:
@@ -32,43 +34,53 @@ class Refinement:
 
         return self.relation.get_operands(kind)
 
-    def aggregable(self, function: Function) -> tuple[Operand, ...]:
-        """Columns of the relation `function` may be applied to."""
-
-        return tuple(operand for operand in self.operands() if function.admits(operand.field))
-
     def group_candidates(self) -> tuple[Operand, ...]:
         """Columns that may be grouped on next: every one not grouped yet."""
 
         return tuple(operand for operand in self.operands() if not self.grouping.contains(operand))
 
     def grouped(self, kind: TypeClass | None = None) -> tuple[Operand, ...]:
-        """Every spelling of a grouped column, optionally only of one class."""
+        """Every grouped value: each spelling of a grouped column, and each computed key.
 
-        return tuple(operand for operand in self.operands(kind) if self.grouping.contains(operand))
+        These are what may be written as a whole wherever only grouped values
+        may stand - HAVING, and the ORDER BY of a grouped query.
+        """
 
-    def resolve(self, projection: Projection) -> tuple[Operand | None, ...]:
-        """The projection's plain items, as the relation resolves them."""
-
-        return tuple(
-            self.relation.resolve(item.reference)
-            for item in projection.plain()
-            if item.reference is not None
+        columns: tuple[Operand, ...] = tuple(
+            operand for operand in self.operands(kind) if self.grouping.contains(operand)
+        )
+        computed: tuple[Operand, ...] = tuple(
+            key for key in self.grouping.keys
+            if not key.is_column and (kind is None or key.kind is kind)
         )
 
-    def covers(self, projection: Projection) -> bool:
-        """Whether the grouping keeps every plain item a single value per group."""
+        return columns + computed
 
-        return self.grouping.covers(self.resolve(projection))
+    def key(self, expr: Expr) -> str:
+        """The key an expression of the projection has in this relation."""
+
+        return expr.render(self.relation.key)
+
+    def is_aggregated(self, projection: Projection) -> bool:
+        """Whether the query folds groups: it groups, or it aggregates without grouping."""
+
+        return bool(self.grouping) or projection.has_aggregates()
+
+    def covers(self, projection: Projection) -> bool:
+        """Whether every item is single valued, which is only a question once the query aggregates."""
+
+        if not self.is_aggregated(projection):
+            return True
+
+        return all(self.grouping.covers(item.expr, self.key) for item in projection.items)
 
     # -- writing it -------------------------------------------------------
 
     def filter(self, text: str) -> "Refinement":
         return replace(self, where=self.where + (text,))
 
-    def group(self, text: str) -> "Refinement | None":
-        key: Operand | None = self.relation.resolve(text)
-        grouped: Grouping | None = None if key is None else self.grouping.add(key)
+    def group(self, key: Operand) -> "Refinement | None":
+        grouped: Grouping | None = self.grouping.add(key)
 
         return None if grouped is None else replace(self, grouping=grouped)
 

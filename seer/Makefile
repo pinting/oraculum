@@ -122,7 +122,7 @@ wasm: prerequisites
 	ls -la $(WASM)/*.whl | awk '{printf "  %-58s %10s\n", $$NF, $$5}'
 
 test:
-	$(PYTHON) test.py
+	$(PYTHON) -m test
 
 run:
 	$(PYTHON) main.py
@@ -132,7 +132,7 @@ live:
 	$(PYTHON) main.py --live
 
 clean:
-	@rm -rf __pycache__/ src/__pycache__/ .pytest_cache/
+	@rm -rf __pycache__/ src/__pycache__/ test/__pycache__/ .pytest_cache/
 	rm -rf $(NATIVE) $(WASM)/*.whl
 
 distclean: clean

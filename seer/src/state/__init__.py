@@ -5,11 +5,13 @@
     clause.py         the lifecycle of one SELECT, clause by clause
 """
 
-from .clause import Clause, clause_machine
+from .clause import BODY, PRESENTATION, Clause, clause_machine
 from .machine import Machine, Transitions
 from .statement import Phase, statement_machine
 
 __all__ = [
+    "BODY",
+    "PRESENTATION",
     "Clause",
     "Machine",
     "Phase",

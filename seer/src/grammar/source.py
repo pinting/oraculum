@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from ..context import Context
 from ..model import unqualify
-from ..resolution import JOIN_TYPES, JoinType, Neighbor
+from ..resolution import JoinType, Neighbor
 from ..runtime import Selector, Thunk
 from .combinators import comma, dynamic, lat, ws
 from .selectors import select
@@ -72,7 +72,7 @@ def joins(next: Thunk) -> Thunk:
         options: list[Thunk] = [finish(next)]
 
         for neighbor in ctx.query.sources.neighbors():
-            for join_type in JOIN_TYPES:
+            for join_type in ctx.query.sources.join_types():
                 options.append(ws(join_clause(
                     neighbor,
                     join_type,

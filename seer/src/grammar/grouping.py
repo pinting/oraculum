@@ -1,11 +1,16 @@
 """GROUP BY and HAVING.
 
-    <grouping> := GROUP BY <column> [, <column>]* [HAVING <filters>]
+    <grouping> := GROUP BY <key> [, <key>]* [HAVING <filters>]
+    <key>      := <column> | FN "(" <key> ")"
 
-The keys are columns of the closed relation, each grouped once however it is
-spelled. HAVING is the condition grammar of `conditions.py` over a different
-domain: on the left a grouped column or an aggregate over any column, on the
-right a literal or a grouped column of the same class.
+A key is a value of the closed relation: a column, grouped once however it is
+spelled, or a scalar function over columns, which is a key of its own -
+`GROUP BY LOWER(email)` groups the lower cased addresses, and covers the item
+`LOWER(email)` but not `email`.
+
+HAVING is the condition grammar of `conditions.py` over a different domain: on
+the left a grouped value, a function over grouped values or an aggregate over
+any column, on the right a literal or a grouped value of the same class.
 
 Whether the query may end after its keys is the virtual table's question, and
 it is asked where the query ends, not here.
@@ -13,53 +18,45 @@ it is asked where the query ends, not here.
 
 from __future__ import annotations
 
-from ..context import Context
-from ..model import FUNCTIONS, Function
 from ..query import Operand
 from ..runtime import Selector, Thunk
-from .combinators import branch, comma, dynamic, exp, keyword, lat, ws
+from ..state import Clause
+from .combinators import branch, comma, guard, keyword, lat, ws
 from .conditions import Continuation, Domain, filters
+from .operands import aggregates, operands
 from .selectors import select, step
-from .tokens import LPAREN, NESTING_LIMIT, RPAREN
+from .tokens import EXPRESSION_DEPTH, NESTING_LIMIT
 
 _enter_grouping: Selector = step(lambda ctx: ctx.query.enter_grouping())
 _enter_having: Selector = step(lambda ctx: ctx.query.enter_having())
-_select_key: Selector = select(lambda ctx, matched: ctx.query.use_group_key(matched))
+
+def _select_key(key: Operand) -> Selector:
+    return select(lambda ctx, _matched: ctx.query.use_group_key(key))
 
 def keys(next: Thunk) -> Thunk:
-    """A comma separated list of columns, none of them grouped twice."""
+    """A comma separated list of keys, no column grouped twice."""
 
     fork: Thunk = branch([
         next,
         Thunk.deferred(lambda: comma(keys(next))),
     ])
 
-    return dynamic(lambda ctx: [
-        lat(operand.text, _select_key, fork) for operand in ctx.query.refinement.group_candidates()
-    ])
-
-def _aggregate(function: Function, then: Continuation) -> Thunk:
-    """`FN(<column>)` over every column `function` accepts, continued by `then`."""
-
-    def build(ctx: Context) -> list[Thunk]:
-        arguments: list[Thunk] = [
-            lat(operand.text, None, exp(RPAREN, None, then(operand.aggregated(function))))
-            for operand in ctx.query.refinement.aggregable(function)
-        ]
-
-        if function.star:
-            arguments.append(lat("*", None, exp(RPAREN, None, then(Operand.star(function)))))
-
-        return arguments
-
-    return lat(function.name, None, exp(LPAREN, None, dynamic(build)))
+    return operands(
+        lambda ctx: ctx.query.refinement.group_candidates(),
+        lambda ctx: ctx.query.refinement.operands(),
+        None,
+        lambda key: (_select_key(key), fork),
+        EXPRESSION_DEPTH,
+    )
 
 def _having_left(then: Continuation) -> Thunk:
-    grouped: Thunk = dynamic(lambda ctx: [
-        lat(operand.text, None, then(operand)) for operand in ctx.query.refinement.grouped()
-    ])
+    continued = lambda operand: (None, then(operand))
+    grouped = lambda ctx: ctx.query.refinement.grouped()
 
-    return branch([grouped, *(_aggregate(function, then) for function in FUNCTIONS)])
+    return branch([
+        operands(grouped, grouped, None, continued, EXPRESSION_DEPTH),
+        aggregates(lambda ctx: ctx.query.refinement.operands(), None, continued, EXPRESSION_DEPTH),
+    ])
 
 HAVING: Domain = Domain(
     left=_having_left,
@@ -68,7 +65,10 @@ HAVING: Domain = Domain(
 )
 
 def having_clause(next: Thunk) -> Thunk:
-    return keyword("HAVING", _enter_having, ws(filters(HAVING, next, NESTING_LIMIT)))
+    return guard(
+        lambda ctx: ctx.query.can_enter(Clause.HAVING),
+        keyword("HAVING", _enter_having, ws(filters(HAVING, next, NESTING_LIMIT))),
+    )
 
 def grouping_clause(next: Thunk) -> Thunk:
     """An optional `GROUP BY <keys> [HAVING <filters>]` before `next`."""
@@ -77,5 +77,8 @@ def grouping_clause(next: Thunk) -> Thunk:
 
     return branch([
         next,
-        keyword("GROUP", None, ws(lat("BY", _enter_grouping, ws(grouped)))),
+        guard(
+            lambda ctx: ctx.query.can_enter(Clause.GROUPING),
+            keyword("GROUP", None, ws(lat("BY", _enter_grouping, ws(grouped)))),
+        ),
     ])

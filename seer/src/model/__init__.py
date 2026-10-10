@@ -11,11 +11,29 @@ from .names import (
     sql_name,
     unqualify,
 )
-from .functions import ARGUMENT_KINDS, FUNCTIONS, Function, function_names
+from .functions import (
+    AGGREGATES,
+    CAST,
+    COALESCE,
+    COUNT,
+    FUNCTIONS,
+    NUMERIC,
+    RANKINGS,
+    SCALARS,
+    Function,
+    Nulls,
+    Role,
+    function_names,
+)
 from .operators import (
     BINARY_OPERATORS,
+    LITERAL_CLASSES,
+    LITERAL_TYPES,
     LITERALS,
+    NULLITY,
+    Arity,
     Operator,
+    comparisons,
     is_comparable,
     is_nullable,
     literal_for,
@@ -23,17 +41,30 @@ from .operators import (
 )
 from .parser import parse_schema
 from .schema import Field, Reference, Schema, Table, Type
-from .types import TypeClass, classify
+from .types import Kinds, TypeClass, classify
 
 __all__ = [
-    "ARGUMENT_KINDS",
+    "AGGREGATES",
+    "CAST",
+    "COALESCE",
+    "COUNT",
     "FUNCTIONS",
+    "NUMERIC",
+    "RANKINGS",
+    "SCALARS",
     "Function",
+    "Nulls",
+    "Role",
     "function_names",
     "BINARY_OPERATORS",
     "KEYWORDS",
+    "LITERAL_CLASSES",
+    "LITERAL_TYPES",
     "LITERALS",
+    "NULLITY",
+    "Arity",
     "Field",
+    "Kinds",
     "Operator",
     "Reference",
     "Schema",
@@ -42,6 +73,7 @@ __all__ = [
     "TypeClass",
     "classify",
     "column_name",
+    "comparisons",
     "is_comparable",
     "is_nullable",
     "literal_for",

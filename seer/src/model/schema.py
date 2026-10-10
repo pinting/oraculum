@@ -12,7 +12,7 @@ so this module is the data alone.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterator
 
 @dataclass(frozen=True)
@@ -52,6 +52,14 @@ class Field:
     exports, and nothing for a value computed from others. A foreign key
     points at an origin, which is what lets a join follow a column through
     any number of derived tables."""
+
+    def optional(self) -> "Field":
+        """The column as the padded side of an outer join sees it: maybe NULL.
+
+        It stops being a key too, since a key is never NULL.
+        """
+
+        return replace(self, is_nullable=True, is_primary_key=False)
 
 @dataclass
 class Table:

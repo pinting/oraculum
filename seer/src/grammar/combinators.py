@@ -7,6 +7,7 @@ already been selected.
 
 from __future__ import annotations
 
+import functools
 from typing import Callable, Sequence
 
 from ..context import Context
@@ -70,8 +71,13 @@ def keyword(word: str, selector: Selector, next: Thunk) -> Thunk:
 
     return ws(lat(word, selector, next))
 
-def exclusions(exclusion: Exclusion) -> list[IndexDraft]:
-    """One draft per reserved name, each matching every spelling it is refused in."""
+@functools.cache
+def exclusions(exclusion: Exclusion) -> tuple[IndexDraft, ...]:
+    """One draft per reserved name, each matching every spelling it is refused in.
+
+    Memoised: an exclusion is a value, and the few the grammar asks for are
+    asked for at every name it offers.
+    """
 
     drafts: list[IndexDraft] = [
         IndexDraft.expression(insensitive(word)) for word in sorted(exclusion.forbidden)
@@ -84,7 +90,7 @@ def exclusions(exclusion: Exclusion) -> list[IndexDraft]:
         for word in sorted(exclusion.respellings)
     )
 
-    return drafts
+    return tuple(drafts)
 
 def name(reserved: Callable[[Context], Exclusion], selector: Selector, next: Thunk) -> Thunk:
     """Match a name someone invents: an identifier that spells nothing else.

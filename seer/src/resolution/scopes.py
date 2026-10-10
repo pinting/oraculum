@@ -36,6 +36,23 @@ class Scopes:
     def __contains__(self, alias: str) -> bool:
         return alias in self._scopes
 
+    def open(self) -> list[tuple[str, frozenset[str]]]:
+        """Every alias not placed yet, with the tables it may still be, sorted."""
+
+        return [
+            (alias, resolver.get_required_tables())
+            for alias, resolver in sorted(self._scopes.items())
+            if not resolver.is_satisfied()
+        ]
+
+    def candidates(self, scope: str, field: str, kinds: Kinds | None = None) -> frozenset[str]:
+        """The tables `scope` could be after selecting `field` in it."""
+
+        resolver: Scope | None = self._scopes.get(scope)
+        owners: frozenset[str] = self._index.owners(field, kinds)
+
+        return owners if resolver is None else resolver.get_required_tables() & owners
+
     def use_field(self, scope: str, field: str, kinds: Kinds | None = None) -> bool:
         """Narrow the alias by `field`, creating the scope on first use."""
 

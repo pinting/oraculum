@@ -3,14 +3,21 @@
     <filters>   := <predicate> [(AND | OR) <predicate>]*
     <predicate> := [NOT] (<condition> | "(" <filters> ")")
     <condition> := <operand> <operator> <operand | literal>
+                 | <operand> [NOT] BETWEEN <operand | literal> AND <operand | literal>
+                 | <operand> [NOT] IN "(" <literal> [, <literal>]* ")"
                  | <operand> IS [NOT] NULL
 
 The shape is the same wherever conditions are written; what differs is which
 operands a clause may name, and that is a `Domain`. The domain emits the left
-operand - it may take several tokens - and hands each one it produced to the
-continuation, which is where the operator choices open. The type never enters
-the context: an operand knows its own `Field`, so the restriction rides in the
-continuation the way a join clause carries its `Neighbor`.
+operand - it may take several tokens, `LOWER(email)` - and hands each one it
+produced to the continuation, which is where the operator choices open. The
+type never enters the context: an operand knows its own `Field`, so the
+restriction rides in the continuation the way a join clause carries its
+`Neighbor`.
+
+A condition is recorded once written whole, on its last token. Where it took
+more than one value - the bounds of a `BETWEEN`, the list of an `IN` - the
+values before the last are set aside in the context's capture until then.
 """
 
 from __future__ import annotations
@@ -19,10 +26,10 @@ from dataclasses import dataclass
 from typing import Callable, Sequence
 
 from ..context import Context
-from ..model import Operator, TypeClass, classify, literal_for, operators_for
-from ..query.relation import Operand
+from ..model import Arity, Operator, TypeClass, classify, literal_for, operators_for
+from ..query import Operand
 from ..runtime import Selector, Thunk
-from .combinators import branch, dynamic, exp, lat, ws
+from .combinators import branch, comma, dynamic, exp, keyword, lat, ws
 from .selectors import select
 from .tokens import LPAREN, RPAREN
 
@@ -41,10 +48,15 @@ class Domain:
     record: Callable[[Context, str], bool]
     """Commit a condition once it has been written whole."""
 
-def _select_condition(domain: Domain, text: Callable[[str], str]) -> Selector:
-    return select(lambda ctx, matched: domain.record(ctx, text(matched)))
+Text = Callable[[Context, str], str]
 
-def right_side(domain: Domain, left: Operand, operator: Operator, next: Thunk) -> Thunk:
+def _record(domain: Domain, text: Text) -> Selector:
+    return select(lambda ctx, matched: domain.record(ctx, text(ctx, matched)))
+
+_capture: Selector = select(lambda ctx, matched: ctx.capture(matched))
+_append: Selector = select(lambda ctx, matched: ctx.append(matched))
+
+def opposite(domain: Domain, left: Operand, selector: Selector, next: Thunk) -> Thunk:
     """What may stand opposite `left`: a column of its class, or a literal.
 
     This is the whole of the restriction. `left` was fixed by the caller, so
@@ -53,45 +65,72 @@ def right_side(domain: Domain, left: Operand, operator: Operator, next: Thunk) -
     the class has one. A class with no pattern, and `UNKNOWN` above all, is
     comparable to columns only.
 
-    The matched text *is* the right hand side, whether that was a column
-    spelling or a literal, so one selector covers both.
+    The matched text *is* the value, whether that was a column spelling or a
+    literal, so one selector covers both.
     """
 
     kind: TypeClass = classify(left.field.type)
-    commit: Selector = _select_condition(domain, lambda matched: f"{left.text} {operator} {matched}")
     pattern: str | None = literal_for(kind)
 
     def build(ctx: Context) -> list[Thunk]:
         options: list[Thunk] = [
-            lat(right.text, commit, next)
+            lat(right.text, selector, next)
             for right in domain.right(ctx, kind)
-            # Comparing a column with itself says nothing, however it is spelled.
-            if not left.same_column(right)
+            # Comparing a value with itself says nothing, however it is spelled.
+            if not left.same_value(right)
         ]
 
         if pattern is not None:
-            options.append(exp(pattern, commit, next))
+            options.append(exp(pattern, selector, next))
 
         return options
 
     return dynamic(build)
 
-def operator_choices(domain: Domain, left: Operand, next: Thunk) -> Thunk:
-    """The operators `left`'s type admits, each carrying its right hand side.
+def listed(domain: Domain, left: Operand, operator: Operator, next: Thunk) -> Thunk:
+    """`( <literal> [, <literal>]* )`, recorded on the closing bracket."""
 
-    A unary operator ends the condition, so it takes the selector itself; a
-    binary one defers that to whatever `right_side` offers.
+    pattern: str | None = literal_for(classify(left.field.type))
+
+    assert pattern is not None, f"{operator} offered over a class with no literals"
+
+    closing: Thunk = exp(RPAREN, _record(domain, lambda ctx, _m: f"{left.text} {operator} ({ctx.captured})"), next)
+
+    def more() -> Thunk:
+        return branch([closing, comma(exp(pattern, _append, Thunk.deferred(more)))])
+
+    return exp(LPAREN, None, exp(pattern, _capture, Thunk.deferred(more)))
+
+def operator_choices(domain: Domain, left: Operand, next: Thunk) -> Thunk:
+    """The operators `left`'s type admits, each carrying what stands on its right.
+
+    A unary operator ends the condition, so it takes the selector itself; the
+    others defer it to the last value they are followed by.
     """
 
     options: list[Thunk] = []
 
     for operator in operators_for(left.field):
-        if operator.is_unary:
-            commit: Selector = _select_condition(domain, lambda _m, o=operator: f"{left.text} {o}")
+        arity: Arity = operator.arity
+
+        if arity is Arity.UNARY:
+            commit: Selector = _record(domain, lambda _ctx, _m, o=operator: f"{left.text} {o}")
 
             options.append(lat(str(operator), commit, next))
+        elif arity is Arity.BINARY:
+            commit = _record(domain, lambda _ctx, matched, o=operator: f"{left.text} {o} {matched}")
+
+            options.append(lat(str(operator), None, ws(opposite(domain, left, commit, next))))
+        elif arity is Arity.RANGE:
+            commit = _record(
+                domain,
+                lambda ctx, matched, o=operator: f"{left.text} {o} {ctx.captured} AND {matched}",
+            )
+            upper: Thunk = keyword("AND", None, ws(opposite(domain, left, commit, next)))
+
+            options.append(lat(str(operator), None, ws(opposite(domain, left, _capture, upper))))
         else:
-            options.append(lat(str(operator), None, ws(right_side(domain, left, operator, next))))
+            options.append(lat(str(operator), None, ws(listed(domain, left, operator, next))))
 
     return branch(options)
 
