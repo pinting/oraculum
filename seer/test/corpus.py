@@ -36,7 +36,10 @@ def read_records(path: Path) -> list[Record]:
     """The corpus, flattened, every query tagged with its group."""
 
     with open(path, "r", encoding="utf-8") as handle:
-        groups: object = yaml.safe_load(handle)
+        try:
+            groups: object = yaml.safe_load(handle)
+        except yaml.YAMLError as error:
+            raise RuntimeError(f"{path}: {error}") from error
 
     if not isinstance(groups, list):
         raise RuntimeError(f"{path}: expected a list of groups")

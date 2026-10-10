@@ -13,9 +13,12 @@ and what the query around it does with the result, and both are handed to the
 context when the subquery opens (`Context.begin_subquery`): the closing
 bracket hands the result back and the grammar resumes where the caller said,
 the way a call returns to its caller. The opening bracket is the caller's to
-write, since `IN (` opens a list of literals just as well.
+write, since `IN (` opens a list of literals just as well; where it opens
+nothing else, `bracketed` writes it.
 
-Every subquery is offered only while the nesting limit leaves room for it.
+Every subquery is offered only while the nesting limit leaves room for it,
+and so is a bracket that opens nothing but one - otherwise the bracket would
+be offered at the limit and lead nowhere.
 """
 
 from __future__ import annotations
@@ -24,9 +27,9 @@ from ..context import Commit
 from ..query import Purpose
 from ..runtime import Selector, Thunk
 from . import statement as statements
-from .combinators import dynamic, guard, lat, ws
+from .combinators import dynamic, exp, guard, lat, ws
 from .selectors import select, step
-from .tokens import RPAREN
+from .tokens import LPAREN, RPAREN
 
 _end: Selector = step(lambda ctx: ctx.end_subquery())
 _resume: Thunk = dynamic(lambda ctx: [ctx.resumed])
@@ -49,3 +52,8 @@ def subquery(purpose: Purpose, resume: Thunk, commit: Commit | None = None) -> T
     begin: Selector = select(lambda ctx, _matched: ctx.begin_subquery(purpose, resume, commit))
 
     return guard(lambda ctx: ctx.can_open_subquery(), lat("SELECT", begin, Thunk.deferred(body)))
+
+def bracketed(purpose: Purpose, resume: Thunk, commit: Commit | None = None, opening: str = LPAREN) -> Thunk:
+    """`( SELECT ... )`, where the bracket opens nothing but the subquery."""
+
+    return guard(lambda ctx: ctx.can_open_subquery(), exp(opening, None, subquery(purpose, resume, commit)))

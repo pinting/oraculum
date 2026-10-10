@@ -194,5 +194,14 @@ RANKINGS: tuple[Function, ...] = (DENSE_RANK, RANK, ROW_NUMBER)
 
 FUNCTIONS: tuple[Function, ...] = AGGREGATES + SCALARS + RANKINGS
 
+# The classes a value folding a group into one can have: what an aggregate
+# produces, or every class it accepts where it keeps its argument's. A scalar
+# over an aggregate adds none, so nothing of another class - a boolean, a
+# binary value - can ever be one row of a whole query.
+AGGREGATED: Kinds = frozenset().union(*(
+    frozenset({function.kind}) if function.kind is not None else (function.accepts(0) or frozenset())
+    for function in AGGREGATES
+))
+
 def function_names() -> frozenset[str]:
     return frozenset(f.name for f in FUNCTIONS)

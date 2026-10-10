@@ -47,6 +47,15 @@ EMSCRIPTEN_VERSION        ?= 5.0.3
 # again; the default keeps it inside the tree so `make distclean` can take it.
 PYODIDE_XBUILDENV_PATH    ?= $(REPO_ROOT)/seer/.xbuildenv
 
+# -- the tools ----------------------------------------------------------------
+
+# The PostgreSQL `make -C seer postgres` runs statements in. pgserver ships the
+# server binaries as a wheel, but none for Python 3.14, so it gets an
+# interpreter of its own.
+POSTGRES_PYTHON_VERSION   ?= 3.12.14
+PGSERVER_VERSION          ?= 0.1.4
+PSYCOPG_VERSION           ?= 3.3.6
+
 # The only thing the built page fetches from anywhere but its own directory -
 # the Pyodide distribution is far too large to vendor into a git repository.
 PYODIDE_CDN               ?= https://cdn.jsdelivr.net/pyodide/v$(PYODIDE_VERSION)/full

@@ -22,8 +22,8 @@ from ..query import Operand
 from ..runtime import Selector, Thunk
 from ..state import Clause
 from .combinators import branch, comma, guard, keyword, lat, ws
-from .conditions import Continuation, Domain, filters
-from .operands import aggregates, operands
+from .conditions import Continuation, Domain, Right, comparable, filters
+from .operands import aggregates, offers, operands
 from .selectors import select, step
 from .tokens import EXPRESSION_DEPTH, NESTING_LIMIT
 
@@ -36,31 +36,32 @@ def _select_key(key: Operand) -> Selector:
 def keys(next: Thunk) -> Thunk:
     """A comma separated list of keys, no column grouped twice."""
 
+    candidates = lambda ctx: ctx.query.refinement.group_candidates()
+    arguments = lambda ctx: ctx.query.refinement.operands()
+
+    # Every column may have been grouped already, with nothing left that a
+    # function could be applied to.
     fork: Thunk = branch([
         next,
-        Thunk.deferred(lambda: comma(keys(next))),
+        guard(offers(candidates, arguments, None, EXPRESSION_DEPTH), Thunk.deferred(lambda: comma(keys(next)))),
     ])
 
-    return operands(
-        lambda ctx: ctx.query.refinement.group_candidates(),
-        lambda ctx: ctx.query.refinement.operands(),
-        None,
-        lambda key: (_select_key(key), fork),
-        EXPRESSION_DEPTH,
-    )
+    return operands(candidates, arguments, None, lambda key: (_select_key(key), fork), EXPRESSION_DEPTH)
+
+_having_right: Right = lambda ctx, kind: ctx.query.refinement.grouped(kind) + ctx.query.correlated(kind)
 
 def _having_left(then: Continuation) -> Thunk:
     continued = lambda operand: (None, then(operand))
     grouped = lambda ctx: ctx.query.refinement.grouped() + ctx.query.correlated()
 
     return branch([
-        operands(grouped, grouped, None, continued, EXPRESSION_DEPTH),
+        operands(comparable(_having_right, grouped), grouped, None, continued, EXPRESSION_DEPTH),
         aggregates(lambda ctx: ctx.query.refinement.operands(), None, continued, EXPRESSION_DEPTH),
     ])
 
 HAVING: Domain = Domain(
     left=_having_left,
-    right=lambda ctx, kind: ctx.query.refinement.grouped(kind) + ctx.query.correlated(kind),
+    right=_having_right,
     record=lambda ctx, text: ctx.query.use_filter(text),
 )
 

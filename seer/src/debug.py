@@ -12,6 +12,7 @@ than one per speculative expansion.
 
 from __future__ import annotations
 
+import functools
 import sys
 import threading
 from typing import Any, Callable, TextIO
@@ -43,7 +44,8 @@ def trace(operation: str, state: Any) -> None:
     """Print `state` under a heading naming the operation that produced it.
 
     `state` is rendered lazily, so nothing is formatted while tracing is off -
-    which matters because `Root.__str__` runs a sympy simplification.
+    which matters because `Root.__str__` renders the running product in
+    disjunctive normal form.
     """
 
     if not _enabled:
@@ -67,10 +69,11 @@ def traced(operation: Callable[..., str]):
     `operation` receives the same arguments as the method and returns the label
     for the heading, so a trace says what was applied and not merely which
     method ran. It is evaluated *before* the call, because a method may consume
-    the state the label describes - `use_field` clears the open namespace.
+    the state the label describes - `use_column` consumes the open qualifier.
     """
 
     def decorate(method):
+        @functools.wraps(method)
         def wrapper(self, *args, **kwargs):
             label: str | None = operation(self, *args, **kwargs) if _enabled else None
 
@@ -80,10 +83,6 @@ def traced(operation: Callable[..., str]):
                 trace(label, self)
 
             return result
-
-        wrapper.__name__ = method.__name__
-        wrapper.__doc__ = method.__doc__
-        wrapper.__wrapped__ = method
 
         return wrapper
 

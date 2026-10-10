@@ -9,9 +9,11 @@
 //! and thrown away. So the edges live in an immutable `Base` that every copy
 //! shares, and the whole of the mutable state is one array behind an `Arc`.
 //!
-//!     copy            two reference count bumps, no allocation
-//!     merge_vertices  one clone of an array of `u32`, then a linear pass
-//!     edges           the class members' base incidence, mapped through it
+//! ```text
+//! copy            two reference count bumps, no allocation
+//! merge_vertices  one clone of an array of `u32`, then a linear pass
+//! edges           the class members' base incidence, mapped through it
+//! ```
 
 use rustc_hash::FxHashMap as HashMap;
 use std::sync::Arc;

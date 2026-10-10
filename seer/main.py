@@ -4,7 +4,7 @@ import argparse
 import sys
 
 import core
-from core import EOS_ID, SCHEMA, VOCABULARY_PATH, get_schema, init_engine, set_schema
+from core import EOS_ID, VOCABULARY_PATH
 from src import DraftKind, Engine, debug
 
 ROUTE_LIMIT: int = 100
@@ -125,12 +125,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     return parser.parse_args(argv)
 
+def use_schema(path: str | None) -> bool:
+    """Point `core` at the schema `--schema` names, or at `schema.sql`."""
+
+    try:
+        core.set_schema(core.SCHEMA if path is None else core.load_schema(path))
+    except OSError as error:
+        print(f"Failed to load schema: {error}", file=sys.stderr)
+
+        return False
+
+    return True
+
 def run_interactive(args: argparse.Namespace) -> int:
-    if args.schema is not None:
-        with open(args.schema, "r", encoding="utf-8") as handle:
-            core.set_schema(handle.read())
-    else:
-        core.set_schema(SCHEMA)
+    if not use_schema(args.schema):
+        return 1
 
     try:
         raw_vocabulary: bytes = core.load_vocabulary(args.vocabulary)
@@ -217,7 +226,8 @@ def run_live(args: argparse.Namespace) -> int:
     from processor import LogitsProcessor
     from vocabulary import serialize_vocabulary
 
-    set_schema(SCHEMA)
+    if not use_schema(args.schema):
+        return 1
 
     try:
         from llama_cpp import Llama, LogitsProcessorList
@@ -250,10 +260,10 @@ def run_live(args: argparse.Namespace) -> int:
         print(f"Driving the head pool on {args.threads} kernel workers")
 
     try:
-        engine: Engine = init_engine(
+        engine: Engine = core.init_engine(
             raw_vocabulary_bytes,
             args.eos_id,
-            get_schema(),
+            core.get_schema(),
             args.threads,
         )
     except RuntimeError as error:
@@ -269,7 +279,7 @@ def run_live(args: argparse.Namespace) -> int:
     vocab_size: int = model.n_vocab()
     processor: LogitsProcessor = LogitsProcessor(vocab_size)
 
-    prompt: str = f"{get_schema()}\n\n{args.prompt}"
+    prompt: str = f"{core.get_schema()}\n\n{args.prompt}"
     prompt_tokens: list[int] = model.tokenize(prompt.encode("utf-8"))
 
     print("Generating response...\n")

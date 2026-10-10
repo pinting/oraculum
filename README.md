@@ -57,6 +57,8 @@ Each project builds itself, from its own directory:
 cd seer
 make build       # seer and the kernel, natively
 make test        # the corpus, one character at a time, then run in SQLite
+make fuzz        # random walks through the graph, checked and run in SQLite
+make postgres    # the corpus and the walks, run in PostgreSQL
 make run         # interactive: the graph offers tokens, you pick one
 make live        # the same, with a model doing the picking
 make wasm        # the same kernel, cross compiled to WebAssembly
@@ -277,7 +279,7 @@ and `comments`, so it leaves both open until something else decides between
 them. A name drops out once nothing that could supply it is left: after
 `SELECT id, title` the root `id` has to come from exactly one source and
 `title` has pinned that source to `posts`, so `users` is out and `first_name`
-is no longer offered. Section 6a is how that is computed.
+is no longer offered. Section 6.1 is how that is computed.
 
 **The FROM clause:** One or more entries, comma separated, each a table
 optionally renamed by `AS`. Only tables the projection actually requires are
@@ -312,7 +314,7 @@ INNER JOIN comments AS c ON posts.id = c.post_id;
 
 A renamed source answers to its alias everywhere afterwards and to nothing
 else, so `FROM users AS u` makes the join `ON u.id = posts.user_id`, never
-`ON users.id`. Section 6c is the graph this walks.
+`ON users.id`. Section 6.3 is the graph this walks.
 
 **The WHERE clause:** Optional and written against the relation the FROM
 clause produced: every column of every source it placed, joined or not.
@@ -332,8 +334,8 @@ WHERE created_at < published_at;
 
 A column's type fixes which operators it may take and what may stand on the
 other side of them, which is what makes `created_at < published_at` a statement
-about two timestamps and `email = users.id` no statement at all. Sections 6d
-and 6e are the relation and this gating.
+about two timestamps and `email = users.id` no statement at all. Sections 6.4
+and 6.5 are the relation and this gating.
 
 Conditions combine with `AND` and `OR`, take a `NOT` in front and nest three
 brackets deep:
@@ -385,7 +387,7 @@ SELECT email, n FROM users INNER JOIN c ON users.id = c.user_id WHERE n > 1;
 
 Every name a definition introduces, its own and its columns', is reserved
 from then on, in every spelling, since SQL hears `T` and `t` as one name.
-Section 6f is the grouping, 6g the stack definitions build and 6h the names it reserves.
+Section 6.6 is the grouping, 6.7 the stack definitions build and 6.8 the names it reserves.
 
 A column list names the columns instead, so the body needs no names of its
 own, only as many items as the list has names:
@@ -463,9 +465,9 @@ A value is one row of one column, so its query aggregates and does not group.
 A derived table is read through its alias, and has to export what the
 projection already read off it.
 
-Section 6i is how expressions are written before the FROM clause exists, 6j
-the placement rule aliases add to it, 6k sorting, 6l compounds and
-recursion, and 6m subqueries.
+Section 6.9 is how expressions are written before the FROM clause exists, 6.10
+the placement rule aliases add to it, 6.11 sorting, 6.12 compounds and
+recursion, and 6.13 subqueries.
 
 Two things have to be true of every statement the system produces. It has to be **grammatical**: a well-formed word or phrase. It also has to be **meaningful**: something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
 
@@ -757,7 +759,7 @@ Entering SOURCE builds the join graph and leaving it builds the relation; leavin
 
 The statement has a machine of its own one level up, `PREAMBLE -> DECLARATION -> DEFINITION -> PREAMBLE -> ... -> MAIN`, which only says which query is open: a definition is declared (its name, its column list) and then opened at the `SELECT` of its body. A compound query runs one clause machine per member, each ended by the set operator that opens the next. Both machines are tables of legal moves and nothing else: what a move builds is the virtual table's business, so the lifecycle can be read without the work getting in the way.
 
-#### 6a. Root fields: exactly one, as a polynomial
+#### 6.1 Root fields: exactly one, as a polynomial
 
 Write $t_1, \ldots, t_n$ for the tables, each a variable that is $1$ when the table is in the FROM clause. Selecting a root field constrains those variables and the constraint is a Boolean function.
 
@@ -812,7 +814,7 @@ Two of those lines need care. The last one ranges over the variables $P$ still m
 
 Idempotence earns its keep. Selecting `body` and then `user_id`, both living in exactly `{comments, posts}`, leaves $P = c + p$ unchanged, because $(c+p)^2 = c+p$: the second field adds no information and the algebra says so with no special case. Naming a table is substitution: setting $u = 1$ discharges the demand of every constraint mentioning it. What is left is rarely the constant $1$. Selecting `body` and then naming `posts` leaves $P = c + 1$, which goes on forbidding `comments`, yet its value at the origin is $1$ and that evaluation is what satisfaction tests.
 
-#### 6b. Aliased fields: intersection
+#### 6.2 Aliased fields: intersection
 
 An alias denotes **exactly one** table and cannot be two things at once, which removes all the cross-talk the ring was needed for. `Scope` is then a plain intersection:
 
@@ -822,7 +824,7 @@ An alias denotes **exactly one** table and cannot be two things at once, which r
 
 A selection that would empty $\mathit{cand}$ is refused outright and leaves it untouched, so $\emptyset$ never means contradiction: it is what naming the table produces and it is exactly the condition for the scope being satisfied. `Scopes` is the registry of them, reporting an aliased table as the scoped node `"users u"` so that `users` and `users u` stay distinguishable downstream. `Conflicts` is the facade over both halves.
 
-#### 6c. The FROM clause: graph contraction
+#### 6.3 The FROM clause: graph contraction
 
 Once the fields are chosen, the required tables have to be **connected**. `Relationships` builds a multigraph whose vertices are the tables (together with aliased nodes like `"users u"`) and whose edges are the foreign keys, each labelled with the column pair it joins on.
 
@@ -858,183 +860,72 @@ a dropped loop needs no handling: an edge whose far end is in the same
 class as its near end is simply not reported.
 ```
 
-#### 6d. The WHERE clause: closing the clause makes it a table
+#### 6.4 The WHERE clause: closing the clause makes it a table
 
-The three structures above all run the same way round. Fields are chosen first
-and the tables follow: the polynomial says which FROM clauses are still
-consistent, the scopes say what each alias may still be, the join graph says
-how to connect what is left. Everything is a constraint waiting to be
-discharged.
+Sections 6.1 to 6.3 run forwards: fields are chosen first and the tables follow. A filter runs the other way. Once `WHERE` is taken the FROM clause is finished, so what a condition may name is no longer a constraint to be solved but a fixed set: the **relation**, every column of every node the clause placed, whether the node came in as an entry or through a join.
 
-A filter runs the other way. By the time the `WHERE` keyword is taken the FROM
-clause is finished and what a condition may name is no longer something to be
-solved: it is a set. Call it the **virtual table**: every column of every node
-the clause placed, whether that node arrived as a static entry or was contracted
-in by a join. A filter cannot tell the two apart, which is exactly what a join
-means.
-
-So there is a second phase boundary, on the `WHERE` keyword, of the same shape
-as the first on `FROM`. And closing the clause turns the two things SQL leaves
-to a resolver into counting problems:
+The relation is built once, when SOURCE is left, and two counting rules decide how each of its columns may be written:
 
 ```math
 \begin{aligned}
-\text{Scoped}(source, col) &= \text{name}(source)\texttt{.}col && \text{always available} \\
-\text{Root}(col) &\text{ is allowed} \iff \big|\{\, source \in \text{FROM} : col \in source \,\}\big| = 1 && \text{SQL's ambiguity rule}
+\text{Scoped}(n, col) &= \text{name}(n)\texttt{.}col && \text{always} \\
+\text{Root}(col) &\text{ is allowed} \iff \big|\{\, n \in \text{FROM} : col \in n \,\}\big| = 1 && \text{SQL's ambiguity rule}
 \end{aligned}
 ```
 
-with $\text{name}(source)$ the alias where the source carries one and the table
-name otherwise, which is the same function the `ON` clause is written from.
-`users INNER JOIN posts` offers `users.id` and `posts.id` but no root `id`,
-while `email` is offered root because one source supplies it. Note what the second line
-is quantified over: the sources of *this clause* rather than the tables of the
-schema. `title` lives on two tables, yet it is unambiguous in any clause that
-names only one of them.
+$\text{name}(n)$ is the alias where the node has one and the table name otherwise, the same name the `ON` clause is written with. After `FROM users INNER JOIN posts` the relation offers `users.id` and `posts.id` but no bare `id`, while `email` is offered bare because only `users` has it. The count runs over the nodes of this clause, not over the schema: `body` lives on both `posts` and `comments`, yet `FROM posts` alone may write it bare.
 
-#### 6e. Conditions: the type rides in the continuation
+An outer join can pad a node with NULLs, so every column of a padded node is nullable in the relation, whatever the schema says about it.
 
-On top of the virtual table sits the restriction proper. Every column carries a
-`Type` the schema parser has always produced and nothing ever read; the
-condition grammar is the first consumer. Types are partitioned into six
-classes (numeric, text, temporal, boolean, binary, plus `UNKNOWN` for a name
-the parser did not recognise) and the class of the left operand fixes the two
-things a condition still has open: which operator may follow it and what may
-stand on the other side of that operator.
+Nothing written after the FROM clause changes it: the polynomial and the join graph are frozen once SOURCE is left, whether `WHERE`, `GROUP BY` or the end of the body comes next.
 
-```math
-\begin{aligned}
-\text{Operators}(col) &= \text{OpsFor}(\text{class of } col) \;\cup\; \{\,\texttt{IS NULL}, \texttt{IS NOT NULL}\,\} \text{ if } col \text{ is nullable} \\
-\text{RightSide}(col) &= \{\, \text{other } col_2 : \text{class}(col_2) = \text{class}(col) \,\} \;\cup\; \text{Literal}(\text{class of } col)
-\end{aligned}
-```
+#### 6.5 Conditions: the type rides in the continuation
 
-One branch per class, with the right hand side following from the same choice:
+Every column carries the `Type` the schema parser read and conditions are where it is used. Types fall into six classes and the class of the left operand decides which operators may follow it:
 
-```mermaid
-graph LR
-    col(["column"]) -->|"numeric"| n_ops["= != < <= > >="]
-    col -->|"text"| t_ops["= != < <= > >= LIKE NOT LIKE"]
-    col -->|"temporal"| d_ops["= != < <= > >="]
-    col -->|"boolean"| b_ops["= !="]
-    col -->|"nullable"| null_ops["IS NULL, IS NOT NULL"]
-
-    n_ops --> rhs_n["number or same-class column"]
-    t_ops --> rhs_t["string or same-class column"]
-    d_ops --> rhs_d["timestamp or same-class column"]
-    b_ops --> rhs_b["TRUE / FALSE or same-class column"]
-
-    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
-    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
-    class col accent
-    class n_ops,t_ops,d_ops,b_ops,null_ops,rhs_n,rhs_t,rhs_d,rhs_b plain
-```
-
-Ordering belongs to the classes that have an order, matching to text alone and
-equality to all of them. Nullability cuts across the classes instead of
-forming one, adding `IS NULL` and `IS NOT NULL` on top of whatever the column
-already allows. Those two are also the only operators that end a condition by
-themselves. Spelled out over the SQL types the schema parser reads:
-
-| type | operators | literal | example |
+| class | types | operators | literal |
 |---|---|---|---|
-| `BIGINT`, `INT`, `DECIMAL`, ... | `=` `!=` `<` `<=` `>` `>=` | `-?[0-9]+(\.[0-9]+)?` | `users.id >= -1` |
-| `VARCHAR`, `TEXT`, `CHAR`, ... | `=` `!=` `<` `<=` `>` `>=` `LIKE` `NOT LIKE` | `'...'` | `email LIKE '%keyword%'` |
-| `TIMESTAMP`, `DATE`, `TIME`, ... | `=` `!=` `<` `<=` `>` `>=` | `'2024-01-31 12:30:00'` | `created_at > '2024-01-31'` |
-| `BOOLEAN`, `BIT` | `=` `!=` | `TRUE`, `FALSE` | `verified != FALSE` |
-| `BLOB`, `BYTEA`, unrecognised | `=` `!=` | none, columns only | |
-| any of them, where nullable | `IS NULL`, `IS NOT NULL` | | `published_at IS NULL` |
+| numeric | `BIGINT`, `INT`, `DECIMAL`, ... | `=` `!=` `<` `<=` `>` `>=` `[NOT] BETWEEN` `[NOT] IN` | `-?[0-9]+(\.[0-9]+)?` |
+| text | `VARCHAR`, `TEXT`, `CHAR`, ... | the numeric ones, `LIKE` `NOT LIKE` | `'[^']*'` |
+| temporal | `TIMESTAMP`, `DATE`, `TIME`, ... | the numeric ones | `'2024-01-31'`, `'2024-01-31 12:30:00'` |
+| boolean | `BOOLEAN`, `BIT` | `=` `!=` | `TRUE`, `FALSE` |
+| binary | `BLOB`, `BYTEA`, ... | `=` `!=` | none |
+| unknown | a type the parser does not recognise | `=` `!=` | none |
 
-`UNKNOWN` is a class rather than a wildcard, so a type nobody recognised
-compares to nothing but another of its kind: a refusal is the safe direction
-to be wrong in. Values are left out entirely. $\text{Literal}$ is a *pattern*,
-one per class, so the literal column above gives a shape and the example beside
-it one word that shape admits; what a literal spells inside it is its own
-business. That is the whole of what typed means here.
+A nullable column also takes `IS NULL` and `IS NOT NULL`, the only operators that end a condition by themselves. A primary key is never nullable, whether or not it was written `NOT NULL`.
 
-None of this is state. The virtual table is: it depends on what the FROM
-clause committed to, so it is built at the boundary and copied per branch like
-everything else. The type stays outside the context. By the time a condition's
-alternatives are enumerated its left operand is already fixed, so the class is
-a constant of the continuation, in the same way the `ON` columns are a constant
-of the join clause that carries them. Nothing about types is ever asked of the
-context.
+What stands on the right of an operator is a literal of the class, or another value of the same class that the clause may name, but never the left value itself. `=`, `!=` and the orderings may also compare with a scalar subquery (6.13). `BETWEEN` takes two such values and `IN` a list of literals or a subquery.
 
-```
-NOTE: Why the conditions cost nothing extra
+A literal is a pattern: it fixes the shape and never the value, so `'2024-99-99'` is a temporal literal as far as the grammar is concerned. A class without a literal is compared with columns of the same class only. A binary or unknown column with no such column opposite it takes no operator other than the `IS NULL` pair, and a column that takes no operator at all is not offered as the left operand.
 
-The latent model is not modified.
+The type is never stored in the context. When the operators are offered the left operand is already written, so its class is a constant of the continuation, the same way the `ON` columns are constants of the join clause that carries them.
 
-The frontier inside a WHERE clause is one head per column of the virtual
-table, not one per column and operator pair: the operand lattice is
-emitted once and its operators open only behind it, so choosing the
-column is what prunes them.
+#### 6.6 Aggregates and grouping: typed fields and coverage
 
-The indexes themselves are built once per schema and then shared. An
-operand is a constant, so it is a lattice; a literal is one expression
-per class, so a second pass over the same registry builds nothing at
-all.
-```
-
-#### 6f. Aggregates and grouping: typed fields and coverage
-
-An aggregate's argument is a field like any other, so it constrains the tables
-the way 6a does, with one more condition: the column has to be of a class the
-function accepts. Write $T(f)$ for the tables carrying a field and $T_K(f)$ for
-those carrying it with a class in $K$. The argument has to come from one of
-$T_K(f)$, and the other owners may not be in the clause at all, or the bare
-name would be ambiguous between them:
+An aggregate's argument is a field like any other, so it constrains the tables the way 6.1 does, with one more condition: the column has to be of a class the function accepts. Write $T(f)$ for the tables that have a field $f$ and $T_K(f)$ for those where it is of a class in $K$. The argument has to come from one of $T_K(f)$ and the other owners may not be in the clause at all, or the bare name would be ambiguous between them:
 
 ```math
 C_K(f) \;=\; C\bigl(T_K(f)\bigr) \cdot \prod_{t \,\in\, T(f) \setminus T_K(f)} (1 + t)
 ```
 
-$(1 + t)$ is the polynomial that is $1$ exactly when $t$ is absent, so the
-product forbids the owners of the wrong class outright. When every owner
-qualifies the product is empty and $C_K(f) = C(f)$. One table of these is built
-per class set a position asks for (numeric for `SUM` and `AVG`, ordered for
-`MIN` and `MAX`, text for `LOWER`), the first time one asks and shared from
-then on, and an aliased argument intersects with $T_K(f)$ instead.
+$(1 + t)$ is $1$ exactly when $t$ is absent. When every owner qualifies the product is empty and $C_K(f) = C(f)$. One set of these constraints is built for each class set a position asks for (numeric for `SUM` and `AVG`, ordered for `MIN` and `MAX`, text for `LOWER`), the first time it is asked for. An aliased argument intersects its scope with $T_K(f)$ instead.
 
-An aggregate is also a column: its function maps the argument's `Field` to the
-`Field` it produces, `COUNT` to a number that is never NULL, `MAX(created_at)`
-to a timestamp that may be. That is what HAVING compares, through exactly the
-operator gating of 6e, and what a definition exports.
+An aggregate is also a column. Its function maps the argument's `Field` to the `Field` it produces: `COUNT` to a number that is never NULL, `MAX(created_at)` to a timestamp that may be. This is what HAVING compares, with the operators of 6.5, and what a definition exports.
 
-Grouping is written against the closed relation, so a key is a value of it
-rather than a spelling: a column, or a scalar function over columns. Every
-value has a **key** that two spellings of it share - a column is keyed by the
-node supplying it, a call by its function and its arguments' keys - and an
-item of the projection renders to the same keys once the relation resolves
-its columns. Coverage is then a recursive question about values:
+Grouping is written against the relation, so a key is a value of it: a column or a scalar function over columns. Every value has a **key** that all of its spellings share. A column is keyed by the node that supplies it, so `email` and `users.email` have one key, and a call is keyed by its function and the keys of its arguments. Once the relation is closed the items of the projection resolve to the same keys, and coverage becomes a recursive question about values:
 
 ```math
 \text{covered}(v) \iff \text{key}(v) \in \text{keys} \;\lor\; v \text{ is an aggregate or a constant}
 \;\lor\; \bigl(v \text{ is not a column} \land \forall\, c \in \text{children}(v) : \text{covered}(c)\bigr)
 ```
 
-and a query that aggregates (it groups, or an item holds an aggregate) may only
-leave its body once every item is covered. `LOWER(email)` is covered by
-`GROUP BY email` because its child is; `email` is not covered by
-`GROUP BY LOWER(email)`, being a column whose key is not grouped; and a window
-is no aggregate, so its arguments and keys have to be covered like any value of
-the row. It is asked in one place only, where the body would be left, so the
-terminator, the `ORDER BY` and the `LIMIT` of an uncovered projection are
-simply not on offer until its keys cover it.
+A query that aggregates, because it groups or because an item holds an aggregate, may only leave its body once every item is covered. `LOWER(email)` is covered by `GROUP BY email` because its child is. `email` is not covered by `GROUP BY LOWER(email)`, because it is a column and its key is not grouped. A window is not an aggregate, so its arguments and keys need covering like any other value of the row. The check is done where the body is left, so the terminator, `ORDER BY`, `LIMIT`, a set operator and a closing bracket are not offered until every item is covered.
 
-One more rule appears here because the FROM clause can no longer be read off
-the polynomial alone: two nodes of one table, `users` and `users AS u`, are one
-variable to the algebra, yet a bare projected column would be ambiguous
-between them. Placing a node checks that every bare column keeps one supplier,
-and the same check filters what is offered, so the grammar never offers a node
-it would have to refuse. Section 6j is the rest of that rule.
+Two nodes of one table, `users` and `users AS u`, are one variable to the algebra, yet a bare column would be ambiguous between them. Placing a node therefore checks that every bare column keeps a single supplier, and the same check filters what is offered (6.10).
 
-#### 6g. WITH: a stack of virtual tables
+#### 6.7 WITH: a stack of virtual tables
 
-A definition is a query of its own, and once it closes it is a table. So a
-statement with definitions is a stack: each definition is a virtual table
-written over everything defined before it and pushed under whatever comes
-next.
+A definition is a query of its own and once it closes it is a table. A statement with definitions is a stack: each definition is written over everything defined before it and the main query over all of them.
 
 ```mermaid
 graph LR
@@ -1048,89 +939,40 @@ graph LR
     class main accent
 ```
 
-Every virtual table holds the stack below it as a `Catalog`, and the catalog
-folds the stack into the two things a query needs: one schema holding the
-physical tables and every export below them, and the reserved names of every
-layer. Every resolver of 6a to 6f then runs over that schema unchanged, which
-is the point. A derived table is a `Table` like any the schema declared: the
-algebra gets one more variable, the join graph one more vertex, the relation
-one more source.
+Every virtual table holds the stack below it as a `Catalog`. The catalog folds the stack into the two things a query needs: one schema with the physical tables and every definition below, and the reserved names of every layer (6.8). The resolvers of 6.1 to 6.6 run over that schema unchanged. A definition is a `Table` like any the schema declared: the algebra gets one more variable, the join graph one more vertex and the relation one more source.
 
-What a definition exports is read off its projection and its closed relation
-the moment it closes: one column per item, by output name. A plain column
-keeps its type, its nullability and its foreign key, and it keeps its
-**origin**, the schema column it is. A foreign key matches its target by
-origin rather than by table name, so the edge from `posts.user_id` to
-`users(id)` reaches the `id` of any definition that projected `users.id`, and
-a definition that projected `posts.user_id` still joins `users`. An aggregate
-has no origin, being a computed value, so nothing joins through it.
+When a definition closes it exports one column per item, under the item's output name. A plain column keeps its type, its nullability, its foreign key and its **origin**, the schema column it is. A foreign key matches its target by origin rather than by table name, so the key from `posts.user_id` to `users(id)` reaches the `id` of any definition that projected `users.id`, and a definition that projected `posts.user_id` still joins `users`. A computed value has no origin, so nothing joins through it.
 
-A closed virtual table never changes, so the stack is persistent: pushing
-builds a new catalog over the old one, and every branch of the syntax graph
-shares the layers below the query it is writing.
+A closed virtual table never changes, so the stack is persistent. Pushing a definition builds a new catalog over the old one, and every branch of the syntax graph shares the layers below the query it is writing.
 
-#### 6h. Reserved names: every spelling, at every level
+#### 6.8 Reserved names: every spelling, at every level
 
-An invented name is an identifier minus a reserved set (section 4), and the set
-is assembled from the stack. Its base is the same for every name: keywords,
-the function names, and every table and column any layer defines. The keywords
-are not only the grammar's own: a statement has to run where it is sent, and
-a dialect refuses an unquoted alias spelling one of its keywords (SQLite
-`NOTHING`, PostgreSQL `USER`), so the set is every keyword SQLite knows and
-every word PostgreSQL reserves. On top of it each use adds what the query has
-introduced itself:
+An invented name is an identifier minus a reserved set (section 4) and the set is assembled from the stack. Its base is the same for every name: the keywords, the function names and every table and column any layer defines. The keywords are not only the grammar's own. A statement has to run where it is sent and a dialect refuses an unquoted alias that spells one of its keywords (SQLite `NOTHING`, PostgreSQL `USER`), so the set holds every keyword SQLite knows and every word PostgreSQL reserves. On top of the base, each use adds what the query has introduced itself:
 
 | the name being invented | may additionally not be |
 |---|---|
-| an alias, `u.` in the projection | an output alias; another spelling of an alias already opened |
-| an output name, `AS n` | another output name, any alias |
+| an alias, `u.` in the projection | an output name; an alias already opened, unless it is written exactly as before |
+| an output name, `AS n` | another output name; any alias |
 | a definition, `WITH c` | anything the stack defines, earlier definitions included |
-| a column of a definition's list, `WITH c(a, b)` | the definition's name, another name of the list |
+| a column of a definition's list, `WITH c(a, b)` | the definition's name; another name of the list |
 | anything inside a definition | the definition's own name |
+| anything inside a subquery | an alias or output name of the queries around it |
 
-SQL compares unquoted identifiers ignoring case, so each reserved name is
-excluded by a case-insensitive pattern rather than by the spelling it was
-written in: `USERS` is the table, `Select` is the keyword, and two definitions
-called `T` and `t` collide. The one name that may be written again is an alias
-already opened, which is the same scope written twice, and only exactly as it
-was written: its exclusion is every case of it minus that one spelling, a
-difference nested inside the group's own difference.
+SQL compares unquoted identifiers ignoring case, so each reserved name is excluded by a case-insensitive pattern: `USERS` is the table, `Select` is the keyword and two definitions called `T` and `t` collide. An alias that is already open may be written again, since it is the same scope, but only where it still has a column to offer and only in the spelling it was opened with. Its exclusion is every case of it minus that one spelling, a difference nested inside the group's own difference.
 
-#### 6i. Expressions: written before the FROM clause exists
+#### 6.9 Expressions: written before the FROM clause exists
 
-The projection is written before anything says which table a column comes
-from, so an expression cannot be typed the way a condition is. What it can be
-is constrained: every value is written at a **position** that says which
-classes it may have, how deep calls may still nest, and whether an aggregate or
-a window may stand there. `LOWER(` writes its argument at a text position, so a
-column there is demanded with $C_{\{\text{text}\}}(f)$ of 6f, and only columns
-some table can supply as text are on offer.
+The projection is written before anything says which table a column comes from, so an item cannot be typed the way a condition is. It can be constrained instead. Every value is written at a **position** that says which classes it may have, how many calls may still nest inside it, whether an aggregate or a window may stand there and whether it reads the row, is a constant or has to hold an aggregate. `LOWER(` writes its argument at a text position, so a column there is demanded with $C_{\{\text{text}\}}(f)$ of 6.6 and only columns some table can supply as text are offered. A function is only offered where something can be written inside it: an item of a scalar subquery has to hold an aggregate, so a function is offered there only while an aggregate still fits inside it.
 
-A value's class is either fixed by its shape (`LOWER(...)` is text, `id + 1`
-numeric, `COUNT(*)` numeric) or follows other values (`MAX(x)` is whatever `x`
-is, `COALESCE(x, y)` whatever both are), down to the columns, which are the only
-thing still open. That gives every value a **narrowing**: the columns that have
-to be of a class for the value to be. A value written where its class was free
-is narrowed when something asks for one, by demanding its columns again under
-the narrower class:
+A value's class is either fixed by its shape (`LOWER(...)` is text, `id + 1` and `COUNT(*)` are numeric) or follows other values (`MAX(x)` has the class of `x`, `COALESCE(x, y)` the class of both), down to the columns, which are the only thing still open. That gives every value a **narrowing**: the columns that have to be of a class for the value to be of it. A value written where its class was free is narrowed when something asks for one, by demanding its columns again under the narrower class:
 
 ```math
 P \;\leftarrow\; P \cdot C_K(f) \qquad\text{and}\qquad C(f) \cdot C_K(f) = C_K(f)
 ```
 
-since $C_K(f)$ implies $C(f)$. So `id + ` narrows `id` to numeric at the `+`, and a
-comparison inside a `CASE` narrows its left side to the class it compares in.
-The operator is only offered where the narrowed product is still non-zero, so
-it never opens onto a value nothing could be.
+since $C_K(f)$ implies $C(f)$. `id + ` narrows `id` to numeric at the `+`, and a comparison inside a `CASE` narrows its left side to the class it compares in. The operator is only offered where the narrowed product is still non-zero.
 
-The tree itself is never stored half built. Every emitter takes a
-continuation that is handed the finished value, so each branch of the graph
-carries the part it has written in the closures ahead of it, and the virtual
-table learns of an item only when it is complete. That moment is not the
-item's last token, because a value does not know it is finished: `id` may yet
-become `id + 1`. It is the separator after it - the comma, or the whitespace
-before `AS` or `FROM` - and both readings live on as separate heads until the
-next character tells them apart:
+The tree of a value is never stored half built. Every emitter takes a continuation that is handed the finished value, so each branch of the graph carries what it has written in the closures ahead of it and the virtual table learns of an item only when it is complete. The item's last token is not that moment, because `id` may still become `id + 1`. The moment is the separator after it, the comma or the whitespace before `AS` or `FROM`, and both readings live on as separate heads until the next character tells them apart:
 
 ```mermaid
 graph LR
@@ -1145,38 +987,22 @@ graph LR
     class tail accent
 ```
 
-What the separator may be is decided before the item is committed: an item of
-a definition with no name of its own, or with one another item already goes
-by, is only offered `AS`. After the FROM clause the same functions are written
-over the closed relation, where every column has a type, so there they are
-typed as written and a call over columns is an operand like a column is.
+What the separator may be is decided before the item is committed. An item of a definition that has no name of its own, or whose name another item already has, is only offered `AS`. After the FROM clause the same functions are written over the relation, where every column has a type, so they are typed as they are written and a call over columns is an operand just like a column.
 
-#### 6j. Placement: aliases are nodes too
+#### 6.10 Placement: aliases are nodes too
 
-The algebra decides which tables the bare columns need and each alias scope
-which table its alias may be. What neither sees is the rule SQL applies across
-both: a bare column has exactly one supplier among the nodes of the FROM
-clause, and every alias is a node that will be placed. So
-`SELECT email, u.first_name` leaves exactly one FROM clause, `users AS u`
-alone: a bare `users` beside it would make `email` ambiguous. And
-`SELECT id, title, u.email` leaves none at all: `title` needs `posts`, `u.email`
-needs `users`, and both supply `id`.
+The algebra decides which tables the bare columns need and each alias scope decides which table its alias may be. Neither sees the rule SQL applies across both: a bare column has exactly one supplier among the nodes of the FROM clause, and every alias is a node that will be placed. `SELECT email, u.first_name` leaves exactly one FROM clause, `users AS u` alone, because a bare `users` beside it would make `email` ambiguous. `SELECT id, title, u.email` leaves none: `title` needs `posts`, `u.email` needs `users` and both supply `id`.
 
-**Placeability** is the question whether a FROM clause can still be written:
-is there a table for every alias not placed yet, and a set of the tables the
-algebra still requires, such that no bare column has two suppliers among them
-and the nodes already placed, and the product holds with all of them present?
-The search is exhaustive and small, a handful of candidate tables per alias
-and a handful more the algebra needs. The projection offers a column only
-where the answer stays yes, a new alias only where some column would, and the
-FROM clause places a node only where it does, so a statement is never written
-into a corner it cannot leave: not into a dead end, and not into a FROM clause
-waiting forever for a node it could never place.
+**Placeability** asks whether a FROM clause can still be written: is there a table for every alias not placed yet and a set of the tables the algebra still requires, so that no bare column has two suppliers among them and the nodes already placed, and the product holds with all of them present? Two facts keep the search small, however many aliases are open:
 
-#### 6k. Sorting: what the result can still be sorted by
+- Where an alias may still be a derived table (6.13), being one is its best option. A derived table supplies no bare column and asserts nothing to the algebra, so whatever a real table would let the rest of the clause complete with, a derived table would too. Where every alias may be derived, only the algebra is left to ask.
+- Otherwise each alias is given one of its tables in turn, and what the rest of the search can still do depends only on the set of tables given so far. A set that failed once is not tried again.
 
-`ORDER BY` and `LIMIT` are written once the body is complete, against its
-result. What a key may be depends on what the result is:
+The projection offers a column only where the answer stays yes, a new alias only where some column would, and the FROM clause places a node only where it does. A statement is never written into a FROM clause that waits for a node it can never place.
+
+#### 6.11 Sorting: what the result can still be sorted by
+
+`ORDER BY` and `LIMIT` are written once the body is complete, against its result. What a key may be depends on what the result is:
 
 | the result | may be sorted by |
 |---|---|
@@ -1185,38 +1011,17 @@ result. What a key may be depends on what the result is:
 | `SELECT DISTINCT` | its output names |
 | a compound | the output names of its first member |
 
-An output name is only on offer where exactly one item goes by it, since a
-name two items share is ambiguous; outside a compound only where it is an `AS`
-alias or names, bare, the very column it comes from, since SQLite reads any
-other name as a column of the relation; and it is written as a whole, never
-inside a function: PostgreSQL reads `ORDER BY e` as the output `e` but `UPPER(e)` as a
-column that does not exist. A value sorted by once is not offered again,
-however it is spelled, and the `ORDER BY` itself is only offered where
-something is left to sort by.
+An output name is only offered where exactly one item goes by it, since a name two items share is ambiguous. Outside a compound it also has to be an `AS` alias, or a bare column name that still means the column it came from, because SQLite reads any other name as a column of the relation. An output name is always written whole and never inside a function: PostgreSQL reads `ORDER BY e` as the output `e`, but `UPPER(e)` as a column that does not exist.
 
-#### 6l. Compounds and recursion: siblings, and a layer read before it closes
+A column or output already sorted by is not offered again, however it is spelled. `ORDER BY`, and the comma before each further key, are only offered while something is left to sort by. `LIMIT` and `OFFSET` take a count each, `OFFSET` only after `LIMIT`.
 
-The members of a compound are siblings, not a stack: each is a query of its
-own over the same catalog, none reads another. What ties them is their result.
-The first member fixes a **shape**, its arity and each column's class, and
-every member after it is written under that shape: its items are offered at
-positions of the classes the first member produced, and `FROM` only once it has
-as many. A definition's column list is a shape too, of arity alone.
+#### 6.12 Compounds and recursion: siblings, and a layer read before it closes
 
-The compound's result is its members' merged: named by the first, NULL wherever
-any member may be, and keeping a lineage only where the members agree on whose
-values they hold. A column that is `users.id` in one member and `posts.user_id`
-(a key pointing at `users.id`) in the next holds user ids either way, so it
-stays joinable from every key that points at users; one that is `users.id` in
-one member and `posts.id` in the next holds nothing in particular, and nothing
-joins through it.
+The members of a compound are siblings, not a stack: each is a query of its own over the same catalog and none of them reads another. What ties them together is their result. The first member fixes a **shape**, its arity and the class of each column, and every later member is written under it: its items are offered at positions of those classes and `FROM` only once it has as many. A definition's column list is a shape too, of arity alone.
 
-A recursive definition reads itself before it is closed, which a stack of
-closed layers cannot express. So the catalog a recursive member is written over
-carries one **provisional** table besides its layers: the definition as the
-members before it export it. It is in the member's schema and reserved names
-like any table, but it is no layer, so the definition is pushed onto the stack
-without it once it closes:
+The compound's result merges the members' results. It takes the names of the first member, it is NULL wherever any member may be, and it keeps a lineage only where the members agree on whose values a column holds. A column that is `users.id` in one member and `posts.user_id` (a key pointing at `users.id`) in the next holds user ids either way, so it stays joinable from every key that points at `users`. A column that is `users.id` in one member and `posts.id` in the next holds nothing in particular, and nothing joins through it.
+
+A recursive definition reads itself before it is closed, which a stack of closed layers cannot express. The catalog a recursive member is written over therefore carries one **provisional** table besides its layers: the definition as the members before it export it. It is in the member's schema and reserved names like any table, but it is not a layer, so once the definition closes it is pushed onto the stack without it:
 
 ```mermaid
 graph LR
@@ -1230,22 +1035,11 @@ graph LR
     class rec accent
 ```
 
-A member that may read the definition is one that follows a union in a
-`WITH RECURSIVE` statement, and it has to stay what both SQLite and PostgreSQL
-accept as a recursive term: no aggregate, window or `DISTINCT`, no grouping or
-sorting, the definition placed once at most and by inner joins only, and,
-once it is placed, no further set operator.
+A member may read the definition when it follows a `UNION` or `UNION ALL` inside a definition of a `WITH RECURSIVE` statement. It has to stay what both SQLite and PostgreSQL accept as a recursive term: no aggregate, window or `DISTINCT`, no grouping or sorting, inner joins only, the definition placed at most once and, once it is placed, no further set operator.
 
-#### 6m. Subqueries: a call stack of virtual tables
+#### 6.13 Subqueries: a call stack of virtual tables
 
-A subquery is a virtual table like any other, written inside another one
-while that one waits. So beside the stack of closed layers (6g) the context
-keeps a second, shorter one: the **calls**, the queries suspended while a
-subquery inside them is written, innermost last. Each call remembers two
-things - where the grammar resumes once the subquery closes, and what the
-query around it does with the result - so one subquery grammar, built once,
-serves every place a subquery may stand, the way a return address lets one
-function serve every caller:
+A subquery is a virtual table like any other, written inside another one while that one waits. Besides the stack of closed layers (6.7) the context keeps a second, shorter stack: the **calls**, the queries suspended while a subquery inside them is written, innermost last. Each call remembers where the grammar resumes once the subquery closes and what the query around it does with the result. One subquery grammar, built once, serves every place a subquery may stand:
 
 ```mermaid
 graph LR
@@ -1259,30 +1053,20 @@ graph LR
     class sub accent
 ```
 
-Where a subquery stands decides what it owes, its **purpose**, which becomes
-its contract the way a definition's frame does:
+Where a subquery stands decides what it has to produce, its **purpose**, which becomes its contract the same way a definition's frame does:
 
 | purpose | must produce |
 |---|---|
 | a value, `x = (…)` | one column of `x`'s class and one row: every item aggregates, nothing is grouped |
 | the list of an `IN` | one column of the left side's class |
 | an `EXISTS` | anything |
-| a derived table, `(…) AS d` | every column the projection read off `d`, of the class it read it as, and no name the projection uses bare |
+| a derived table, `(…) AS d` | every column the projection read off `d`, of the class it was read as, and no name the projection uses bare |
 
-The last is the left-to-right problem in miniature: the projection names
-`d.user_id` before anything says what `d` is. So an alias may turn out to be a
-derived table wherever one may still be opened, which keeps every column some
-table has on offer to it, and the derived table that stands in for it later
-is written under a contract listing exactly what was read. Being a derived
-table is one more candidate in the placement search of 6j, and a clash-free
-one, since it supplies no bare column.
+A value has to fold the whole query into one row, so it can only be of a class an aggregate produces: numeric, text or temporal. A boolean, binary or unknown value is never compared with a subquery.
 
-A subquery inside a condition reads what is typed around it: the closed
-relation of a WHERE, the grouped columns of a HAVING, and whatever the queries
-around those expose in turn - always qualified, and never a name its own FROM
-clause shadows. One in the projection or the FROM clause reads nothing around
-it: the projection is written before there is anything to read, and a derived
-table has no LATERAL to read its neighbours with. Subqueries nest two deep.
+A derived table is the hard case, because the projection names `d.user_id` before anything says what `d` is. Wherever a derived table may still be opened an alias may turn out to be one, so every column some table has stays on offer to it, and the derived table that later stands in for it is written under a contract listing exactly what was read. In the placement search of 6.10 it is one more candidate, and one that never clashes, since it supplies no bare column.
+
+A subquery inside a condition reads the columns that are typed around it: the relation of a WHERE, the grouped columns of a HAVING, and whatever the queries around those expose in turn. It reads them qualified only, and never under a name its own FROM clause shadows. A subquery in the projection or in the FROM clause reads nothing around it: the projection is written before there is anything to read, and a derived table has no `LATERAL` to read its neighbours with. Subqueries nest two deep, and at that depth neither a subquery nor a bracket that could only open one is offered.
 
 ## License
 

@@ -15,6 +15,12 @@ WASM   := $(OUT)/wasm
 # between them, and both gitignored.
 TOOLCHAIN := .toolchain
 
+# The interpreter `tools/postgres.py` runs under, with the server it starts.
+POSTGRES := .postgres
+
+# What `make fuzz` walks besides the corpus's own schema.
+FUZZ_SCHEMAS := tools/schemas/harsh.sql tools/schemas/mixed.sql
+
 KERNEL := $(CURDIR)/../kernel
 
 export PATH := $(CURDIR)/$(VENV)/bin:$(PATH)
@@ -25,7 +31,7 @@ REQUIREMENTS := \
 	sqlglot==$(SQLGLOT_VERSION) \
 	pyyaml==$(PYYAML_VERSION)
 
-.PHONY: prerequisites kernel build wasm test run live clean distclean
+.PHONY: prerequisites kernel build wasm test fuzz postgres run live clean distclean
 
 prerequisites:
 	@command -v $(UV) > /dev/null || { echo "Error: $(UV) is not installed"; exit 1; }
@@ -124,6 +130,47 @@ wasm: prerequisites
 test:
 	$(PYTHON) -m test
 
+# Random walks over the corpus's schema and the harder ones in tools/schemas,
+# each checked for routes that lead nowhere and run in SQLite. Every schema is
+# walked even when one fails, and the run fails if any did.
+fuzz:
+	@status=0
+
+	$(PYTHON) -m tools.fuzz || status=1
+
+	for SCHEMA in $(FUZZ_SCHEMAS); do
+		$(PYTHON) -m tools.fuzz --schema "$$SCHEMA" || status=1
+	done
+
+	exit $$status
+
+# The legal records of the corpus, and whatever `make fuzz` wrote, run in
+# PostgreSQL - see tools/postgres.py.
+postgres:
+	@command -v $(UV) > /dev/null || { echo "Error: $(UV) is not installed"; exit 1; }
+
+	if [ ! -x "$(POSTGRES)/bin/python" ]; then
+		echo ">> creating $(POSTGRES) with Python $(POSTGRES_PYTHON_VERSION)"
+		$(UV) venv "$(POSTGRES)" --python $(POSTGRES_PYTHON_VERSION) -q
+		$(UV) pip install -q --python "$(POSTGRES)/bin/python" \
+			pgserver==$(PGSERVER_VERSION) "psycopg[binary]==$(PSYCOPG_VERSION)" pyyaml==$(PYYAML_VERSION)
+	fi
+
+	status=0
+
+	$(POSTGRES)/bin/python tools/postgres.py test/cases.yaml \
+		$$(ls $(OUT)/fuzz/schema.jsonl 2> /dev/null) || status=1
+
+	for SCHEMA in $(FUZZ_SCHEMAS); do
+		FUZZED="$(OUT)/fuzz/$$(basename "$$SCHEMA" .sql).jsonl"
+
+		if [ -f "$$FUZZED" ]; then
+			$(POSTGRES)/bin/python tools/postgres.py --schema "$$SCHEMA" --data - "$$FUZZED" || status=1
+		fi
+	done
+
+	exit $$status
+
 run:
 	$(PYTHON) main.py
 
@@ -132,11 +179,11 @@ live:
 	$(PYTHON) main.py --live
 
 clean:
-	@rm -rf __pycache__/ src/__pycache__/ test/__pycache__/ .pytest_cache/
-	rm -rf $(NATIVE) $(WASM)/*.whl
+	@rm -rf __pycache__/ src/__pycache__/ test/__pycache__/ tools/__pycache__/ .pytest_cache/
+	rm -rf $(NATIVE) $(WASM)/*.whl $(OUT)/fuzz
 
 distclean: clean
-	@rm -rf $(VENV) $(TOOLCHAIN)
+	@rm -rf $(VENV) $(TOOLCHAIN) $(POSTGRES)
 
 	case "$(PYODIDE_XBUILDENV_PATH)" in
 		$(CURDIR)/*) rm -rf "$(PYODIDE_XBUILDENV_PATH)" ;;

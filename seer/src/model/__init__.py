@@ -13,6 +13,7 @@ from .names import (
     unqualify,
 )
 from .functions import (
+    AGGREGATED,
     AGGREGATES,
     CAST,
     COALESCE,
@@ -47,6 +48,7 @@ from .schema import Field, Reference, Schema, Table, Type
 from .types import Kinds, TypeClass, classify
 
 __all__ = [
+    "AGGREGATED",
     "AGGREGATES",
     "CAST",
     "COALESCE",

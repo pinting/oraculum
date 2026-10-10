@@ -15,7 +15,7 @@ from ..query import Operand
 from ..runtime import Selector, Thunk
 from ..state import Clause
 from .combinators import branch, comma, exp, guard, keyword, lat, ws
-from .operands import aggregates, operands
+from .operands import aggregates, offers, operands
 from .selectors import select, step
 from .tokens import COUNT, EXPRESSION_DEPTH
 
@@ -33,10 +33,16 @@ def _direct(direction: str) -> Selector:
 def order_keys(next: Thunk) -> Thunk:
     """A comma separated list of sort keys, each with an optional direction."""
 
+    candidates = lambda ctx: ctx.query.presentation.candidates()
+    arguments = lambda ctx: ctx.query.presentation.arguments()
+    more = offers(candidates, arguments, None, EXPRESSION_DEPTH)
+
+    # Another key is only offered while something is left to sort by: an
+    # aggregate always is, a value of the result only until each is used.
     fork: Thunk = branch([
         next,
         guard(
-            lambda ctx: not ctx.query.presentation.is_exhausted(),
+            lambda ctx: ctx.query.presentation.aggregates or more(ctx),
             Thunk.deferred(lambda: comma(order_keys(next))),
         ),
     ])
@@ -47,13 +53,7 @@ def order_keys(next: Thunk) -> Thunk:
     then = lambda key: (_sort(key), directed)
 
     return branch([
-        operands(
-            lambda ctx: ctx.query.presentation.candidates(),
-            lambda ctx: ctx.query.presentation.arguments(),
-            None,
-            then,
-            EXPRESSION_DEPTH,
-        ),
+        operands(candidates, arguments, None, then, EXPRESSION_DEPTH),
         guard(
             lambda ctx: ctx.query.presentation.aggregates,
             aggregates(lambda ctx: ctx.query.refinement.operands(), None, then, EXPRESSION_DEPTH),

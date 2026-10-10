@@ -75,16 +75,21 @@ class Feeder:
 
         return self._ids[character]
 
-    def feed(self, query: str) -> Outcome:
-        """Walk `query` one character at a time through a fresh engine."""
+    def engine(self) -> Engine:
+        """A fresh engine at the start of a statement, over the shared indexes."""
 
-        engine: Engine = Engine(
+        return Engine(
             self.vocabulary,
             Context(self.schema),
             self.grammar,
             factory=self.factory,
             threads=self.threads,
         )
+
+    def feed(self, query: str) -> Outcome:
+        """Walk `query` one character at a time through a fresh engine."""
+
+        engine: Engine = self.engine()
 
         for consumed, character in enumerate(query):
             token_id: int | None = self.token_id(character)
