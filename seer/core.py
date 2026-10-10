@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 
 import kernel as kl
 
-from src import Engine, IndexFactory, Schema, parse_schema, root
+from src import Context, Engine, IndexFactory, Schema, parse_schema, root
 
 VOCABULARY_PATH: str = "../vocabulary.tiktoken"
 EOS_ID: int = 1
@@ -90,7 +90,7 @@ def init_schema(data: bytes, threads: int = 1) -> int:
     try:
         engine: Engine = Engine(
             _vocabulary,
-            schema,
+            Context(schema),
             root(),
             factory=IndexFactory(_vocabulary),
             threads=threads,

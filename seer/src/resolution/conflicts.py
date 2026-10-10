@@ -2,7 +2,7 @@
 
 The facade that merges `Root` (unqualified fields) and `Scopes` (aliased
 fields) into one interface for the required and excluded table queries the FROM
-clause needs. This is what `context.py` is built around.
+clause needs. This is what the projection of a query is resolved against.
 
 Two properties the token driven engine depends on:
 
@@ -11,43 +11,41 @@ Two properties the token driven engine depends on:
   alternative is ordinary rather than exceptional.
 * `copy()` gives every branch of the syntax graph its own state, sharing the
   parts that are immutable once built.
+
+What was selected is not recorded here - the projection of the query keeps
+the items, this keeps only what they imply about the tables.
 """
 
 from __future__ import annotations
 
+from ..model import ARGUMENT_KINDS, Schema, unqualify
+from .columns import ColumnIndex, Kinds
 from .root import Root
-from .schema import Schema
-from .scopes import Scopes, qualify, unqualify
+from .scopes import Scopes
 
 class Conflicts:
-    __slots__ = ("_root", "_scopes", "_schema", "_all_fields", "_used_fields")
+    __slots__ = ("_index", "_root", "_scopes")
 
     def __init__(self, schema: Schema | None = None) -> None:
         if schema is None:
             return
 
-        fields: dict[str, list[str]] = schema.get_fields()
-
-        self._schema = schema
-        self._root = Root(fields)
-        self._scopes = Scopes(fields)
-        self._all_fields = frozenset(schema.get_all_fields())
-        self._used_fields: tuple[str, ...] = ()
+        self._index: ColumnIndex = ColumnIndex(schema)
+        self._root = Root(self._index, ARGUMENT_KINDS)
+        self._scopes = Scopes(self._index)
 
     def copy(self) -> "Conflicts":
         clone: Conflicts = Conflicts.__new__(Conflicts)
 
-        clone._schema = self._schema
-        clone._all_fields = self._all_fields
+        clone._index = self._index
         clone._root = self._root.copy()
         clone._scopes = self._scopes.copy()
-        clone._used_fields = self._used_fields
 
         return clone
 
     @property
-    def schema(self) -> Schema:
-        return self._schema
+    def index(self) -> ColumnIndex:
+        return self._index
 
     @property
     def root(self) -> Root:
@@ -57,41 +55,33 @@ class Conflicts:
     def scopes(self) -> Scopes:
         return self._scopes
 
-    def get_used_fields(self) -> tuple[str, ...]:
-        return self._used_fields
+    def use_field(self, scope: str, field: str, kinds: Kinds | None = None) -> bool:
+        """Select `field`, qualified by `scope` when it is not empty.
 
-    def use_field(self, scope: str, field: str) -> bool:
-        """Select `field`, qualified by `scope` when it is not empty."""
-
-        if not scope:
-            applied: bool = self._root.use_field(field)
-        else:
-            applied = self._scopes.use_field(scope, field)
-
-        if not applied:
-            return False
-
-        self._used_fields = self._used_fields + (f"{scope}.{field}" if scope else field,)
-
-        return True
-
-    def get_all_fields(self) -> frozenset[str]:
-        return self._all_fields
-
-    def get_fields(self, scope: str = "") -> frozenset[str]:
-        """Fields still selectable in `scope`.
-
-        An alias that has not been used yet may still become any table, so it
-        offers every field in the schema.
+        `kinds` restricts the classes the column may have, which is what
+        handing it to a function does.
         """
 
         if not scope:
-            return self._root.get_fields()
+            return self._root.use_field(field, kinds)
 
-        fields: frozenset[str] | None = self._scopes.get_fields(scope)
+        return self._scopes.use_field(scope, field, kinds)
+
+    def get_fields(self, scope: str = "", kinds: Kinds | None = None) -> frozenset[str]:
+        """Fields still selectable in `scope`.
+
+        An alias that has not been used yet may still become any table, so it
+        offers every field in the schema - of an accepted class, for an
+        argument.
+        """
+
+        if not scope:
+            return self._root.get_fields(kinds)
+
+        fields: frozenset[str] | None = self._scopes.get_fields(scope, kinds)
 
         if fields is None:
-            return self._all_fields
+            return self._index.fields(kinds)
 
         return fields
 
@@ -115,7 +105,7 @@ class Conflicts:
         return self._root.get_excluded_tables() | self._scopes.get_excluded_tables()
 
     def use_table(self, node: str) -> bool:
-        """Satisfy a required node, named `"table"` or `"table alias"`."""
+        """Satisfy a node, named `"table"` or `"table alias"`."""
 
         table, alias = unqualify(node)
 
@@ -138,7 +128,6 @@ class Conflicts:
     def __str__(self) -> str:
         return (
             f"Satisfied        = {self.is_satisfied()}\n"
-            f"Selected fields  = {', '.join(self._used_fields)}\n"
             f"Excluded fields  = {', '.join(sorted(self.get_excluded_fields()))}\n"
             f"Root tables      = {self._root}\n"
             f"Scopes tables    = {self._scopes}\n"

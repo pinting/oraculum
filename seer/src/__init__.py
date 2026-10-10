@@ -2,74 +2,115 @@
 
 seer owns the modelling and the syntax graph; `kernel` owns the indexes, the
 active heads walking them and the worker pool that drives them. The split runs
-through `engine.py`: the kernel notifies seer when a head reaches the end of
-its index, and seer answers with the indexes that may follow.
+through `runtime/engine.py`: the kernel notifies seer when a head reaches the
+end of its index, and seer answers with the indexes that may follow.
 
-    factory.py        drafts in, kernel index ids out
-    engine.py         the syntax graph and the kernel's resolver
-    graph.py          the SQL SELECT language
+    runtime/          the kernel boundary: drafts, thunks, the engine
+    model/            the schema, names, type classes and operators
+    resolution/       projection -> required tables -> join graph
+    query/            the virtual table: the data structure of a query, and its stack
+    state/            the state machines, apart from the work they trigger
     context.py        the generation state a node is resolved against
+    grammar/          the SQL SELECT language, clause by clause
+    debug.py          state tracing
 
-The modelling underneath the graph is a stack of its own:
-
-    schema.py         the SQL schema, parsed with sqlglot
-    backend.py        the algebra and the graph, both from the kernel
-    root.py           unqualified field resolution over GF(2)
-    scope.py          one alias, narrowed by set intersection
-    scopes.py         the registry of alias scopes
-    conflicts.py      root and scopes behind one interface
-    relationships.py  the foreign key join graph
-    relation.py       the virtual table a finished FROM clause produces
-    operators.py      type classes, and what each may be compared with
-
-This module re-exports the public surface; `main.py` and `core.py` import from
-here.
+This module re-exports the public surface; `main.py`, `core.py` and `test.py`
+import from here.
 """
 
 from __future__ import annotations
 
 from . import debug
-from .conflicts import Conflicts
-from .context import Context, GLOBAL_NAMESPACE
-from .engine import Engine, Head, Node, Selector, Thunk, ThunkFn
-from .factory import DraftKind, IndexDraft, IndexFactory, IndexSpec
-from .graph import alias, root
-from .operators import (
+from .context import Context
+from .grammar import root
+from .model import (
     BINARY_OPERATORS,
+    FUNCTIONS,
+    KEYWORDS,
     LITERALS,
+    Field,
+    Function,
     Operator,
+    Reference,
+    Schema,
+    Table,
+    Type,
     TypeClass,
     classify,
     is_comparable,
     literal_for,
     operators_for,
+    parse_schema,
+    qualify,
+    reference_name,
+    sql_name,
+    unqualify,
 )
-from .relation import Operand, Relation
-from .relationships import (
+from .query import (
+    Catalog,
+    Exclusion,
+    Grouping,
+    Item,
+    NameUse,
+    Operand,
+    Projection,
+    Refinement,
+    Relation,
+    Selection,
+    Sources,
+    VirtualTable,
+    derive,
+)
+from .resolution import (
     JOIN_TYPES,
+    ColumnIndex,
+    Conflicts,
     EdgeLabel,
     FieldRef,
-    JoinGraph,
     JoinType,
     Neighbor,
     Relationships,
+    Root,
+    Scope,
+    Scopes,
 )
-from .root import Root
-from .schema import RESERVED, Field, Reference, Schema, Table, Type, parse_schema
-from .scope import Scope
-from .scopes import Scopes, qualify, reference_name, sql_name, unqualify
+from .runtime import (
+    DraftKind,
+    Engine,
+    Head,
+    IndexDraft,
+    IndexFactory,
+    IndexSpec,
+    JoinGraph,
+    Node,
+    Selector,
+    Thunk,
+    ThunkFn,
+)
+from .state import Clause, Machine, Phase
 
 __all__ = [
     "BINARY_OPERATORS",
+    "Catalog",
+    "Clause",
+    "ColumnIndex",
     "Conflicts",
     "Context",
     "debug",
     "DraftKind",
     "EdgeLabel",
     "Engine",
+    "Exclusion",
     "Field",
     "FieldRef",
-    "GLOBAL_NAMESPACE",
+    "FUNCTIONS",
+    "Function",
+    "Grouping",
+    "Item",
+    "NameUse",
+    "Projection",
+    "Sources",
+    "VirtualTable",
     "Head",
     "IndexDraft",
     "IndexFactory",
@@ -77,14 +118,18 @@ __all__ = [
     "JOIN_TYPES",
     "JoinGraph",
     "JoinType",
+    "KEYWORDS",
     "LITERALS",
+    "Machine",
     "Neighbor",
     "Node",
     "Operand",
     "Operator",
-    "RESERVED",
+    "Phase",
     "Reference",
+    "Refinement",
     "Relation",
+    "Selection",
     "Relationships",
     "Root",
     "Schema",
@@ -96,8 +141,8 @@ __all__ = [
     "ThunkFn",
     "Type",
     "TypeClass",
-    "alias",
     "classify",
+    "derive",
     "is_comparable",
     "literal_for",
     "operators_for",

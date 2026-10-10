@@ -1,3 +1,5 @@
+"""Aliases for the two kernel structures the modelling is built on."""
+
 from __future__ import annotations
 
 from typing import Any

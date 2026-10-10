@@ -5,8 +5,7 @@ import sys
 
 import core
 from core import EOS_ID, SCHEMA, VOCABULARY_PATH, get_schema, init_engine, set_schema
-from src import Engine, debug
-from src.factory import DraftKind
+from src import DraftKind, Engine, debug
 
 ROUTE_LIMIT: int = 100
 
