@@ -14,10 +14,9 @@ from ..model import unqualify
 from ..query import Derivation, NameUse
 from ..resolution import JoinType, Neighbor
 from ..runtime import Selector, Thunk
-from .combinators import comma, dynamic, exp, keyword, lat, name, ws
+from .combinators import comma, dynamic, keyword, lat, name, ws
 from .selectors import select
-from .subquery import subquery
-from .tokens import LPAREN
+from .subquery import bracketed
 
 def _select_table(node: str) -> Selector:
     return select(lambda ctx, _matched: ctx.query.use_table(node))
@@ -63,7 +62,7 @@ def derived(alias: str | None, next: Thunk) -> Thunk:
 
     resume: Thunk = keyword("AS", None, ws(named))
 
-    return exp(LPAREN, None, subquery(Derivation(alias), resume))
+    return bracketed(Derivation(alias), resume)
 
 def from_entry(next: Thunk) -> Thunk:
     """One FROM entry: a table the query may open with, or a derived table, then any joins off it."""

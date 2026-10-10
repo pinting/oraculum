@@ -1450,6 +1450,15 @@
     - SELECT email, u.first_name, v.last_name FROM users AS u, users AS v;
     - SELECT body, c.post_id, p.title FROM comments AS c, posts AS p;
 
+- group: many aliases over one table
+  expect: completed
+  queries:
+    # Every alias could be `users` or a derived table, and each bare column
+    # the projection might still name rules out all but one of them. The
+    # placement search has to stay small however many aliases are open.
+    - SELECT a0.email, a1.email, a2.email, a3.email, a4.email, a5.email, a6.email, a7.email, a8.email, a9.email, a10.email, a11.email, a12.email, a13.email, a14.email, a15.email, a16.email, a17.email, a18.email, a19.email FROM users AS a0, users AS a1, users AS a2, users AS a3, users AS a4, users AS a5, users AS a6, users AS a7, users AS a8, users AS a9, users AS a10, users AS a11, users AS a12, users AS a13, users AS a14, users AS a15, users AS a16, users AS a17, users AS a18, users AS a19 LIMIT 1;
+    - SELECT d.email FROM (SELECT a1.first_name AS n1, a2.first_name AS n2, a3.first_name AS n3, a4.first_name AS n4, a5.first_name AS n5, a6.first_name AS n6, a7.first_name AS n7, a8.first_name AS n8, a9.first_name AS n9, a10.first_name AS n10, a11.first_name AS n11, a12.first_name AS n12, a13.first_name AS n13, a14.first_name AS n14, a15.first_name AS n15, a16.first_name AS n16, a17.first_name AS n17, a18.first_name AS n18, a19.first_name AS n19, a0.email FROM users AS a0, users AS a1, users AS a2, users AS a3, users AS a4, users AS a5, users AS a6, users AS a7, users AS a8, users AS a9, users AS a10, users AS a11, users AS a12, users AS a13, users AS a14, users AS a15, users AS a16, users AS a17, users AS a18, users AS a19 LIMIT 1) AS d;
+
 # -- names the new constructs reserve ----------------------------------------
 
 - group: names the new functions and keywords reserve

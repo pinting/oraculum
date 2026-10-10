@@ -1,6 +1,6 @@
 """Index construction on top of the `kernel` Rust library.
 
-The kernel never hands an index back. A `IndexDraft` describes the one a graph
+The kernel never hands an index back. An `IndexDraft` describes the one a graph
 node wants, the factory turns it into a real index and keeps it, and what comes
 back is an id. Heads are then spawned onto that id, and the kernel walks them
 internally.
@@ -171,13 +171,13 @@ class IndexFactory:
         if known is not None:
             return known
 
-        # The members are built as one batch rather than one at a time: an
+        # The members are built as one batch rather than one at a time: a
         # name group holds an exclusion per reserved word, table and field, and
         # the kernel spreads a batch over its worker pool with the GIL dropped.
         members: tuple[IndexDraft, ...] = (draft.include,) + draft.excludes
-        specs: list[IndexSpec | None] = [self.spec(member) for member in members]
+        specs: list[IndexSpec] = [spec for spec in map(self.spec, members) if spec is not None]
 
-        if any(spec is None for spec in specs):
+        if len(specs) != len(members):
             return None
 
         built: list[int | None] = self._unit.create_many(specs)

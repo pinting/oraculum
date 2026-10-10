@@ -3,7 +3,7 @@
     tokens.py         the patterns separators and identifiers are spelled with
     combinators.py    lattices, expressions, branches, guards and names
     selectors.py      matched text into context operations, on a copy
-    values/          the values an item is written as, before FROM exists
+    values/           the values an item is written as, before FROM exists
     operands.py       the values of the closed relation, typed as they are written
     projection.py     the item list, each item committed on the separator after it
     source.py         FROM entries and the joins off them

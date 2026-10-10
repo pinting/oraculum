@@ -15,7 +15,7 @@ cased and the grammar excludes each of them case-insensitively.
 
 The base set is the same for every use:
 
-* the SQL keywords and the aggregate function names;
+* the SQL keywords and every function name;
 * every table and column name the query can see, through the whole stack.
 
 Beyond it each use adds the names the query itself has introduced that the new

@@ -10,19 +10,23 @@ from __future__ import annotations
 
 from ..runtime import Thunk
 from .combinators import branch, keyword, ws
-from .conditions import Continuation, Domain, filters
+from .conditions import Continuation, Domain, Right, comparable, filters
 from .operands import operands
 from .selectors import step
 from .tokens import EXPRESSION_DEPTH, NESTING_LIMIT
 
+_right: Right = lambda ctx, kind: ctx.query.condition_operands(kind)
+
 def _left(then: Continuation) -> Thunk:
     columns = lambda ctx: ctx.query.condition_operands()
 
-    return operands(columns, columns, None, lambda operand: (None, then(operand)), EXPRESSION_DEPTH)
+    return operands(
+        comparable(_right, columns), columns, None, lambda operand: (None, then(operand)), EXPRESSION_DEPTH
+    )
 
 WHERE: Domain = Domain(
     left=_left,
-    right=lambda ctx, kind: ctx.query.condition_operands(kind),
+    right=_right,
     record=lambda ctx, text: ctx.query.use_filter(text),
 )
 

@@ -77,12 +77,12 @@ def init_schema(data: bytes, threads: int = 1) -> int:
 
     print(f"Schema:\n{text}")
 
-    schema: Schema | None = parse_schema(text)
+    parsed: Schema | None = parse_schema(text)
 
-    if schema is None:
+    if parsed is None:
         return 1
 
-    print(f"Tables: {schema.get_fields()}")
+    print(f"Tables: {parsed.get_fields()}")
 
     if _vocabulary is None:
         return 1
@@ -90,7 +90,7 @@ def init_schema(data: bytes, threads: int = 1) -> int:
     try:
         engine: Engine = Engine(
             _vocabulary,
-            Context(schema),
+            Context(parsed),
             root(),
             factory=IndexFactory(_vocabulary),
             threads=threads,
@@ -128,14 +128,12 @@ def routes() -> NDArray[np.uint64]:
     return _engine.routes()
 
 def feed(token_id: int) -> int:
-    """Consume a token. Returns 0 on success."""
+    """Consume a token. Returns 0 when the engine accepted it, 1 otherwise."""
 
     if _engine is None:
         return 1
 
-    _engine.feed(token_id)
-
-    return 0
+    return 0 if _engine.feed(token_id) else 1
 
 def get_token_by_id(token_id: int) -> str | None:
     if _vocabulary is None:

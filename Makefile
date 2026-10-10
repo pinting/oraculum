@@ -3,7 +3,7 @@
 # and bundles it with the seer sources, the vocabulary and the page.
 #
 #     make docs          the site, into docs/
-#     make -C seer ...   build, wasm, test, run, live
+#     make -C seer ...   build, wasm, test, fuzz, postgres, run, live
 #     make -C kernel ... build, benchmark
 #
 # Serving it is `python3 -m http.server --directory docs`; the page fetches

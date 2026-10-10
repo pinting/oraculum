@@ -18,7 +18,8 @@ but `LOWER(email)` over an `email` already grouped is a key of its own.
 Only scalar functions of one argument are applied here, and only where some
 value it accepts can be written inside it: `F(` is offered once the classes
 the arguments can produce, `depth` levels down, meet what `F` takes, so the
-bracket never opens onto nothing.
+bracket never opens onto nothing. `offers` asks the same of a whole list, so
+the comma before another key is only offered where there is one.
 
 Every emitter hands what it wrote to `then`, which answers with the selector
 the last token takes and what follows - the selector is how a grouping key or a
@@ -27,7 +28,7 @@ sort key is committed on the token that completes it.
 
 from __future__ import annotations
 
-from typing import Callable, Sequence
+from typing import Callable, Iterator, Sequence
 
 from ..context import Context
 from ..model import AGGREGATES, SCALARS, Function, Kinds, TypeClass
@@ -66,6 +67,32 @@ def producible(arguments: Sequence[Operand], depth: int) -> frozenset[TypeClass]
 def _admitted(kinds: Kinds | None, produced: frozenset[TypeClass]) -> bool:
     return bool(produced if kinds is None else produced & kinds)
 
+def _calls(kinds: Kinds | None, produced: frozenset[TypeClass]) -> Iterator[tuple[Function, Kinds | None]]:
+    """Every function that produces one of `kinds` over a class in `produced`, with what it accepts there."""
+
+    for function in UNARY:
+        if function.kind is not None:
+            if kinds is not None and function.kind not in kinds:
+                continue
+
+            accepted: Kinds | None = function.accepts(0)
+        else:
+            accepted = meet(function.accepts(0), kinds)
+
+        if _admitted(accepted, produced):
+            yield function, accepted
+
+def offers(leaves: Leaves, arguments: Leaves, kinds: Kinds | None, depth: int) -> Callable[[Context], bool]:
+    """Whether `operands` over the same leaves and arguments would offer anything at all."""
+
+    def test(ctx: Context) -> bool:
+        if any(kinds is None or leaf.kind in kinds for leaf in leaves(ctx)):
+            return True
+
+        return depth > 0 and any(True for _ in _calls(kinds, producible(arguments(ctx), depth - 1)))
+
+    return test
+
 def operands(leaves: Leaves, arguments: Leaves, kinds: Kinds | None, then: Then, depth: int) -> Thunk:
     """A leaf of `kinds`, or a function of `kinds` over `arguments`, nested up to `depth`."""
 
@@ -81,20 +108,7 @@ def operands(leaves: Leaves, arguments: Leaves, kinds: Kinds | None, then: Then,
         if depth <= 0:
             return options
 
-        produced: frozenset[TypeClass] = producible(arguments(ctx), depth - 1)
-
-        for function in UNARY:
-            if function.kind is not None:
-                if kinds is not None and function.kind not in kinds:
-                    continue
-
-                accepted: Kinds | None = function.accepts(0)
-            else:
-                accepted = meet(function.accepts(0), kinds)
-
-            if not _admitted(accepted, produced):
-                continue
-
+        for function, accepted in _calls(kinds, producible(arguments(ctx), depth - 1)):
             options.append(call(function, arguments, accepted, then, depth - 1))
 
         return options

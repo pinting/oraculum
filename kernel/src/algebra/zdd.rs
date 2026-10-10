@@ -5,7 +5,9 @@
 //! squarefree monomials and nothing else, so it is a set of subsets of the
 //! variables. A node `(var, hi, lo)` stands for the family
 //!
-//!     { {var} U S : S in hi }  U  { S : S in lo }
+//! ```text
+//! { {var} U S : S in hi }  U  { S : S in lo }
+//! ```
 //!
 //! Two reductions make it canonical: a node whose `hi` is `ZERO` is replaced by
 //! its `lo` (zero suppression), and `unique` hash conses the rest, so equal
@@ -179,7 +181,9 @@ impl Zdd {
     /// Splitting both sides at the top variable `v` gives `f = v*a1 + a0` and
     /// `g = v*b1 + b0`, and since `v*v = v`,
     ///
-    ///     f*g = v*(a1*b1 + a1*b0 + a0*b1) + a0*b0
+    /// ```text
+    /// f*g = v*(a1*b1 + a1*b0 + a0*b1) + a0*b0
+    /// ```
     ///
     /// Three products for the `hi` branch, except that PolyBoRi's `dd_multiply`
     /// folds two of them into one by multiplying `a1` against `b0 + b1`, which

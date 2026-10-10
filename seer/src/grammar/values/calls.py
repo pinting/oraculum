@@ -8,13 +8,13 @@ each other; it reads `value` through the module, once both are loaded.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ...model import Function, Kinds
 from ...query import STAR, Call, Expr, Window
 from ...runtime import Thunk
 from ..combinators import branch, comma, exp, keyword, lat, ws
 from ..tokens import EMPTY_ARGUMENTS, LPAREN, RPAREN
-from dataclasses import replace
-
 from . import values
 from .position import Need, Position, Then, meet
 from .windows import over
@@ -38,7 +38,12 @@ def arguments(function: Function, positions: tuple[Position, ...], then: Then, d
 def scalar(function: Function, position: Position, then: Then) -> Thunk | None:
     """`FN(...)` where the position allows what it produces, else `None`."""
 
-    def call(positions: tuple[Position, ...]) -> Thunk:
+    def call(positions: tuple[Position, ...]) -> Thunk | None:
+        # The first argument carries whatever the position needs, which it
+        # may have no room left to hold.
+        if not positions[0].is_open:
+            return None
+
         return lat(function.name, None, exp(LPAREN, None, Thunk.deferred(
             lambda: arguments(function, positions, then)
         )))
@@ -47,14 +52,15 @@ def scalar(function: Function, position: Position, then: Then) -> Thunk | None:
         return cast(function, position, then)
 
     def positions(first: Kinds | None, rest: tuple[Kinds | None, ...]) -> tuple[Position, ...]:
-        # The first argument carries whatever the position needs.
         return (position.carrying(first),) + tuple(position.within(kinds) for kinds in rest)
 
     if function.uniform:
-        return branch([
+        calls: list[Thunk | None] = [
             call(positions(frozenset({kind}), tuple(frozenset({kind}) for _ in function.parameters[1:])))
             for kind in position.classes()
-        ])
+        ]
+
+        return branch([option for option in calls if option is not None])
 
     if function.kind is not None:
         if not position.allows(function.kind):
@@ -78,12 +84,16 @@ def cast(function: Function, position: Position, then: Then) -> Thunk | None:
         return None
 
     target: str = function.target
+    argument: Position = position.carrying(function.accepts(0))
+
+    if not argument.is_open:
+        return None
 
     def after(expr: Expr) -> Thunk:
         return keyword("AS", None, ws(lat(target, None, exp(RPAREN, None, then(Call(function, (expr,)))))))
 
     return lat(function.name, None, exp(LPAREN, None, Thunk.deferred(
-        lambda: values.value(position.carrying(function.accepts(0)), after)
+        lambda: values.value(argument, after)
     )))
 
 def aggregate(function: Function, position: Position, then: Then) -> Thunk | None:

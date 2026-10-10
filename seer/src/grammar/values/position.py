@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Callable
 
-from ...model import LITERAL_CLASSES, NUMERIC, Kinds, TypeClass
+from ...model import AGGREGATED, LITERAL_CLASSES, NUMERIC, Kinds, TypeClass
 from ...query import Expr
 from ...runtime import Thunk
 from ..tokens import EXPRESSION_DEPTH
@@ -54,6 +54,19 @@ class Position:
     @property
     def reads_row(self) -> bool:
         return self.need is Need.ROW
+
+    @property
+    def is_open(self) -> bool:
+        """Whether any value can be written here at all.
+
+        Only a position that needs an aggregate can be closed off: it needs
+        room for one more call, and to allow a class an aggregate can have.
+        """
+
+        if self.need is not Need.AGGREGATE:
+            return True
+
+        return self.depth > 0 and self.aggregates and (self.kinds is None or bool(self.kinds & AGGREGATED))
 
     def allows(self, kind: TypeClass) -> bool:
         return self.kinds is None or kind in self.kinds

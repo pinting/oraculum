@@ -265,9 +265,12 @@ class VirtualTable(Writes):
         # Whatever follows the FROM clause reads the relation it produced, and
         # it is only final once nothing more can be placed.
         if clause is Clause.SOURCE:
-            self._refinement = Refinement(Relation(
-                self.schema, self.sources.nodes(), self.sources.nullable(), self.sources.derived()
-            ))
+            self._refinement = Refinement(self._relation())
+
+    def _relation(self) -> Relation:
+        """The relation the nodes placed so far produce."""
+
+        return Relation(self.schema, self.sources.nodes(), self.sources.nullable(), self.sources.derived())
 
     def _open_sources(self) -> Sources:
         # A recursive member joins only by inner joins: an outer join could
@@ -310,9 +313,7 @@ class VirtualTable(Writes):
 
         # Still in SOURCE, the relation is not built yet; it would be the one
         # the sources placed so far.
-        refinement: Refinement = self._refinement or Refinement(Relation(
-            self.schema, self.sources.nodes(), self.sources.nullable(), self.sources.derived()
-        ))
+        refinement: Refinement = self._refinement or Refinement(self._relation())
         preview: Presentation = Presentation.of_query(
             projection, result(projection, refinement.relation), refinement
         )
@@ -351,6 +352,46 @@ class VirtualTable(Writes):
         return not self.is_closed() and self.can_enter(Clause.CLOSED)
 
     # -- compounds --------------------------------------------------------
+
+    def can_combine(self) -> bool:
+        """Whether a set operator may end this member and start another.
+
+        Only the body may be combined - ORDER BY and LIMIT belong to the
+        compound, after its last member - and a member that read its own
+        definition is the recursive one, which has to be the last.
+        """
+
+        if not self._clause.is_at(*BODY) or not self.can_close():
+            return False
+
+        # A value has one row, which a compound would not keep.
+        if self._selection.contract.single_row:
+            return False
+
+        provisional: str | None = self._catalog.provisional
+
+        return not (self._frame.recursive and provisional is not None and self.sources.places(provisional))
+
+    @debug.traced(lambda self, operator, recursive=False: f"combine({operator})")
+    def combine(self, operator: SetOperator, recursive: bool = False) -> "VirtualTable | None":
+        """Close this member and open the next, which `operator` joins to it.
+
+        Where the next member may read the definition (`Frame.after`), it does
+        so as the members so far export it.
+        """
+
+        if not self.can_combine() or not self.close():
+            return None
+
+        frame: Frame = self._frame.after(self, operator, recursive)
+        catalog: Catalog = self._catalog.base
+
+        if frame.recursive:
+            assert frame.name is not None and frame.compound is not None
+
+            catalog = catalog.reading(frame.name, table(frame.compound.result(), frame.names()))
+
+        return VirtualTable(catalog, frame, self._base)
 
     # -- subqueries -------------------------------------------------------
 
@@ -406,47 +447,9 @@ class VirtualTable(Writes):
             {} if alias is None else self._selection.conflicts.scopes.demands(alias)
         )
 
-        return Derivation(alias, tuple(sorted(demands.items(), key=lambda item: item[0])), self._selection.bare_columns())
+        required: tuple[tuple[str, Kinds | None], ...] = tuple(sorted(demands.items(), key=lambda item: item[0]))
 
-    def can_combine(self) -> bool:
-        """Whether a set operator may end this member and start another.
-
-        Only the body may be combined - ORDER BY and LIMIT belong to the
-        compound, after its last member - and a member that read its own
-        definition is the recursive one, which has to be the last.
-        """
-
-        if not self._clause.is_at(*BODY) or not self.can_close():
-            return False
-
-        # A value has one row, which a compound would not keep.
-        if self._selection.contract.single_row:
-            return False
-
-        provisional: str | None = self._catalog.provisional
-
-        return not (self._frame.recursive and provisional is not None and self.sources.places(provisional))
-
-    @debug.traced(lambda self, operator, recursive=False: f"combine({operator})")
-    def combine(self, operator: SetOperator, recursive: bool = False) -> "VirtualTable | None":
-        """Close this member and open the next, which `operator` joins to it.
-
-        Where the next member may read the definition (`Frame.after`), it does
-        so as the members so far export it.
-        """
-
-        if not self.can_combine() or not self.close():
-            return None
-
-        frame: Frame = self._frame.after(self, operator, recursive)
-        catalog: Catalog = self._catalog.base
-
-        if frame.recursive:
-            assert frame.name is not None and frame.compound is not None
-
-            catalog = catalog.reading(frame.name, table(frame.compound.result(), frame.names()))
-
-        return VirtualTable(catalog, frame, self._base)
+        return Derivation(alias, required, self._selection.bare_columns())
 
     # -- debug ------------------------------------------------------------
 

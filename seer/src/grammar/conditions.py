@@ -25,6 +25,12 @@ a comparison takes (`Scalar`), as the list of an `IN` (`Membership`), and on its
 own after `EXISTS`. It is recorded when it closes, and it may read the columns
 of the clause it stands in (`VirtualTable.exposes`), which is what makes a
 subquery correlated.
+
+Nothing is offered that leads nowhere. An operator is only offered where
+something can stand opposite it, and an operand only where it takes some
+operator: a class with no literal - a binary column, one of a type nobody
+recognised - is compared with another column of its class or not at all, and
+no subquery folds a query into one value of it.
 """
 
 from __future__ import annotations
@@ -33,15 +39,28 @@ from dataclasses import dataclass
 from typing import Callable, Sequence
 
 from ..context import Commit, Context
-from ..model import EQUALITY, ORDERING, Arity, Operator, TypeClass, classify, literal_for, operators_for
+from ..model import (
+    AGGREGATED,
+    EQUALITY,
+    ORDERING,
+    Arity,
+    Operator,
+    TypeClass,
+    classify,
+    is_nullable,
+    literal_for,
+    operators_for,
+)
 from ..query import Existence, Membership, Operand, Scalar
 from ..runtime import Selector, Thunk
-from .combinators import branch, comma, dynamic, exp, keyword, lat, ws
+from .combinators import branch, comma, dynamic, exp, guard, keyword, lat, ws
 from .selectors import select
-from .subquery import subquery
+from .subquery import bracketed, subquery
 from .tokens import LPAREN, RPAREN, SPACED_LPAREN
 
 Continuation = Callable[[Operand], Thunk]
+Leaves = Callable[[Context], Sequence[Operand]]
+Right = Callable[[Context, TypeClass], Sequence[Operand]]
 
 @dataclass(frozen=True)
 class Domain:
@@ -50,11 +69,26 @@ class Domain:
     left: Callable[[Continuation], Thunk]
     """Emit every left operand, continuing each with the thunk it is handed."""
 
-    right: Callable[[Context, TypeClass], Sequence[Operand]]
+    right: Right
     """The columns that may stand opposite a left operand of a class."""
 
     record: Callable[[Context, str], bool]
     """Commit a condition once it has been written whole."""
+
+def opposable(right: Right, ctx: Context, left: Operand) -> bool:
+    """Whether anything can stand opposite `left`: a literal of its class, or another value of it."""
+
+    if literal_for(left.kind) is not None:
+        return True
+
+    return any(not left.same_value(other) for other in right(ctx, left.kind))
+
+def comparable(right: Right, leaves: Leaves) -> Leaves:
+    """`leaves`, without the ones no condition can be written about."""
+
+    return lambda ctx: tuple(
+        leaf for leaf in leaves(ctx) if is_nullable(leaf.field) or opposable(right, ctx, leaf)
+    )
 
 Text = Callable[[Context, str], str]
 
@@ -124,7 +158,7 @@ def scalar(domain: Domain, left: Operand, operator: Operator, next: Thunk) -> Th
 
     purpose: Scalar = Scalar(frozenset({classify(left.field.type)}))
 
-    return exp(LPAREN, None, subquery(purpose, next, _recorded(domain, f"{left.text} {operator} (SELECT …)")))
+    return bracketed(purpose, next, _recorded(domain, f"{left.text} {operator} (SELECT …)"))
 
 def operator_choices(domain: Domain, left: Operand, next: Thunk) -> Thunk:
     """The operators `left`'s type admits, each carrying what stands on its right.
@@ -143,8 +177,9 @@ def operator_choices(domain: Domain, left: Operand, next: Thunk) -> Thunk:
             sides: list[Thunk] = [opposite(domain, left, commit, next)]
 
             # An equality or an order may compare with the one value a
-            # subquery produces; a pattern only with a pattern.
-            if operator in EQUALITY + ORDERING:
+            # subquery produces, where one can be of its class; a pattern
+            # only with a pattern.
+            if operator in EQUALITY + ORDERING and left.kind in AGGREGATED:
                 sides.append(scalar(domain, left, operator, next))
 
             return branch(sides)
@@ -160,17 +195,18 @@ def operator_choices(domain: Domain, left: Operand, next: Thunk) -> Thunk:
 
         return listed(domain, left, operator, next)
 
-    options: list[Thunk] = []
+    unary: list[Thunk] = []
+    binary: list[Thunk] = []
 
     for operator in operators_for(left.field):
         if operator.is_unary:
             commit: Selector = _record(domain, lambda _ctx, _m, o=operator: f"{left.text} {o}")
 
-            options.append(lat(str(operator), commit, next))
+            unary.append(lat(str(operator), commit, next))
         else:
-            options.append(lat(str(operator), None, ws(Thunk.deferred(lambda o=operator: right(o)))))
+            binary.append(lat(str(operator), None, ws(Thunk.deferred(lambda o=operator: right(o)))))
 
-    return branch(options)
+    return branch(unary + [guard(lambda ctx: opposable(domain.right, ctx, left), branch(binary))])
 
 def condition(domain: Domain, next: Thunk) -> Thunk:
     """One comparison.
@@ -185,8 +221,8 @@ def condition(domain: Domain, next: Thunk) -> Thunk:
 def predicate(domain: Domain, next: Thunk, depth: int) -> Thunk:
     """One condition, optionally parenthesised, optionally negated."""
 
-    exists: Thunk = lat("EXISTS", None, exp(SPACED_LPAREN, None, subquery(
-        Existence(), next, _recorded(domain, "EXISTS (SELECT …)")
+    exists: Thunk = guard(lambda ctx: ctx.can_open_subquery(), lat("EXISTS", None, bracketed(
+        Existence(), next, _recorded(domain, "EXISTS (SELECT …)"), SPACED_LPAREN
     )))
 
     options: list[Thunk] = [condition(domain, next), exists]

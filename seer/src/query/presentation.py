@@ -74,11 +74,6 @@ class Presentation:
             if not self._is_ordered(operand) and (kinds is None or operand.kind in kinds)
         )
 
-    def is_exhausted(self) -> bool:
-        """Whether nothing is left to sort by."""
-
-        return not (self.candidates() or self.leaves or self.aggregates)
-
     def arguments(self) -> tuple[Operand, ...]:
         """What a function sorted by may be applied to."""
 
