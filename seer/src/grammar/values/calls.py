@@ -13,8 +13,10 @@ from ...query import STAR, Call, Expr, Window
 from ...runtime import Thunk
 from ..combinators import branch, comma, exp, keyword, lat, ws
 from ..tokens import EMPTY_ARGUMENTS, LPAREN, RPAREN
+from dataclasses import replace
+
 from . import values
-from .position import Position, Then, meet
+from .position import Need, Position, Then, meet
 from .windows import over
 
 def arguments(function: Function, positions: tuple[Position, ...], then: Then, distinct: bool = False) -> Thunk:
@@ -44,9 +46,13 @@ def scalar(function: Function, position: Position, then: Then) -> Thunk | None:
     if function.target is not None:
         return cast(function, position, then)
 
+    def positions(first: Kinds | None, rest: tuple[Kinds | None, ...]) -> tuple[Position, ...]:
+        # The first argument carries whatever the position needs.
+        return (position.carrying(first),) + tuple(position.within(kinds) for kinds in rest)
+
     if function.uniform:
         return branch([
-            call(tuple(position.within(frozenset({kind})) for _ in function.parameters))
+            call(positions(frozenset({kind}), tuple(frozenset({kind}) for _ in function.parameters[1:])))
             for kind in position.classes()
         ])
 
@@ -54,14 +60,14 @@ def scalar(function: Function, position: Position, then: Then) -> Thunk | None:
         if not position.allows(function.kind):
             return None
 
-        return call(tuple(position.within(kinds) for kinds in function.parameters))
+        return call(positions(function.accepts(0), function.parameters[1:]))
 
     first: Kinds | None = meet(function.accepts(0), position.kinds)
 
     if first is not None and not first:
         return None
 
-    return call((position.within(first),) + tuple(position.within(k) for k in function.parameters[1:]))
+    return call(positions(first, function.parameters[1:]))
 
 def cast(function: Function, position: Position, then: Then) -> Thunk | None:
     """`CAST(<value> AS <target>)`."""
@@ -77,7 +83,7 @@ def cast(function: Function, position: Position, then: Then) -> Thunk | None:
         return keyword("AS", None, ws(lat(target, None, exp(RPAREN, None, then(Call(function, (expr,)))))))
 
     return lat(function.name, None, exp(LPAREN, None, Thunk.deferred(
-        lambda: values.value(position.within(function.accepts(0)), after)
+        lambda: values.value(position.carrying(function.accepts(0)), after)
     )))
 
 def aggregate(function: Function, position: Position, then: Then) -> Thunk | None:
@@ -94,8 +100,10 @@ def aggregate(function: Function, position: Position, then: Then) -> Thunk | Non
         if accepted is not None and not accepted:
             return None
 
-    # Nothing nests inside an aggregate but plain values: no aggregate, no window.
-    inner: Position = position.within(accepted, aggregates=False)
+    # Nothing nests inside an aggregate but plain values of the row: no
+    # aggregate, no window - and the row is readable again, whatever the
+    # position outside it needed.
+    inner: Position = replace(position.within(accepted, aggregates=False), need=Need.ROW)
 
     def after(call: Call) -> Thunk:
         if not position.windows or call.distinct:
@@ -122,6 +130,9 @@ def aggregate(function: Function, position: Position, then: Then) -> Thunk | Non
 
 def ranking(function: Function, position: Position, then: Then) -> Thunk | None:
     """`RANK() OVER (...)`, which only exists over a window."""
+
+    if not position.reads_row:
+        return None
 
     if function.kind is not None and not position.allows(function.kind):
         return None

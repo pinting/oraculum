@@ -17,7 +17,7 @@ import functools
 from typing import TYPE_CHECKING, Callable, TypeVar
 
 from .. import debug
-from ..model import Kinds, column_name
+from ..model import Kinds, Table, column_name
 from ..resolution import JoinType, Neighbor
 from ..state import Clause, Machine
 from .expression import Column, Direction, Expr
@@ -122,6 +122,13 @@ class Writes:
     @during(Clause.SOURCE)
     def join_table(self, neighbor: Neighbor, join_type: JoinType = JoinType.INNER) -> bool:
         return self.sources.join(neighbor, join_type)
+
+    @debug.traced(lambda self, alias, table: f"use_derived({alias})")
+    @during(Clause.SOURCE)
+    def use_derived(self, alias: str, table: Table) -> bool:
+        """Open a FROM entry at a derived table exporting `table`, called `alias`."""
+
+        return self.sources.place_derived(alias, table)
 
     # -- FILTER, GROUPING, HAVING -----------------------------------------
 

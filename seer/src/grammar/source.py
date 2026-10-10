@@ -1,6 +1,6 @@
 """The FROM clause, which is resolved by walking the foreign key graph.
 
-    <entry> := <table> [AS <alias>] [<join>]*
+    <entry> := <table> [AS <alias>] [<join>]* | ( <subquery> ) AS <alias>
     <join>  := <join type> <table> [AS <alias>] ON <column> = <column>
 
 Two loops shape it: the outer one over entries is `from_entry` plus `finish`,
@@ -11,10 +11,13 @@ from __future__ import annotations
 
 from ..context import Context
 from ..model import unqualify
+from ..query import Derivation, NameUse
 from ..resolution import JoinType, Neighbor
 from ..runtime import Selector, Thunk
-from .combinators import comma, dynamic, lat, ws
+from .combinators import comma, dynamic, exp, keyword, lat, name, ws
 from .selectors import select
+from .subquery import subquery
+from .tokens import LPAREN
 
 def _select_table(node: str) -> Selector:
     return select(lambda ctx, _matched: ctx.query.use_table(node))
@@ -37,13 +40,47 @@ def node_name(node: str, selector: Selector, next: Thunk) -> Thunk:
 
     return lat(table, None, tail)
 
-def from_entry(next: Thunk) -> Thunk:
-    """One FROM entry: a table the query may open with, then any joins off it."""
+def _use_derived(alias: str | None) -> Selector:
+    """Place the subquery that just closed as a derived table, called `alias` or what was matched."""
 
-    return dynamic(lambda ctx: [
-        node_name(node, _select_table(node), Thunk.deferred(lambda: joins(next)))
-        for node in ctx.query.sources.entries()
-    ])
+    return select(lambda ctx, matched: ctx.query.use_derived(
+        matched if alias is None else alias, ctx.finished.export()
+    ))
+
+def derived(alias: str | None, next: Thunk) -> Thunk:
+    """`(<subquery>) AS <alias>`: for an alias the projection read off, or a new one."""
+
+    named: Thunk
+
+    if alias is None:
+        named = name(
+            lambda ctx: ctx.query.selection.reserved(NameUse.QUALIFIER),
+            _use_derived(None),
+            next,
+        )
+    else:
+        named = lat(alias, _use_derived(alias), next)
+
+    resume: Thunk = keyword("AS", None, ws(named))
+
+    return exp(LPAREN, None, subquery(Derivation(alias), resume))
+
+def from_entry(next: Thunk) -> Thunk:
+    """One FROM entry: a table the query may open with, or a derived table, then any joins off it."""
+
+    def build(ctx: Context) -> list[Thunk]:
+        sources = ctx.query.sources
+        after: Thunk = Thunk.deferred(lambda: joins(next))
+
+        options: list[Thunk] = [node_name(node, _select_table(node), after) for node in sources.entries()]
+        options.extend(derived(alias, after) for alias in sources.derivable())
+
+        if sources.may_derive_freely():
+            options.append(derived(None, after))
+
+        return options
+
+    return dynamic(build)
 
 def join_clause(neighbor: Neighbor, join_type: JoinType, next: Thunk) -> Thunk:
     """`<join type> <table> [AS <alias>] ON <column> = <column>`.

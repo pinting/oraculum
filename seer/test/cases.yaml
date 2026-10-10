@@ -38,6 +38,10 @@
     - SELECT email FROM users WHERE email = 'a' AND users.id > 1;
     - SELECT email FROM users WHERE NOT email LIKE 'a%';
     - SELECT email FROM users WHERE (email = 'a' OR email = 'b') AND NOT users.id = 1;
+    - SELECT email FROM users WHERE EXISTS (SELECT title FROM posts WHERE posts.user_id = users.id);
+    - SELECT title FROM posts WHERE published_at > (SELECT MIN(created_at) FROM users WHERE users.id = posts.user_id);
+    - SELECT email, (SELECT COUNT(*) FROM posts) AS total FROM users;
+    - SELECT d.user_id FROM (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) AS d WHERE d.n > 1;
     - SELECT COUNT(*) FROM users;
     - SELECT MIN(title), MAX(published_at) FROM posts;
     - SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id;
@@ -333,12 +337,9 @@
     # Every keyword is upper case.
     - select email from users;
     - Select Email From Users;
-    # Every item is a value of its own: no star, and no subquery anywhere.
+    # Every item is a value of its own: no star.
     - SELECT * FROM users;
     - SELECT users.* FROM users;
-    - SELECT email FROM users WHERE users.id = (SELECT id FROM posts);
-    - SELECT email FROM users WHERE users.id IN (SELECT user_id FROM posts);
-    - SELECT email FROM (SELECT email FROM users) AS u;
     # One statement, and it is a SELECT.
     - INSERT INTO users VALUES (1);
     - UPDATE users SET email = 'a';
@@ -1213,6 +1214,8 @@
     - SELECT user_id FROM posts GROUP BY user_id ORDER BY MAX(published_at);
     - SELECT COUNT(*) FROM posts ORDER BY COUNT(*);
     - SELECT LOWER(email), COUNT(*) FROM users GROUP BY LOWER(email) ORDER BY LOWER(email);
+    - SELECT u.verified AS ver, v.email FROM users AS u, users AS v ORDER BY ver;
+    - SELECT u.verified, v.email FROM users AS u, users AS v ORDER BY u.verified, v.email;
     # A deduplicated one only by its names.
     - SELECT DISTINCT email FROM users ORDER BY email;
     - SELECT DISTINCT LOWER(email) AS e FROM users ORDER BY e DESC;
@@ -1230,6 +1233,9 @@
     - SELECT email FROM users ORDER BY email, users.email;
     # An output name is no column a function can be applied to.
     - SELECT LOWER(email) AS e FROM users ORDER BY UPPER(e);
+    # A column's own name sorts by it only where, bare, it still is that
+    # column - SQLite reads it as a column of the relation, here ambiguous.
+    - SELECT u.verified, v.email FROM users AS u, users AS v ORDER BY verified;
     # The order is fixed: ORDER BY, LIMIT, OFFSET, nothing else after.
     - SELECT email FROM users OFFSET 5;
     - SELECT email FROM users LIMIT 1 ORDER BY email;
@@ -1437,8 +1443,8 @@
   queries:
     # A bare `users` beside `u` would make `email` ambiguous.
     - SELECT email, u.first_name FROM users, users AS u;
-    # `title` needs posts, `u.email` users, and both supply `id`: nothing
-    # after `u.` is offered at all.
+    # `title` needs posts, `u.email` users, and both supply `id`: no table
+    # can be `u` - only a derived table could.
     - SELECT id, title, u.email FROM posts, users AS u;
     # Two aliases of tables sharing a bare column cannot both be placed.
     - SELECT email, u.first_name, v.last_name FROM users AS u, users AS v;
@@ -1520,3 +1526,121 @@
       HAVING COUNT(p.id) IN (0, 1, 2) OR AVG(LENGTH(p.body)) > 10
       ORDER BY n DESC, who
       LIMIT 5 OFFSET 0;
+
+# -- inline subqueries ---------------------------------------------------------
+
+- group: subqueries in conditions
+  expect: completed
+  queries:
+    - SELECT email FROM users WHERE users.id IN (SELECT user_id FROM posts);
+    - SELECT email FROM users WHERE users.id NOT IN (SELECT user_id FROM comments WHERE body LIKE 'a%');
+    - SELECT email FROM users WHERE users.id = (SELECT MAX(user_id) FROM posts);
+    - SELECT email FROM users WHERE users.id >= (SELECT AVG(user_id) + 1 FROM posts);
+    - SELECT email FROM users WHERE created_at < (SELECT MIN(published_at) FROM posts);
+    - SELECT email FROM users WHERE EXISTS (SELECT title FROM posts);
+    - SELECT email FROM users WHERE NOT EXISTS (SELECT id FROM comments WHERE body = 'x') AND verified = TRUE;
+    # The list of an IN is a query like any other.
+    - SELECT email FROM users WHERE users.id IN (SELECT user_id FROM posts UNION SELECT user_id FROM comments);
+    - SELECT email FROM users WHERE users.id IN (SELECT DISTINCT user_id FROM posts ORDER BY user_id LIMIT 3);
+    - WITH a AS (SELECT user_id FROM posts) SELECT email FROM users WHERE users.id IN (SELECT user_id FROM a);
+    - SELECT user_id FROM posts GROUP BY user_id HAVING COUNT(*) >= (SELECT COUNT(*) FROM users WHERE verified = TRUE);
+    - SELECT user_id FROM posts GROUP BY user_id HAVING user_id IN (SELECT user_id FROM comments);
+    - SELECT email FROM users WHERE users.id IN ( SELECT user_id FROM posts );
+
+- group: correlated subqueries
+  expect: completed
+  queries:
+    # A subquery of a WHERE reads the relation around it, qualified.
+    - SELECT email FROM users WHERE EXISTS (SELECT title FROM posts WHERE posts.user_id = users.id);
+    - SELECT email FROM users WHERE NOT EXISTS (SELECT body FROM comments WHERE comments.user_id = users.id);
+    - SELECT title FROM posts WHERE published_at > (SELECT MIN(created_at) FROM users WHERE users.id = posts.user_id);
+    - SELECT u.email FROM users AS u WHERE u.id < (SELECT COUNT(*) FROM posts WHERE posts.user_id = u.id) OR u.id IN (SELECT user_id FROM comments WHERE comments.user_id = u.id);
+    # A subquery of a HAVING reads the grouped columns around it.
+    - SELECT user_id FROM posts GROUP BY user_id HAVING COUNT(*) > (SELECT COUNT(*) FROM comments WHERE comments.user_id = posts.user_id);
+    # Two deep, the innermost reads both queries around it.
+    - |-
+      SELECT u.email FROM users AS u
+      WHERE u.id IN (SELECT user_id FROM posts WHERE posts.id IN (SELECT post_id FROM comments WHERE comments.user_id = u.id));
+    - SELECT u.email FROM users AS u WHERE EXISTS (SELECT p.id FROM posts AS p WHERE p.user_id = u.id AND EXISTS (SELECT id FROM comments WHERE comments.post_id = p.id));
+
+- group: subqueries as values of the projection
+  expect: completed
+  queries:
+    - SELECT email, (SELECT COUNT(*) FROM posts) AS n FROM users;
+    - SELECT email, (SELECT MAX(title) FROM posts) FROM users;
+    - SELECT u.email, (SELECT COUNT(*) FROM posts) + 1 AS n FROM users AS u;
+    - SELECT LOWER((SELECT MIN(email) FROM users)) FROM posts;
+    # Being the same for every row, it is a constant to the grouping.
+    - SELECT user_id, COUNT(*), (SELECT COUNT(*) FROM users) FROM posts GROUP BY user_id;
+    - WITH t AS (SELECT (SELECT COUNT(*) FROM comments) AS total FROM users) SELECT total FROM t;
+
+- group: derived tables
+  expect: completed
+  queries:
+    # The projection reads a derived table through its alias, and the table
+    # has to export what was read.
+    - SELECT d.user_id FROM (SELECT user_id FROM posts) AS d;
+    - SELECT d.user_id FROM (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) AS d WHERE d.n > 1 ORDER BY d.n DESC;
+    - SELECT email, d.title FROM users, (SELECT title FROM posts) AS d;
+    - SELECT SUM(d.user_id) FROM (SELECT user_id FROM posts WHERE published_at IS NOT NULL) AS d;
+    - SELECT d.email, d.title FROM (SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id) AS d;
+    # Where no table can be the alias, a derived table still can.
+    - SELECT id, title, u.email FROM posts, (SELECT email FROM users) AS u;
+    - SELECT email, u.first_name FROM users, (SELECT first_name FROM users WHERE verified = TRUE) AS u;
+    # A projection that reads no table at all may open with any derived table.
+    - SELECT COUNT(*) FROM (SELECT DISTINCT user_id FROM posts) AS authors;
+    - SELECT COUNT(*) AS n FROM (SELECT email FROM users UNION SELECT title FROM posts) AS everything;
+    - SELECT 1 FROM (SELECT email FROM users LIMIT 1) AS one;
+    # Its columns are columns of the relation like any other.
+    - SELECT d.title FROM (SELECT title, user_id FROM posts) AS d WHERE d.user_id IN (SELECT user_id FROM comments);
+    - SELECT d.user_id, COUNT(*) FROM (SELECT user_id FROM posts) AS d GROUP BY d.user_id HAVING COUNT(*) > 1;
+
+- group: subqueries that do not hold
+  expect: stuck
+  queries:
+    # A value is one row of one column: an aggregate, ungrouped.
+    - SELECT email FROM users WHERE users.id = (SELECT user_id FROM posts);
+    - SELECT email FROM users WHERE users.id = (SELECT MAX(user_id) FROM posts GROUP BY title);
+    - SELECT email FROM users WHERE users.id = (SELECT MAX(user_id), MIN(user_id) FROM posts);
+    - SELECT email FROM users WHERE users.id = (SELECT MAX(user_id) FROM posts UNION SELECT MIN(user_id) FROM posts);
+    - SELECT email, (SELECT title FROM posts) FROM users;
+    - SELECT email, (SELECT 1 FROM posts) FROM users;
+    # The list of an IN has one column, of the left side's class.
+    - SELECT email FROM users WHERE users.id IN (SELECT title FROM posts);
+    - SELECT email FROM users WHERE users.id IN (SELECT user_id, title FROM posts);
+    # A pattern is not compared with a subquery, nor is a range bounded by one.
+    - SELECT email FROM users WHERE email LIKE (SELECT MAX(email) FROM users);
+    - SELECT email FROM users WHERE users.id BETWEEN (SELECT MIN(id) FROM posts) AND 3;
+    # A value of the projection reads nothing of the query it stands in.
+    - SELECT email, (SELECT COUNT(*) FROM posts WHERE posts.user_id = users.id) FROM users;
+    # The subquery's own nodes shadow what they share a name with.
+    - SELECT email FROM users WHERE EXISTS (SELECT email FROM users WHERE users.id = users.id);
+    # A correlated column is written qualified.
+    - SELECT email FROM users WHERE EXISTS (SELECT title FROM posts WHERE user_id = email);
+    # A subquery invents no name the query around it has introduced.
+    - SELECT u.email FROM users AS u WHERE EXISTS (SELECT u.title FROM posts AS u);
+    # Three deep is past the limit.
+    - SELECT u.email FROM users AS u WHERE u.id IN (SELECT user_id FROM posts WHERE posts.id IN (SELECT post_id FROM comments WHERE comments.id IN (SELECT id FROM comments)));
+    - SELECT email FROM users WHERE EXISTS (SELECT title FROM posts;
+    - SELECT email FROM users WHERE EXISTS SELECT title FROM posts;
+
+- group: derived tables that do not hold
+  expect: stuck
+  queries:
+    # A derived table exports what the projection read off its alias, of the
+    # class it was read as - and an alias cannot rename a column into one.
+    - SELECT d.user_id FROM (SELECT title FROM posts) AS d;
+    - SELECT SUM(d.user_id) FROM (SELECT title AS user_id FROM posts) AS d;
+    # Nor a name the projection uses bare, which would turn ambiguous.
+    - SELECT email, d.title FROM users, (SELECT email, title FROM posts INNER JOIN users ON posts.user_id = users.id) AS d;
+    # A bare column comes from a table; a derived table is read through its alias.
+    - SELECT email FROM (SELECT email FROM users) AS u;
+    # It is named, is named once, and reads nothing beside it.
+    - SELECT d.user_id FROM (SELECT user_id FROM posts);
+    - SELECT d.user_id FROM (SELECT user_id FROM posts) d;
+    - SELECT d.user_id FROM (SELECT user_id FROM posts) AS e;
+    - SELECT d.user_id, email FROM users, (SELECT user_id FROM posts WHERE posts.user_id = users.id) AS d;
+    # Nor is it joined: its columns are only known once it has closed.
+    - SELECT d.user_id, email FROM (SELECT user_id FROM posts) AS d INNER JOIN users ON d.user_id = users.id;
+    # A projection that reads a table opens with the table it reads.
+    - SELECT email FROM (SELECT DISTINCT user_id FROM posts) AS d;

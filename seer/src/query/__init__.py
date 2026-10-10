@@ -15,6 +15,7 @@
     names.py          what an invented name may not spell
     derivation.py     the result a closed query produces, and the table it exports
     compound.py       members joined by set operators
+    purpose.py        what a subquery is written for
     frame.py          where a query stands in its statement
     catalog.py        the stack of virtual tables a query is written over
     lifecycle.py      the rules for moving a query from one clause to the next
@@ -37,6 +38,7 @@ from .expression import (
     Literal,
     Predicate,
     Star,
+    Subquery,
     Window,
     narrowing,
 )
@@ -45,6 +47,7 @@ from .grouping import Grouping
 from .names import Exclusion, NameUse
 from .placement import placeable
 from .presentation import Presentation
+from .purpose import NESTING, Derivation, Existence, Membership, Purpose, Scalar
 from .projection import Item, Projection
 from .refinement import Refinement
 from .operand import Operand
@@ -74,6 +77,12 @@ __all__ = [
     "Output",
     "Predicate",
     "Presentation",
+    "Purpose",
+    "Derivation",
+    "Existence",
+    "Membership",
+    "NESTING",
+    "Scalar",
     "Projection",
     "Refinement",
     "Relation",
@@ -85,6 +94,7 @@ __all__ = [
     "Shape",
     "Sources",
     "Star",
+    "Subquery",
     "VirtualTable",
     "Window",
     "merge",

@@ -2,7 +2,8 @@
 
 Its keyword closes the FROM clause, and every operand afterwards is a value
 of that one relation - a column, written the way SQL's ambiguity rule allows,
-or a scalar function over columns.
+or a scalar function over columns - or, in a subquery, a column of a query
+around it, qualified.
 """
 
 from __future__ import annotations
@@ -15,13 +16,13 @@ from .selectors import step
 from .tokens import EXPRESSION_DEPTH, NESTING_LIMIT
 
 def _left(then: Continuation) -> Thunk:
-    columns = lambda ctx: ctx.query.refinement.operands()
+    columns = lambda ctx: ctx.query.condition_operands()
 
     return operands(columns, columns, None, lambda operand: (None, then(operand)), EXPRESSION_DEPTH)
 
 WHERE: Domain = Domain(
     left=_left,
-    right=lambda ctx, kind: ctx.query.refinement.operands(kind),
+    right=lambda ctx, kind: ctx.query.condition_operands(kind),
     record=lambda ctx, text: ctx.query.use_filter(text),
 )
 

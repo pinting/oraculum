@@ -47,7 +47,7 @@ from __future__ import annotations
 from typing import Iterator
 
 from .. import debug
-from ..model import Schema, Table
+from ..model import Kinds, Schema, Table, TypeClass, reference_name
 from ..resolution import JoinType
 from ..state import BODY, PRESENTATION, Clause, Machine, clause_machine
 from .catalog import Catalog
@@ -56,7 +56,9 @@ from .derivation import Result, merge, result, table
 from .frame import Frame
 from .lifecycle import may_enter
 from .names import Exclusion
+from .operand import Operand
 from .presentation import Presentation, can_sort
+from .purpose import Derivation
 from .refinement import Refinement
 from .relation import Relation
 from .selection import Selection
@@ -67,6 +69,7 @@ class VirtualTable(Writes):
     __slots__ = (
         "_catalog",
         "_frame",
+        "_base",
         "_clause",
         "_selection",
         "_sources",
@@ -75,21 +78,32 @@ class VirtualTable(Writes):
         "_result",
     )
 
-    def __init__(self, catalog: Catalog | None = None, frame: Frame = Frame()) -> None:
-        """A query over `catalog`, standing where `frame` says."""
+    def __init__(
+        self,
+        catalog: Catalog | None = None,
+        frame: Frame = Frame(),
+        reserved: Exclusion | None = None,
+    ) -> None:
+        """A query over `catalog`, standing where `frame` says.
+
+        `reserved` is what its invented names may not spell, where the query
+        it is written inside decides; the catalog's otherwise.
+        """
 
         if catalog is None:
             return
 
+        if reserved is None:
+            reserved = catalog.reserved
+
         # A definition's own name is reserved inside it too: it is not a
         # table there yet, and nothing should look as if it were.
-        reserved: Exclusion = catalog.reserved
-
         if frame.name is not None:
             reserved = reserved.including([frame.name])
 
         self._catalog = catalog
         self._frame = frame
+        self._base: Exclusion = reserved
         self._clause: Machine[Clause] = clause_machine()
         self._selection: Selection = Selection(
             catalog.schema, reserved, frame.contract(catalog.provisional)
@@ -104,6 +118,7 @@ class VirtualTable(Writes):
 
         clone._catalog = self._catalog
         clone._frame = self._frame
+        clone._base = self._base
         clone._clause = self._clause
         clone._selection = self._selection.copy()
         clone._sources = None if self._sources is None else self._sources.copy(clone._selection)
@@ -167,7 +182,7 @@ class VirtualTable(Writes):
     def export(self) -> Table:
         """The table a closed definition contributes to the stack."""
 
-        assert self.is_closed() and self.is_derived(), "only a closed definition exports a table"
+        assert self.is_closed() and self._frame.exports, "only a closed definition or derived table exports one"
 
         return table(self.result(), self._frame.names())
 
@@ -250,9 +265,9 @@ class VirtualTable(Writes):
         # Whatever follows the FROM clause reads the relation it produced, and
         # it is only final once nothing more can be placed.
         if clause is Clause.SOURCE:
-            self._refinement = Refinement(
-                Relation(self.schema, self.sources.nodes(), self.sources.nullable())
-            )
+            self._refinement = Refinement(Relation(
+                self.schema, self.sources.nodes(), self.sources.nullable(), self.sources.derived()
+            ))
 
     def _open_sources(self) -> Sources:
         # A recursive member joins only by inner joins: an outer join could
@@ -276,11 +291,33 @@ class VirtualTable(Writes):
         )
 
     def can_order(self) -> bool:
-        """Whether an ORDER BY may be written here, with something to sort by."""
+        """Whether an ORDER BY may be written here, with something to sort by.
 
-        compound: Result | None = None if self._frame.compound is None else self._frame.compound.result()
+        A plain or grouped result always has something; one sorted by its
+        output names alone has only as much as those names allow.
+        """
 
-        return self.can_enter(Clause.ORDERING) and can_sort(self._selection.projection, compound)
+        if not self.can_enter(Clause.ORDERING):
+            return False
+
+        projection = self._selection.projection
+
+        if self._frame.compound is not None:
+            return can_sort(projection, self._frame.compound.result())
+
+        if not projection.distinct:
+            return True
+
+        # Still in SOURCE, the relation is not built yet; it would be the one
+        # the sources placed so far.
+        refinement: Refinement = self._refinement or Refinement(Relation(
+            self.schema, self.sources.nodes(), self.sources.nullable(), self.sources.derived()
+        ))
+        preview: Presentation = Presentation.of_query(
+            projection, result(projection, refinement.relation), refinement
+        )
+
+        return bool(preview.candidates())
 
     @debug.traced(lambda self: "enter_source()")
     def enter_source(self) -> bool:
@@ -315,6 +352,62 @@ class VirtualTable(Writes):
 
     # -- compounds --------------------------------------------------------
 
+    # -- subqueries -------------------------------------------------------
+
+    def exposes(self) -> tuple[Operand, ...]:
+        """The columns a subquery written here may read in its conditions.
+
+        Only a closed relation has typed columns to read, so a subquery of a
+        WHERE reads the relation and one of a HAVING its grouped columns -
+        always qualified, since a bare name would be resolved inside the
+        subquery first. On top come whatever the queries around this one
+        expose, unless this one's own nodes shadow them.
+        """
+
+        if self._clause.is_at(Clause.FILTER):
+            own: tuple[Operand, ...] = self.refinement.operands()
+        elif self._clause.is_at(Clause.HAVING):
+            own = tuple(operand for operand in self.refinement.grouped() if operand.is_column)
+        else:
+            # Before its FROM clause is closed a query has nothing typed to
+            # expose - and could not tell which outer names its own nodes are
+            # yet to shadow.
+            return ()
+
+        return tuple(operand for operand in own if "." in operand.text) + self.correlated()
+
+    def correlated(self, kind: TypeClass | None = None) -> tuple[Operand, ...]:
+        """The columns of the queries around this one its conditions may read.
+
+        A qualifier this query's own FROM clause uses shadows the outer column
+        it would otherwise name, so that one is not offered.
+        """
+
+        shadowed: frozenset[str] = frozenset()
+
+        if self._refinement is not None:
+            shadowed = frozenset(reference_name(node) for node in self._refinement.relation.get_nodes())
+
+        return tuple(
+            operand
+            for operand in self._frame.correlated
+            if operand.text.split(".")[0] not in shadowed and (kind is None or operand.kind is kind)
+        )
+
+    def condition_operands(self, kind: TypeClass | None = None) -> tuple[Operand, ...]:
+        """What a WHERE condition may compare: the relation's columns, and the correlated ones."""
+
+        return self.refinement.operands(kind) + self.correlated(kind)
+
+    def derivation(self, alias: str | None) -> Derivation:
+        """What a derived table standing in for `alias` has to export; see `purpose.py`."""
+
+        demands: dict[str, Kinds | None] = (
+            {} if alias is None else self._selection.conflicts.scopes.demands(alias)
+        )
+
+        return Derivation(alias, tuple(sorted(demands.items(), key=lambda item: item[0])), self._selection.bare_columns())
+
     def can_combine(self) -> bool:
         """Whether a set operator may end this member and start another.
 
@@ -324,6 +417,10 @@ class VirtualTable(Writes):
         """
 
         if not self._clause.is_at(*BODY) or not self.can_close():
+            return False
+
+        # A value has one row, which a compound would not keep.
+        if self._selection.contract.single_row:
             return False
 
         provisional: str | None = self._catalog.provisional
@@ -349,7 +446,7 @@ class VirtualTable(Writes):
 
             catalog = catalog.reading(frame.name, table(frame.compound.result(), frame.names()))
 
-        return VirtualTable(catalog, frame)
+        return VirtualTable(catalog, frame, self._base)
 
     # -- debug ------------------------------------------------------------
 

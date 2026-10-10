@@ -11,6 +11,7 @@
     filter.py         WHERE
     grouping.py       GROUP BY and HAVING
     presentation.py   ORDER BY and LIMIT
+    subquery.py       ( SELECT ... ), one body for every place a subquery may stand
     statement.py      the statement, end to end: definitions, compounds, the main query
 """
 

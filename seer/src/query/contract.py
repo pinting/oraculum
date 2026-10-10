@@ -13,6 +13,22 @@ that means for the items it may select, as three rules over the projection:
 * **simple** - a recursive member may not aggregate, window or deduplicate,
   and the definition it reads may be placed **once** at most.
 
+A subquery adds its own (`purpose.py`):
+
+* **single row** - a scalar subquery has to aggregate the whole of what it
+  reads, so every item is an aggregate expression and nothing is grouped;
+* **required** - a derived table has to export the columns the projection
+  around it already read off its alias, each of the classes it read it as.
+  Those are column names, which no alias may spell, so each is a column item
+  of that name - and a column of that name that could not be of the class
+  is offered only with an `AS`;
+* **forbidden** - nor may it export a name the projection around it uses
+  bare, which would make that name ambiguous: a column of that name is
+  offered only with an `AS` too.
+
+**derivable** says whether a derived table may still be opened in the query's
+own FROM clause, which only the nesting limit takes away.
+
 A contract is a value and reads the projection it is handed, so the selection
 asks it and nothing else has to know which rules a frame implies.
 """
@@ -35,6 +51,25 @@ class Contract:
     once: frozenset[str] = frozenset()
     """The tables the FROM clause may place one node of at most."""
 
+    single_row: bool = False
+
+    required: tuple[tuple[str, Kinds | None], ...] = ()
+    """The columns the result has to export, by name, with the classes each may have."""
+
+    forbidden: frozenset[str] = frozenset()
+    """The names the result may not export."""
+
+    derivable: bool = True
+
+    def requirement(self, name: str | None) -> tuple[bool, Kinds | None]:
+        """Whether `name` is required, and of which classes."""
+
+        for required, kinds in self.required:
+            if required == name:
+                return True, kinds
+
+        return False, None
+
     def kinds_at(self, position: int) -> Kinds | None:
         """The classes the item at `position` may have, where the shape fixes them."""
 
@@ -54,27 +89,42 @@ class Contract:
         if not self.has_room(projection):
             return False
 
+        if self.single_row and not expr.aggregates():
+            return False
+
         return not (self.simple and (expr.aggregates() or expr.windows()))
 
     def needs_name(self, projection: Projection, expr: Expr) -> bool:
-        """Whether `expr` may only be added with an `AS`."""
+        """Whether `expr` may only be added with an `AS`, as far as names alone decide.
+
+        Whether a required column can be of its classes is the algebra's
+        question, which the selection asks on top of this.
+        """
 
         if not self.named:
             return False
 
         output: str | None = Item(expr).output
 
-        return output is None or output in projection.outputs()
+        return output is None or output in projection.outputs() or output in self.forbidden
 
-    def may_end_with_next(self, projection: Projection) -> bool:
-        """Whether the item being written may be the last."""
+    def may_end_with(self, projection: Projection, output: str | None) -> bool:
+        """Whether the item being written, going by `output`, may be the last."""
 
-        return self.shape is None or len(projection.items) + 1 == len(self.shape)
+        if self.shape is not None and len(projection.items) + 1 != len(self.shape):
+            return False
+
+        outputs: set[str | None] = set(projection.outputs()) | {output}
+
+        return all(name in outputs for name, _ in self.required)
 
     def is_met(self, projection: Projection) -> bool:
         """Whether the projection, as it stands, is all its frame asked for."""
 
         if self.shape is not None and len(projection.items) != len(self.shape):
+            return False
+
+        if any(name not in projection.outputs() for name, _ in self.required):
             return False
 
         if not self.named:

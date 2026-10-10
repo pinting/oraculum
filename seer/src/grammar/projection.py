@@ -21,10 +21,10 @@ from __future__ import annotations
 from typing import Callable
 
 from ..context import Context
-from ..query import Exclusion, Expr, NameUse, Selection
+from ..query import Exclusion, Expr, Item, NameUse, Selection
 from ..runtime import Selector, Thunk
 from .combinators import branch, comma, dynamic, exp, guard, lat, name, ws
-from .values import Position, value
+from .values import Need, Position, value
 from .selectors import select, step
 from .tokens import COMMA, EXPRESSION_DEPTH, WHITESPACE
 
@@ -35,11 +35,16 @@ def reserved(use: NameUse) -> Callable[[Context], Exclusion]:
     return lambda ctx: ctx.query.selection.reserved(use)
 
 def item_position(selection: Selection) -> Position:
-    """Where the next item is written: of the class a shape may fix."""
+    """Where the next item is written: of the class a shape may fix.
+
+    The item of a scalar subquery has to aggregate, which is what keeps it to
+    the one row a value is.
+    """
 
     allowed: bool = selection.allows_aggregates
+    need: Need = Need.AGGREGATE if selection.contract.single_row else Need.ROW
 
-    return Position(selection.item_kinds(), EXPRESSION_DEPTH, allowed, allowed)
+    return Position(selection.item_kinds(), EXPRESSION_DEPTH, allowed, allowed and need is Need.ROW, need)
 
 def items(next: Thunk) -> Thunk:
     """A comma separated item list, then `next` - which starts at `FROM`."""
@@ -69,14 +74,18 @@ def items(next: Thunk) -> Thunk:
 
             unnamed: bool = not selection.needs_name(expr)
             more: bool = selection.can_follow()
-            last: bool = selection.can_end()
+
+            # Whether the projection may end after this item depends on what
+            # it goes by - an `AS` gives it a name no requirement asks for.
+            last: bool = selection.can_end(Item(expr).output)
+            last_named: bool = selection.can_end(None)
 
             following: list[Thunk] = []
 
             if more:
                 following.append(comma(loop))
 
-            if last:
+            if last_named:
                 following.append(ws(next))
 
             named: Thunk = branch(following)

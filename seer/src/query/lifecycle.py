@@ -9,7 +9,8 @@ them the query may make, which is where the rules that span parts live:
   placing everything the projection demanded, and the grouping covering every
   item of a query that aggregates;
 * a recursive member stays a simple select, so it never groups, sorts or
-  limits.
+  limits;
+* a scalar subquery is one row, so it never groups.
 
 They are pure functions of the query's parts, so the virtual table asks them
 and nothing else has to know how the parts fit.
@@ -68,6 +69,10 @@ def may_enter(
         return False
 
     if frame.recursive and clause in NOT_SIMPLE:
+        return False
+
+    # A value is one row, which grouping would break into many.
+    if clause is Clause.GROUPING and selection.contract.single_row:
         return False
 
     if clause is Clause.SOURCE:

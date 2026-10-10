@@ -11,7 +11,9 @@ depends on where that is:
   needs no names at all, since the first member's are the compound's;
 * a **recursive** member - a member of a `WITH RECURSIVE` definition after a
   `UNION` - may read the definition it belongs to, and has to stay a simple
-  select to do so.
+  select to do so;
+* a **subquery** produces what its purpose needs (`purpose.py`), and its
+  conditions may read the columns of the queries around it.
 
 A frame says which of these a query is, and the virtual table reads off it
 the rules its parts apply.
@@ -24,6 +26,8 @@ from typing import TYPE_CHECKING
 
 from .compound import Compound, SetOperator
 from .contract import Contract
+from .operand import Operand
+from .purpose import NESTING, Derivation, Membership, Purpose, Scalar
 from .shape import Shape
 
 if TYPE_CHECKING:
@@ -43,15 +47,30 @@ class Frame:
     recursive: bool = False
     """Whether the query may read the definition it belongs to."""
 
+    purpose: Purpose | None = None
+    """What the query is written for, where it is a subquery."""
+
+    depth: int = 0
+    """How many queries it is written inside of."""
+
+    correlated: tuple[Operand, ...] = ()
+    """The columns of the queries around it its conditions may read."""
+
     @property
     def is_derived(self) -> bool:
         return self.name is not None
 
     @property
+    def exports(self) -> bool:
+        """Whether the query's result is a table: a definition's, or a derived one's."""
+
+        return self.is_derived or isinstance(self.purpose, Derivation)
+
+    @property
     def named(self) -> bool:
         """Whether every column the query produces needs a name of its own."""
 
-        return self.is_derived and not self.columns and self.compound is None
+        return self.exports and not self.columns and self.compound is None
 
     def shape(self) -> Shape | None:
         if self.compound is not None:
@@ -59,6 +78,9 @@ class Frame:
 
         if self.columns:
             return Shape.arity(len(self.columns))
+
+        if isinstance(self.purpose, (Scalar, Membership)):
+            return Shape((self.purpose.kinds,))
 
         return None
 
@@ -70,8 +92,20 @@ class Frame:
         """
 
         once: frozenset[str] = frozenset({provisional}) if self.recursive and provisional else frozenset()
+        derivation: Derivation | None = (
+            self.purpose if isinstance(self.purpose, Derivation) and self.compound is None else None
+        )
 
-        return Contract(named=self.named, shape=self.shape(), simple=self.recursive, once=once)
+        return Contract(
+            named=self.named,
+            shape=self.shape(),
+            simple=self.recursive,
+            once=once,
+            single_row=isinstance(self.purpose, Scalar),
+            required=() if derivation is None else derivation.required,
+            forbidden=frozenset() if derivation is None else derivation.forbidden,
+            derivable=self.depth < NESTING,
+        )
 
     def names(self) -> tuple[str, ...]:
         """What the exported columns are called, where the frame decides it."""
@@ -102,4 +136,7 @@ class Frame:
             self.columns,
             compound,
             recursive and self.is_derived and operator.is_union,
+            self.purpose,
+            self.depth,
+            self.correlated,
         )

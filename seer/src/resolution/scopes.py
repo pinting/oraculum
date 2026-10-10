@@ -13,19 +13,21 @@ from .columns import ColumnIndex, Kinds
 from .scope import Scope
 
 class Scopes:
-    __slots__ = ("_scopes", "_index")
+    __slots__ = ("_scopes", "_index", "_derivable")
 
-    def __init__(self, index: ColumnIndex | None = None) -> None:
+    def __init__(self, index: ColumnIndex | None = None, derivable: bool = False) -> None:
         if index is None:
             return
 
         self._scopes: dict[str, Scope] = {}
         self._index: ColumnIndex = index
+        self._derivable: bool = derivable
 
     def copy(self) -> "Scopes":
         clone: Scopes = Scopes.__new__(Scopes)
 
         clone._index = self._index
+        clone._derivable = self._derivable
         clone._scopes = {alias: scope.copy() for alias, scope in self._scopes.items()}
 
         return clone
@@ -45,21 +47,13 @@ class Scopes:
             if not resolver.is_satisfied()
         ]
 
-    def candidates(self, scope: str, field: str, kinds: Kinds | None = None) -> frozenset[str]:
-        """The tables `scope` could be after selecting `field` in it."""
-
-        resolver: Scope | None = self._scopes.get(scope)
-        owners: frozenset[str] = self._index.owners(field, kinds)
-
-        return owners if resolver is None else resolver.get_required_tables() & owners
-
     def use_field(self, scope: str, field: str, kinds: Kinds | None = None) -> bool:
         """Narrow the alias by `field`, creating the scope on first use."""
 
         resolver: Scope | None = self._scopes.get(scope)
 
         if resolver is None:
-            resolver = Scope(self._index)
+            resolver = Scope(self._index, self._derivable)
 
             if not resolver.use_field(field, kinds):
                 return False
@@ -105,6 +99,18 @@ class Scopes:
                 result.add(qualify(table, alias))
 
         return frozenset(result)
+
+    def demands(self, scope: str) -> dict[str, Kinds | None]:
+        """What `scope` has had selected in it; see `Scope.demands`."""
+
+        resolver: Scope | None = self._scopes.get(scope)
+
+        return {} if resolver is None else resolver.demands()
+
+    def derive(self, scope: str) -> bool:
+        resolver: Scope | None = self._scopes.get(scope)
+
+        return resolver is not None and resolver.derive()
 
     def use_table(self, scope: str, table: str) -> bool:
         resolver: Scope | None = self._scopes.get(scope)

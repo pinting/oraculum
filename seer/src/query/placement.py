@@ -29,6 +29,11 @@ written into a corner it cannot leave.
 A table that may be placed once at most - the definition a recursive member
 reads - counts against every node of it, whichever way it would be placed.
 
+An alias may also be placed as a derived table, `(SELECT ...) AS u`, where the
+query may still open one: a derived table exports what was read off the alias
+and no name the projection uses bare, so it supplies no bare column and asks
+nothing of the algebra. It is one more candidate, and always a clash-free one.
+
 The search is exhaustive and small: an alias has a handful of candidate
 tables, and the algebra still requires a handful more.
 """
@@ -38,7 +43,7 @@ from __future__ import annotations
 from itertools import combinations, product
 from typing import Sequence
 
-from ..model import Schema, unqualify
+from ..model import DERIVED, Schema, unqualify
 from ..resolution import Conflicts, Root
 
 def supplied(schema: Schema, table: str, bare: frozenset[str]) -> frozenset[str]:
@@ -99,6 +104,7 @@ def placeable(
     bare: frozenset[str],
     placed: Sequence[str] = (),
     once: frozenset[str] = frozenset(),
+    derivable: bool = False,
 ) -> bool:
     """Whether the rest of the FROM clause can be placed beside `placed`, every bare column supplied once."""
 
@@ -116,7 +122,13 @@ def placeable(
 
     scopes: list[tuple[str, frozenset[str]]] = conflicts.scopes.open()
 
-    for assignment in product(*(sorted(candidates) for _, candidates in scopes)):
+    options: list[list[str]] = [
+        sorted(candidates) + ([DERIVED] if derivable else []) for _, candidates in scopes
+    ]
+
+    for choice in product(*options):
+        # A derived table supplies nothing and assumes nothing.
+        assignment: tuple[str, ...] = tuple(table for table in choice if table != DERIVED)
         spent: frozenset[str] | None = _spends(placed_tables + list(assignment), once)
 
         if spent is None:

@@ -51,7 +51,7 @@ def keys(next: Thunk) -> Thunk:
 
 def _having_left(then: Continuation) -> Thunk:
     continued = lambda operand: (None, then(operand))
-    grouped = lambda ctx: ctx.query.refinement.grouped()
+    grouped = lambda ctx: ctx.query.refinement.grouped() + ctx.query.correlated()
 
     return branch([
         operands(grouped, grouped, None, continued, EXPRESSION_DEPTH),
@@ -60,7 +60,7 @@ def _having_left(then: Continuation) -> Thunk:
 
 HAVING: Domain = Domain(
     left=_having_left,
-    right=lambda ctx, kind: ctx.query.refinement.grouped(kind),
+    right=lambda ctx, kind: ctx.query.refinement.grouped(kind) + ctx.query.correlated(kind),
     record=lambda ctx, text: ctx.query.use_filter(text),
 )
 

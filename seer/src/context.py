@@ -12,10 +12,16 @@ been written. That is
   so this is the member being written, which holds the ones before it;
 * the statement machine of `state.statement`, which says which of those is
   open, and whether the statement is `WITH RECURSIVE`;
+* the **calls**, the queries suspended while a subquery inside them is
+  written, innermost last. Each remembers where the grammar resumes once the
+  subquery closes and what its query does with the result, so one subquery
+  grammar serves every place a subquery may stand, the way a return address
+  lets one function serve every caller;
 * the **capture**, the text of the last token a selector set aside for the one
   that commits it - the first bound of a `BETWEEN`, the values of an `IN`, a
-  literal the projection is about to wrap in an expression. Nothing reads it
-  but the selector it was set aside for.
+  literal the projection is about to wrap in an expression - and likewise the
+  subquery that has just closed. Nothing reads either but the selector they
+  were set aside for.
 
 Everything about the data structure of a query is its virtual table's
 business. The context only opens queries, and pushes a closed definition onto
@@ -32,10 +38,12 @@ See `debug.py`; tracing is off until a driver enables it.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Callable
 
 from . import debug
 from .model import Schema
-from .query import Catalog, Exclusion, Frame, SetOperator, VirtualTable
+from .query import NESTING, Catalog, Derivation, Exclusion, Frame, Purpose, SetOperator, VirtualTable
+from .runtime import Thunk
 from .state import Machine, Phase, statement_machine
 
 @dataclass(frozen=True)
@@ -45,8 +53,32 @@ class Declaration:
     name: str
     columns: tuple[str, ...] = ()
 
+# What the query a subquery was written in does with it once it has closed.
+Commit = Callable[["Context", VirtualTable], bool]
+
+@dataclass(frozen=True)
+class Call:
+    """A query suspended while a subquery inside it is written."""
+
+    outer: VirtualTable
+    resume: Thunk
+    """Where the grammar goes on once the subquery has closed."""
+
+    commit: Commit | None = None
+
 class Context:
-    __slots__ = ("_phase", "_recursive", "_catalog", "_declaration", "_query", "_capture")
+    __slots__ = (
+        "_phase",
+        "_recursive",
+        "_catalog",
+        "_declaration",
+        "_query",
+        "_calls",
+        "_capture",
+        "_finished",
+        "_resume",
+        "_serial",
+    )
 
     def __init__(self, schema: Schema | None = None) -> None:
         if schema is None:
@@ -57,7 +89,11 @@ class Context:
         self._catalog: Catalog = Catalog(schema)
         self._declaration: Declaration | None = None
         self._query: VirtualTable | None = None
+        self._calls: tuple[Call, ...] = ()
         self._capture: str = ""
+        self._finished: VirtualTable | None = None
+        self._resume: Thunk | None = None
+        self._serial: int = 0
 
     def copy(self) -> "Context":
         clone: Context = Context.__new__(Context)
@@ -67,7 +103,11 @@ class Context:
         clone._catalog = self._catalog
         clone._declaration = self._declaration
         clone._query = None if self._query is None else self._query.copy()
+        clone._calls = self._calls
         clone._capture = self._capture
+        clone._finished = self._finished
+        clone._resume = self._resume
+        clone._serial = self._serial
 
         return clone
 
@@ -197,7 +237,7 @@ class Context:
     def end_definition(self) -> bool:
         """Close the open definition and push it onto the stack."""
 
-        if self._query is None or not self._phase.is_at(Phase.DEFINITION):
+        if self._query is None or self._calls or not self._phase.is_at(Phase.DEFINITION):
             return False
 
         if not self._query.close() or not self._enter(Phase.PREAMBLE):
@@ -226,6 +266,84 @@ class Context:
 
         return True
 
+    # -- subqueries -------------------------------------------------------
+
+    def can_open_subquery(self) -> bool:
+        """Whether a subquery may be opened inside the query being written."""
+
+        return self._query is not None and self._query.frame.depth < NESTING
+
+    @debug.traced(lambda self, purpose, resume, commit=None: f"begin_subquery({type(purpose).__name__})")
+    def begin_subquery(self, purpose: Purpose, resume: Thunk, commit: Commit | None = None) -> bool:
+        """Suspend the query being written and open a subquery inside it for `purpose`.
+
+        The subquery reads the same stack - a recursive definition excepted,
+        which is never read from inside a subquery - and what the query
+        around it exposes (`VirtualTable.exposes`); a derived table reads
+        nothing of it, having no LATERAL to do so with.
+        """
+
+        if not self.can_open_subquery():
+            return False
+
+        outer: VirtualTable = self.query
+
+        if isinstance(purpose, Derivation):
+            purpose = outer.derivation(purpose.alias)
+            correlated = ()
+        else:
+            correlated = outer.exposes()
+
+        frame: Frame = Frame(purpose=purpose, depth=outer.frame.depth + 1, correlated=correlated)
+        reserved: Exclusion = outer.selection.enclosing_reserved()
+
+        self._calls = self._calls + (Call(outer, resume, commit),)
+        self._query = VirtualTable(outer.catalog.base, frame, reserved)
+        self._serial += 1
+
+        return True
+
+    @debug.traced(lambda self: "end_subquery()")
+    def end_subquery(self) -> bool:
+        """Close the subquery being written and resume the query it was written in."""
+
+        if self._query is None or not self._calls or not self._query.close():
+            return False
+
+        call: Call = self._calls[-1]
+
+        self._finished = self._query
+        self._resume = call.resume
+        self._calls = self._calls[:-1]
+
+        # The query around it was shared by every branch while it was
+        # suspended; it is written again from here, so on a copy of its own.
+        self._query = call.outer.copy()
+
+        return call.commit is None or call.commit(self, self._finished)
+
+    @property
+    def finished(self) -> VirtualTable:
+        """The subquery that closed last."""
+
+        assert self._finished is not None, "no subquery has closed"
+
+        return self._finished
+
+    @property
+    def resumed(self) -> Thunk:
+        """Where the grammar goes on after the subquery that closed last."""
+
+        assert self._resume is not None, "no subquery has closed"
+
+        return self._resume
+
+    @property
+    def serial(self) -> int:
+        """How many subqueries the statement has opened, which tells them apart."""
+
+        return self._serial
+
     # -- the main query ---------------------------------------------------
 
     @debug.traced(lambda self: "begin_main()")
@@ -243,9 +361,10 @@ class Context:
         query: str = "" if self._query is None else f"\n{self._query}"
         declaration: str = "" if self._declaration is None else f"\nDeclaring        = {self._declaration}"
         recursive: str = " (recursive)" if self._recursive else ""
+        nesting: str = f", {len(self._calls)} subquery deep" if self._calls else ""
 
         return (
-            f"Statement        = {self._phase}{recursive}\n"
+            f"Statement        = {self._phase}{recursive}{nesting}\n"
             f"Stack            = {self._catalog}"
             f"{declaration}{query}"
         )

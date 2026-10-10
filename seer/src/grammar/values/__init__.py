@@ -37,10 +37,11 @@ first token on.
     calls.py      scalar functions, casts, aggregates, ranking functions
     windows.py    OVER (...)
     cases.py      CASE WHEN ... END, and its predicates
+    subqueries.py (SELECT ...) as a value
     values.py     a term, and the arithmetic extending it
 """
 
-from .position import Position, Then, meet
+from .position import Need, Position, Then, meet
 from .values import value
 
-__all__ = ["Position", "Then", "meet", "value"]
+__all__ = ["Need", "Position", "Then", "meet", "value"]
