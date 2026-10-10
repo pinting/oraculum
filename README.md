@@ -64,7 +64,7 @@ Imagine a text box where you type SQL and the system only ever offers you tokens
   </a>
 </p>
 
-### Layers
+### Atoms
 
 **Token trees:** A language model writes in tokens, fixed pieces drawn from a vocabulary of hundreds of thousands of entries, each covering one or more characters. The same keyword can arrive as one piece or many and every way of spelling it forms a path through a graph over the character positions in the string:
 
@@ -103,110 +103,13 @@ graph LR
 
 The first character class is consumed and the starred tail loops on itself. Two derivatives, two states. Transitions on vocabulary tokens walk all characters at once, pruned by a trie so that dead prefixes skip whole subtrees.
 
-**The grammar as an NFA:** Wire the keyword constants and identifier patterns as edges in a graph whose shape is the SQL grammar:
+**The grammar as an NFA:** Wire the keyword constants and identifier patterns as edges in a graph whose shape is the SQL grammar. Every edge label is one of the automata from the previous step: a constant, a pattern or a difference of patterns. Walking an edge means feeding tokens into that automaton until it accepts, then following the grammar arc. Multiple edges out of one node are multiple live branches, which makes the graph an NFA. The system determinises lazily, one token at a time, rather than building the exponential product machine up front.
 
-```mermaid
-graph LR
-    q0(( )) -->|"SELECT"| q1(( ))
-    q1 -->|"field"| q2(( ))
-    q2 -->|","| q1
-    q2 -->|"FROM"| q3(( ))
-    q3 -->|"table"| q4(( ))
-    q4 -->|"join .. on .."| q4
-    q4 -->|","| q3
-    q4 -->|"WHERE"| q5(( ))
-    q5 -->|"condition"| q6(( ))
-    q6 -->|"AND / OR"| q5
-    q4 -->|";"| q7(((end)))
-    q6 -->|";"| q7
+**Latent state, enabling and disabling routes:** The grammar graph is static: it knows that *a* field follows `SELECT` and *a* table follows `FROM`, but not which ones. A second layer, the latent state, rides alongside the walk and enables or disables edges as the query grows.
 
-    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
-    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
-    class q0,q1,q2,q3,q4,q5,q6 plain
-    class q7 accent
-```
+The latent state holds what the query has committed to so far. Each branch of the walk has its own copy, so one branch never sees the choices of another. An edge is offered only if the query can still be completed after taking it.
 
-Every edge label is one of the automata from the previous step: a constant, a pattern or a difference of patterns. Walking an edge means feeding tokens into that automaton until it accepts, then following the grammar arc. Multiple edges out of one node are multiple live branches, which makes the graph an NFA. The system determinises lazily, one token at a time, rather than building the exponential product machine up front.
-
-**Latent state: enabling and disabling routes:** The grammar graph is static: it knows that *a* field follows `SELECT` and *a* table follows `FROM`, but not which ones. A second layer, the latent state, rides alongside the walk and gates edges as the query grows.
-
-Take a minimal schema:
-
-| table | fields |
-|---|---|
-| **t1** | f1, f2, f3 |
-| **t2** | f4, f2, f5 |
-
-Suppose `f1` and `f2` have been selected. `f1` lives only in `t1`, so `t1` is required. `f2` lives in both, so writing it root means exactly one table may supply it and `t2` is ruled out: with both tables in the query the root `f2` would be ambiguous. Every route that needs `t2` is disabled:
-
-```mermaid
-graph LR
-    q1(["next field"]) -->|"f2"| q2(( ))
-    q1 -->|"f3"| q2
-    q1 -.->|"f4"| q2
-    q1 -.->|"f5"| q2
-    q2 -->|"FROM"| q3(( ))
-    q3 -->|"t1"| q4(( ))
-    q3 -.->|"t2"| q4
-    q4 -->|";"| q5(((end)))
-
-    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
-    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
-    class q1,q2,q3,q4 plain
-    class q5 accent
-```
-
-Solid edges are live, dashed edges are disabled. `f4` and `f5` belong to `t2` alone, so both are withdrawn; `t2` stops being offered as a FROM target. `f2` survives because `t1` has it too.
-
-**Conflict management as Boolean algebra:** The gating is computed in $\mathbb{F}_2$, the two-element field where addition is XOR and multiplication is AND. Each field carries a constraint polynomial encoding "exactly one of my tables supplies me":
-
-```math
-C(\text{f1}) = t_1 \qquad C(\text{f2}) = t_1 + t_2 \qquad C(\text{f5}) = t_2
-```
-
-$C(\text{f2}) = t_1 + t_2$ is XOR: exactly one of the two must supply it. Selecting a field multiplies its constraint into a running product $P$:
-
-```math
-P \;\leftarrow\; 1 \;\cdot\; C(\text{f1}) \;\cdot\; C(\text{f2}) \;=\; t_1(t_1 + t_2) \;=\; t_1 + t_1 t_2
-```
-
-using $t_1^2 = t_1$ in $\mathbb{F}_2$. Evaluating $P$ answers every question the grammar needs:
-
-| evaluation | result | meaning |
-|---|---|---|
-| $P$ at $t_1{=}1,\; t_2{=}0$ | $1$ | `FROM t1` works |
-| $P$ at $t_1{=}0,\; t_2{=}1$ | $0$ | `FROM t2` alone contradicts the selection |
-| $P$ at $t_1{=}1,\; t_2{=}1$ | $0$ | both tables, but root `f2` becomes ambiguous |
-| $P \cdot C(\text{f5})$ | $0$ | `f5` can no longer be selected |
-
-The last two rows are worth pausing on. Having both tables makes the root `f2` ambiguous, since each would claim it, so the polynomial zeros out. And $P \cdot C(\text{f5}) = (t_1 + t_1 t_2) \cdot t_2 = t_1 t_2 + t_1 t_2 = 0$ in $\mathbb{F}_2$: the product kills it outright, so `f5` is never offered. The polynomial decides without enumeration which tables, fields and routes remain viable.
-
-**The join graph.** When two tables are both required, say after selecting `f1` and `f5` instead, which gives $P = t_1 \cdot t_2$, the FROM clause must connect them. Foreign keys form a graph whose edges carry the columns to join on:
-
-```mermaid
-graph LR
-    T1["t1 (f1, f2, f3)"] ---|"t1.f1 = t2.f4"| T2["t2 (f4, f2, f5)"]
-
-    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
-    class T1,T2 plain
-```
-
-The edge label determines the `ON` clause. The schema writes it; the model only picks which edge to walk. Joining is vertex contraction: `t1` and `t2` merge into one node that inherits both neighbourhoods, so a table two foreign keys away becomes reachable only after the intermediate one has been joined in. With more tables the problem is which contraction sequence connects the required set and the edges fix every `ON` clause along the way.
-
-**The WHERE clause: a phase boundary.** Everything above runs in one direction: fields are chosen, tables follow, joins connect them. The `WHERE` keyword reverses the flow. By the time it is reached the FROM clause is finished and what a condition may name is no longer something to be solved: it is a fixed set. Call it the **virtual table**: every column of every source the clause placed, whether it arrived as a root entry or was contracted in by a join.
-
-Continuing the example, suppose the FROM clause settled on `t1 INNER JOIN t2 ON t1.f1 = t2.f4`. The virtual table is:
-
-| reference | columns |
-|---|---|
-| `t1` | f1, f2, f3 |
-| `t2` | f4, f2, f5 |
-
-A column reachable as `t1.f1` is always offered scoped. A column like `f3` is offered root too, because exactly one source supplies it. But `f2` lives in both, so it can only be written as `t1.f2` or `t2.f2`: root `f2` would be ambiguous. This is SQL's own resolution rule, applied to the nodes of *this clause* rather than to the whole schema.
-
-On top of that sits the type, which dictates the permitted operators and whether the right-hand side can be a literal pattern or another column of the same class.
-
-The key property is that the WHERE clause **never feeds back**. A filter can neither require a table nor discharge one, so the polynomial $P$ and the join graph are frozen at the `WHERE` boundary. Conditions combine with `AND` and `OR`, take a `NOT` and nest behind brackets, but nothing they say alters which tables are in the query.
+What the state tracks depends on the clause. In the projection it works out which tables could still supply the fields selected so far and withdraws any field that would contradict the selection. In the FROM clause it offers only the tables the projection needs and a join only reaches a table linked to the entry by a foreign key, which also fills in the `ON` clause. Once the FROM clause is finished its columns form a fixed table and the rest of the query is written against it: a condition may name only those columns and the type of a column decides which operators and literals can follow it. The terminator is not offered until the FROM clause supplies every table the projection needs. Section 6 covers how each of these is computed.
 
 ### An example
 
@@ -256,7 +159,7 @@ and `comments`, so it leaves both open until something else decides between
 them. A name drops out once nothing that could supply it is left: after
 `SELECT id, title` the root `id` has to come from exactly one source and
 `title` has pinned that source to `posts`, so `users` is out and `first_name`
-is no longer offered. Section 6a is how that is computed.
+is no longer offered. Section 6.1 is how that is computed.
 
 **The FROM clause:** One or more entries, comma separated, each a table
 optionally renamed by `AS`. Only tables the projection actually requires are
@@ -291,7 +194,7 @@ INNER JOIN comments AS c ON posts.id = c.post_id;
 
 A renamed source answers to its alias everywhere afterwards and to nothing
 else, so `FROM users AS u` makes the join `ON u.id = posts.user_id`, never
-`ON users.id`. Section 6c is the graph this walks.
+`ON users.id`. Section 6.3 is the graph this walks.
 
 **The WHERE clause:** Optional and written against the relation the FROM
 clause produced: every column of every source it placed, joined or not.
@@ -311,8 +214,8 @@ WHERE created_at < published_at;
 
 A column's type fixes which operators it may take and what may stand on the
 other side of them, which is what makes `created_at < published_at` a statement
-about two timestamps and `email = users.id` no statement at all. Sections 6d
-and 6e are the relation and this gating.
+about two timestamps and `email = users.id` no statement at all. Sections 6.4
+and 6.5 are the relation and this gating.
 
 Conditions combine with `AND` and `OR`, take a `NOT` in front and nest three
 brackets deep:
@@ -500,49 +403,23 @@ Above the indexes sits the syntax graph. It weaves the raw primitives (constants
 
 The grammatical skeleton is right-linear:
 
-```mermaid
-graph LR
-    q0(( )) -->|SELECT| ref
-
-    ref(["next field"]) ==>|alias| q1(( ))
-    q1 -->|"."| q2(( ))
-    q2 -->|field| more(["after a field"])
-    ref -->|field| more
-
-    more -.->|","| ref
-    more -->|FROM| entry
-
-    entry(["next table"]) -->|table| head(["current entry"])
-    entry -->|"table AS alias"| head
-
-    head -->|"join type"| j1(( ))
-    j1 -->|table| j2(( ))
-    j2 -->|ON| j3(( ))
-    j3 -->|"a = b"| head
-
-    head -.->|","| entry
-    head -.->|";"| accept(((accept)))
-
-    head -->|WHERE| cond
-    cond(["next condition"]) -->|operand| w1(( ))
-    w1 -->|"operator"| w2(( ))
-    w2 -->|"operand or literal"| done(["after a condition"])
-    w1 -->|"IS [NOT] NULL"| done
-
-    done -->|"AND, OR"| cond
-    done -.->|";"| accept
-
-    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
-    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
-    class q0,q1,q2,more,j1,j2,j3,w1,w2,done,accept plain
-    class ref,entry,head,cond accent
+```math
+\begin{aligned}
+S &\to \texttt{SELECT}\; \mathit{Ref} \\
+\mathit{Ref} &\to \mathit{field}\; \mathit{More} \;\mid\; \mathit{alias}\,\texttt{.}\,\mathit{field}\; \mathit{More} \\
+\mathit{More} &\to \texttt{,}\; \mathit{Ref} \;\mid\; \texttt{FROM}\; \mathit{Entry} \\
+\mathit{Entry} &\to \mathit{table}\; \mathit{Head} \;\mid\; \mathit{table}\; \texttt{AS}\; \mathit{alias}\; \mathit{Head} \\
+\mathit{Head} &\to \mathit{join}\; \mathit{table}\; \texttt{ON}\; a \;\texttt{=}\; b\; \mathit{Head} \;\mid\; \texttt{,}\; \mathit{Entry} \\
+&\;\;\mid\; \texttt{WHERE}\; \mathit{Cond} \;\mid\; \texttt{;} \\
+\mathit{Cond} &\to \mathit{operand}\; \mathit{operator}\; \mathit{value}\; \mathit{Done} \\
+&\;\;\mid\; \mathit{operand}\; \texttt{IS [NOT] NULL}\; \mathit{Done} \\
+\mathit{Done} &\to \texttt{AND}\; \mathit{Cond} \;\mid\; \texttt{OR}\; \mathit{Cond} \;\mid\; \texttt{;}
+\end{aligned}
 ```
 
-Solid edges are lattices, dashed ones expressions and the thick one is the alias group. The whitespace between tokens is an expression index of its own and is left out of the picture, as are the `AS alias` a join target may carry, the `NOT` prefix a condition may take and the brackets it may nest behind. The one mixed edge is the right hand side of a condition, which is a lattice where it is another column and an expression where it is a literal.
+Every terminal is an index. An alias is a group, `,` and `;` are regular expressions and everything else is a constant. The one mixed terminal is the $\mathit{value}$ on the right of a condition, which is a constant where it is another column and a regular expression where it is a literal. The whitespace between tokens is a regular expression of its own and is left out of the rules, as are the `AS alias` a joined table may carry, the `NOT` a condition may take and the brackets conditions may nest in.
 
-If it were just this static structure, the language could be compiled ahead of time into one massive DFA. 
-
-But it isn't static. The four heavy states are the ones whose alternatives come from the latent context rather than from the grammar. Whether `head` may take the `;` or has to open another table entry depends on what has *already been selected*, the `field` edge out of `ref` ranges over the fields that are *still selectable in the current latent state* and the `operand` edge out of `cond` ranges over the columns the FROM clause *actually placed*, with the operator that follows it fixed by that column's type. 
+On its own this grammar could be compiled ahead of time into one large DFA. Four of its nonterminals take their alternatives from the latent context instead. $\mathit{Ref}$ offers only the fields that are still selectable in the current latent state and $\mathit{Entry}$ only the tables that can still answer the selection. Whether $\mathit{Head}$ may take the `;` or has to open another entry depends on what has already been selected. $\mathit{Cond}$ offers the columns the FROM clause actually placed and the type of the chosen column fixes which operators may follow it.
 
 Each of the four is a thunk: hand it the latent context (the constraints on tables, the aliases opened so far, the relation the FROM clause produced) and it answers with the alternatives that context still allows. 
 
@@ -582,13 +459,13 @@ so no sibling can observe the choice.
 
 ### 6. The latent state: semantics as algebra
 
-The state each rule is run against is a `Context`. It carries everything the statement has committed to so far and it answers three kinds of question out of three structures. Every operation that changes it works on a copy, so branches never see each other.
+Every rule runs against a `Context`, which holds what the statement has committed to so far in three structures. `Conflicts` narrows the tables while the fields are selected (6.1, 6.2). `Relationships` is built at `FROM` and connects the tables the fields require (6.3). `Relation` is built at `WHERE` and holds the columns a condition may name (6.4). A rule never changes a context in place. It changes a copy, so branches never see each other's choices.
 
-#### 6a. Root fields: exactly one, as a polynomial
+#### 6.1 Root fields: exactly one, as a polynomial
 
 Write $t_1, \ldots, t_n$ for the tables, each a variable that is $1$ when the table is in the FROM clause. Selecting a root field constrains those variables and the constraint is a Boolean function.
 
-The natural home for Boolean functions here is $\mathbb{F}_2$, the field with two elements, where **addition is XOR and multiplication is AND**. `Root` works in the ring of such functions:
+Every Boolean function can be written as a polynomial over $\mathbb{F}_2$, the field with two elements, where **addition is XOR and multiplication is AND**. `Root` works in the ring of such polynomials:
 
 ```math
 R \;=\; \mathbb{F}_2[t_1, \ldots, t_n] \,\big/\, (t_i^2 - t_i)
@@ -596,7 +473,7 @@ R \;=\; \mathbb{F}_2[t_1, \ldots, t_n] \,\big/\, (t_i^2 - t_i)
 
 The quotient says $t^2 = t$: a table is either in the query or not and saying it twice adds nothing.
 
-A field $f$ that lives in the tables $T(f)$ says *exactly one of those is where it came from*. Writing that as a polynomial is easy for one or two tables and gets interesting after:
+A field $f$ that lives in the tables $T(f)$ demands that *exactly one of them* is in the FROM clause. As a polynomial that is easy to write for one or two tables and needs correction terms after that:
 
 ```math
 \begin{aligned}
@@ -607,15 +484,15 @@ A field $f$ that lives in the tables $T(f)$ says *exactly one of those is where 
 \end{aligned}
 ```
 
-For two tables, "exactly one" *is* XOR. For three it is not: $a + b + c$ over $\mathbb{F}_2$ is the **parity** function, which is $1$ when an odd number of tables are on. That is right for one table and wrong for three. The $abc$ term is there to cancel the all-three case and nothing else, since it is $0$ everywhere else.
+For two tables, exactly one is XOR. For three, $a + b + c$ over $\mathbb{F}_2$ is the **parity** function, which is $1$ when an odd number of tables are on: right for one table and wrong for all three. The $abc$ term cancels the all-three case and is $0$ everywhere else.
 
-The pattern that falls out is clean. $C(f)$ is the sum of **every odd-sized subset** of $T(f)$:
+In general $C(f)$ is the sum over **every odd-sized subset** of $T(f)$:
 
 ```math
 C(f) \;=\; \sum_{\substack{S \subseteq T(f) \\ |S| \text{ odd}}} \;\; \prod_{i \in S} t_i
 ```
 
-and it is exactly-one for a one-line reason: if $m$ tables are on, the terms that survive are the odd-sized subsets of those $m$ and for $m \ge 1$ there are $2^{m-1}$ of them, which is even for every $m \ge 2$, so they cancel. The sum is $1$ only when $m = 1$ and empty, hence $0$, when $m = 0$.
+If $m$ tables are on, the terms that survive are the odd-sized subsets of those $m$. For $m \ge 1$ there are $2^{m-1}$ of them, an even number for every $m \ge 2$, so they cancel. The sum is $1$ for $m = 1$ and empty, hence $0$, for $m = 0$.
 
 Selecting a field multiplies its constraint into a running product, which is AND:
 
@@ -623,7 +500,7 @@ Selecting a field multiplies its constraint into a running product, which is AND
 P \;\leftarrow\; P \cdot C(f), \qquad P \text{ starts at } 1
 ```
 
-$P$ is the latent state: the function that is $1$ on exactly those FROM clauses still consistent with everything selected. Every question is now an evaluation of it:
+$P$ is the latent state: the function that is $1$ on exactly those FROM clauses still consistent with everything selected. Every question about the selection is an evaluation of it:
 
 ```math
 \begin{aligned}
@@ -635,21 +512,27 @@ P \cdot C(f) = 0 \quad&\Longleftrightarrow\quad \text{field } f \text{ is exclud
 \end{aligned}
 ```
 
-Two of those lines need care. The last one ranges over the variables $P$ still mentions rather than over every table: a table $P$ has stopped depending on is *compatible* with the selection but not *required* by it and only what $P$ still depends on belongs in the FROM clause. Selecting `email` leaves $P = u$ and it is `users` alone that is outstanding: `posts` and `comments` pass the $P|_{t=1} \neq 0$ test yet appear nowhere in $P$. The second line has the mirror image of the same subtlety: a table already named has been substituted away and no longer appears in $P$, so the test can never flag it again and the excluded set carries the used tables alongside.
+The last line ranges only over the variables $P$ still mentions. A table $P$ no longer depends on is compatible with the selection but not required by it and only the tables $P$ depends on belong in the FROM clause. Selecting `email` leaves $P = u$, so only `users` is outstanding: `posts` and `comments` pass the $P|_{t=1} \neq 0$ test but do not appear in $P$.
 
-Idempotence earns its keep. Selecting `body` and then `user_id`, both living in exactly `{comments, posts}`, leaves $P = c + p$ unchanged, because $(c+p)^2 = c+p$: the second field adds no information and the algebra says so with no special case. Naming a table is substitution: setting $u = 1$ discharges the demand of every constraint mentioning it. What is left is rarely the constant $1$. Selecting `body` and then naming `posts` leaves $P = c + 1$, which goes on forbidding `comments`, yet its value at the origin is $1$ and that evaluation is what satisfaction tests.
+The second line has the opposite problem. A table that has already been named was substituted away and no longer appears in $P$, so the test can never flag it again. The set of excluded tables therefore also holds the tables already used.
 
-#### 6b. Aliased fields: intersection
+Selecting a field twice changes nothing. `body` and `user_id` both live in exactly `{comments, posts}`, so selecting both leaves $P = c + p$ without any special case, because $(c+p)^2 = c+p$.
 
-An alias denotes **exactly one** table and cannot be two things at once, which removes all the cross-talk the ring was needed for. `Scope` is then a plain intersection:
+Naming a table is substitution: setting $u = 1$ satisfies every constraint that mentions `users`. What is left is rarely the constant $1$. Selecting `body` and then naming `posts` leaves $P = c + 1$. It still forbids `comments`, but its value at the origin is $1$ and the origin is where satisfaction is tested.
+
+#### 6.2 Aliased fields: intersection
+
+An alias stands for exactly one table, so its fields only narrow down which table that is and no ring is needed. `Scope` is a plain intersection:
 
 ```math
 \mathit{cand} \;\leftarrow\; \mathit{cand} \,\cap\, T(f)
 ```
 
-A selection that would empty $\mathit{cand}$ is refused outright and leaves it untouched, so $\emptyset$ never means contradiction: it is what naming the table produces and it is exactly the condition for the scope being satisfied. `Scopes` is the registry of them, reporting an aliased table as the scoped node `"users u"` so that `users` and `users u` stay distinguishable downstream. `Conflicts` is the facade over both halves.
+A field that would empty $\mathit{cand}$ is refused and leaves it unchanged, so $\emptyset$ never means a contradiction. The set becomes empty when the alias's table is named in the FROM clause and that is exactly when the scope is satisfied.
 
-#### 6c. The FROM clause: graph contraction
+`Scopes` holds one scope per alias and reports an aliased table as the node `"users u"`, so `users` and `users u` stay apart. `Conflicts` puts `Root` and `Scopes` behind one interface.
+
+#### 6.3 The FROM clause: graph contraction
 
 Once the fields are chosen, the required tables have to be **connected**. `Relationships` builds a multigraph whose vertices are the tables (together with aliased nodes like `"users u"`) and whose edges are the foreign keys, each labelled with the column pair it joins on.
 
@@ -659,149 +542,67 @@ One FROM entry is a connected piece being grown from a head vertex $h$. Joining 
 \mathrm{join}(h, x) : \qquad G \;\leftarrow\; G \,/\, \{h, x\}
 ```
 
-Contraction is the right operation because it reproduces SQL's own rule: after a join the pair behaves as one relation, every column of either is reachable and the merged vertex inherits both neighbourhoods, so a table two foreign keys away only becomes joinable once the table between them has been joined in.
+Contraction matches SQL's rule: after a join the pair behaves as one relation, every column of either is reachable and the merged vertex has both neighbourhoods. A table two foreign keys away therefore becomes joinable only once the table between them has been joined.
 
 The `ON` columns are the label on the edge, so choosing the target determines them.
 
 ```
 NOTE: What the join graph answers
 
-Ask it what can be joined onto the current entry and you get back, per
-edge, the neighbouring table together with the two columns the ON clause
-needs. Those are read off the edge label. The label is stored undirected
-and oriented when asked, so the head's column always comes out first.
+Asked what can be joined onto the current entry, it answers with one
+neighbouring table per edge, together with the two columns the ON clause
+needs. The columns are read off the edge label, which is stored
+undirected and turned around when read, so the head's column comes first.
 
-It is a multigraph deliberately: two tables joined by two different
-foreign keys are two alternatives and both stay. The head is a single
-vertex name, so growing one FROM entry is a sequence of contractions
-into it.
+Two tables linked by two different foreign keys have two edges and both
+stay, one alternative each. The head is a single vertex, so growing one
+FROM entry is a sequence of contractions into it.
 
-Contraction being the *only* mutation is worth saying out loud, because
-it is what makes the structure cheap. Nothing is ever added after the
-schema has been read, so the quotient is determined by one array, saying
-which vertex each vertex has been folded into; everything else is shared
-by every copy. A branch that joins nothing allocates nothing and
-a dropped loop needs no handling: an edge whose far end is in the same
-class as its near end is simply not reported.
+Contraction is the only change ever made to the graph and that keeps it
+cheap. Nothing is added after the schema has been read, so the contracted
+graph is one array saying which vertex each vertex was folded into and
+everything else is shared by every copy. A branch that joins nothing
+allocates nothing. Loops need no handling either: an edge whose two ends
+are in the same class is not reported.
 ```
 
-#### 6d. The WHERE clause: closing the clause makes it a table
+#### 6.4 The WHERE clause: closing the clause makes it a table
 
-The three structures above all run the same way round. Fields are chosen first
-and the tables follow: the polynomial says which FROM clauses are still
-consistent, the scopes say what each alias may still be, the join graph says
-how to connect what is left. Everything is a constraint waiting to be
-discharged.
+In 6.1 to 6.3 the fields come first and the tables follow from them. A filter works the other way round. Once `WHERE` is taken the FROM clause is finished, so the columns a condition may name are a fixed set, the **relation**: every column of every node the clause placed, as an entry or through a join.
 
-A filter runs the other way. By the time the `WHERE` keyword is taken the FROM
-clause is finished and what a condition may name is no longer something to be
-solved: it is a set. Call it the **virtual table**: every column of every node
-the clause placed, whether that node arrived as a static entry or was contracted
-in by a join. A filter cannot tell the two apart, which is exactly what a join
-means.
-
-So there is a second phase boundary, on the `WHERE` keyword, of the same shape
-as the first on `FROM`. And closing the clause turns the two things SQL leaves
-to a resolver into counting problems:
+The relation is built once, when `WHERE` is taken. Two rules decide how each of its columns may be written:
 
 ```math
 \begin{aligned}
-\text{Scoped}(source, col) &= \text{name}(source)\texttt{.}col && \text{always available} \\
-\text{Root}(col) &\text{ is allowed} \iff \big|\{\, source \in \text{FROM} : col \in source \,\}\big| = 1 && \text{SQL's ambiguity rule}
+\text{Scoped}(n, col) &= \text{name}(n)\texttt{.}col && \text{always} \\
+\text{Root}(col) &\text{ is allowed} \iff \big|\{\, n \in \text{FROM} : col \in n \,\}\big| = 1 && \text{SQL's ambiguity rule}
 \end{aligned}
 ```
 
-with $\text{name}(source)$ the alias where the source carries one and the table
-name otherwise, which is the same function the `ON` clause is written from.
-`users INNER JOIN posts` offers `users.id` and `posts.id` but no root `id`,
-while `email` is offered root because one source supplies it. Note what the second line
-is quantified over: the sources of *this clause* rather than the tables of the
-schema. `title` lives on two tables, yet it is unambiguous in any clause that
-names only one of them.
+$\text{name}(n)$ is the node's alias if it has one and its table name otherwise, the same name the `ON` clause uses. After `FROM users INNER JOIN posts` the relation offers `users.id` and `posts.id` but no bare `id`, while `email` is offered bare because only `users` has it. The count is over the nodes of this FROM clause only: `body` lives on both `posts` and `comments`, yet after `FROM posts` it may be written bare.
 
-#### 6e. Conditions: the type rides in the continuation
+The relation does not change once it is built. A filter can neither require a table nor discharge one, so the polynomial and the join graph are frozen at the `WHERE` keyword.
 
-On top of the virtual table sits the restriction proper. Every column carries a
-`Type` the schema parser has always produced and nothing ever read; the
-condition grammar is the first consumer. Types are partitioned into six
-classes (numeric, text, temporal, boolean, binary, plus `UNKNOWN` for a name
-the parser did not recognise) and the class of the left operand fixes the two
-things a condition still has open: which operator may follow it and what may
-stand on the other side of that operator.
+#### 6.5 Conditions: the type rides in the continuation
 
-```math
-\begin{aligned}
-\text{Operators}(col) &= \text{OpsFor}(\text{class of } col) \;\cup\; \{\,\texttt{IS NULL}, \texttt{IS NOT NULL}\,\} \text{ if } col \text{ is nullable} \\
-\text{RightSide}(col) &= \{\, \text{other } col_2 : \text{class}(col_2) = \text{class}(col) \,\} \;\cup\; \text{Literal}(\text{class of } col)
-\end{aligned}
-```
+Every column carries the `Type` the schema parser read. Types fall into six classes and the class of a condition's left operand decides which operators may follow it:
 
-One branch per class, with the right hand side following from the same choice:
-
-```mermaid
-graph LR
-    col(["column"]) -->|"numeric"| n_ops["= != < <= > >="]
-    col -->|"text"| t_ops["= != < <= > >= LIKE NOT LIKE"]
-    col -->|"temporal"| d_ops["= != < <= > >="]
-    col -->|"boolean"| b_ops["= !="]
-    col -->|"nullable"| null_ops["IS NULL, IS NOT NULL"]
-
-    n_ops --> rhs_n["number or same-class column"]
-    t_ops --> rhs_t["string or same-class column"]
-    d_ops --> rhs_d["timestamp or same-class column"]
-    b_ops --> rhs_b["TRUE / FALSE or same-class column"]
-
-    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
-    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
-    class col accent
-    class n_ops,t_ops,d_ops,b_ops,null_ops,rhs_n,rhs_t,rhs_d,rhs_b plain
-```
-
-Ordering belongs to the classes that have an order, matching to text alone and
-equality to all of them. Nullability cuts across the classes instead of
-forming one, adding `IS NULL` and `IS NOT NULL` on top of whatever the column
-already allows. Those two are also the only operators that end a condition by
-themselves. Spelled out over the SQL types the schema parser reads:
-
-| type | operators | literal | example |
+| class | types | operators | literal |
 |---|---|---|---|
-| `BIGINT`, `INT`, `DECIMAL`, ... | `=` `!=` `<` `<=` `>` `>=` | `-?[0-9]+(\.[0-9]+)?` | `users.id >= -1` |
-| `VARCHAR`, `TEXT`, `CHAR`, ... | `=` `!=` `<` `<=` `>` `>=` `LIKE` `NOT LIKE` | `'...'` | `email LIKE '%keyword%'` |
-| `TIMESTAMP`, `DATE`, `TIME`, ... | `=` `!=` `<` `<=` `>` `>=` | `'2024-01-31 12:30:00'` | `created_at > '2024-01-31'` |
-| `BOOLEAN`, `BIT` | `=` `!=` | `TRUE`, `FALSE` | `verified != FALSE` |
-| `BLOB`, `BYTEA`, unrecognised | `=` `!=` | none, columns only | |
-| any of them, where nullable | `IS NULL`, `IS NOT NULL` | | `published_at IS NULL` |
+| numeric | `BIGINT`, `INT`, `DECIMAL`, ... | `=` `!=` `<` `<=` `>` `>=` | `-?[0-9]+(\.[0-9]+)?` |
+| text | `VARCHAR`, `TEXT`, `CHAR`, ... | the numeric ones, `LIKE` `NOT LIKE` | `'[^']*'` |
+| temporal | `TIMESTAMP`, `DATE`, `TIME`, ... | the numeric ones | `'2024-01-31'`, `'2024-01-31 12:30:00'` |
+| boolean | `BOOLEAN`, `BIT` | `=` `!=` | `TRUE`, `FALSE` |
+| binary | `BLOB`, `BYTEA`, ... | `=` `!=` | none |
+| unknown | a type the parser does not recognise | `=` `!=` | none |
 
-`UNKNOWN` is a class rather than a wildcard, so a type nobody recognised
-compares to nothing but another of its kind: a refusal is the safe direction
-to be wrong in. Values are left out entirely. $\text{Literal}$ is a *pattern*,
-one per class, so the literal column above gives a shape and the example beside
-it one word that shape admits; what a literal spells inside it is its own
-business. That is the whole of what typed means here.
+A nullable column also takes `IS NULL` and `IS NOT NULL`, the only operators that end a condition on their own. A primary key is never nullable, whether or not it was declared `NOT NULL`.
 
-None of this is state. The virtual table is: it depends on what the FROM
-clause committed to, so it is built at the boundary and copied per branch like
-everything else. The type stays outside the context. By the time a condition's
-alternatives are enumerated its left operand is already fixed, so the class is
-a constant of the continuation, in the same way the `ON` columns are a constant
-of the join clause that carries them. Nothing about types is ever asked of the
-context.
+The right side of an operator is a literal of the class or another column of the same class that the clause may name, other than the left column itself.
 
-```
-NOTE: Why the conditions cost nothing extra
+A literal is a pattern that checks only the shape of a value, so `'2024-99-99'` passes as a temporal literal. A class without a literal is compared only with columns of the same class.
 
-The latent model is not modified.
-
-The frontier inside a WHERE clause is one head per column of the virtual
-table, not one per column and operator pair: the operand lattice is
-emitted once and its operators open only behind it, so choosing the
-column is what prunes them.
-
-The indexes themselves are built once per schema and then shared. An
-operand is a constant, so it is a lattice; a literal is one expression
-per class, so a second pass over the same registry builds nothing at
-all.
-```
+The type is not stored in the context. When the operators are offered the left operand has already been written, so its class is a constant of the continuation, the same way the `ON` columns are constants of the join that carries them.
 
 ## License
 
