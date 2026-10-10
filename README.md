@@ -3,21 +3,29 @@
 An SQL autocomplete framework which guarantees grammatical and semantical correctness in the following subset of the language.
 
 ```xml
-<statement> := SELECT <fields> FROM <entry> [, <entry>]* [WHERE <filters>] ;
+<statement>  := [WITH <definition> [, <definition>]*] <select> ;
+<definition> := <name> AS ( <select> )
 
-<fields>    := <field ref> [, <field ref>]*
-<field ref> := <field> | <alias>.<field>
+<select>     := SELECT <items> FROM <entry> [, <entry>]*
+                [WHERE <filters>] [GROUP BY <keys> [HAVING <filters>]]
 
-<entry>     := <source> [<join>]*
-<join>      := <join type> <source> ON <column ref> = <column ref>
-<source>    := <table> [AS <alias>]
-<join type> := INNER JOIN | LEFT JOIN | RIGHT JOIN | FULL JOIN
+<items>      := <item> [, <item>]*
+<item>       := <field ref> | <aggregate> [AS <name>]
+<aggregate>  := COUNT(*) | <function>(<field ref>)
+<function>   := COUNT | SUM | AVG | MIN | MAX
+<field ref>  := <field> | <alias>.<field>
 
-<filters>   := <predicate> [(AND | OR) <predicate>]*
-<predicate> := [NOT] (<condition> | "(" <filters> ")")
-<condition> := <operand> <operator> <operand | literal>
-             | <operand> IS [NOT] NULL
-<operand>   := <column> | <qualifier>.<column>
+<entry>      := <source> [<join>]*
+<join>       := <join type> <source> ON <column ref> = <column ref>
+<source>     := <table> [AS <alias>]
+<join type>  := INNER JOIN | LEFT JOIN | RIGHT JOIN | FULL JOIN
+
+<keys>       := <operand> [, <operand>]*
+<filters>    := <predicate> [(AND | OR) <predicate>]*
+<predicate>  := [NOT] (<condition> | "(" <filters> ")")
+<condition>  := <operand> <operator> <operand | literal>
+              | <operand> IS [NOT] NULL
+<operand>    := <column> | <qualifier>.<column> | <aggregate>   (aggregates in HAVING only)
 ```
 
 ## Setup
@@ -319,6 +327,49 @@ SELECT email FROM users WHERE NOT email LIKE 'a%';
 SELECT email FROM users WHERE (email = 'a' OR email = 'b') AND NOT users.id = 1;
 ```
 
+**Aggregates and grouping:** An item may also be an aggregate over a column,
+`COUNT(*)` included, optionally named with `AS`. The function decides which
+columns it may take: `SUM` and `AVG` only numbers, `MIN` and `MAX` anything with
+an order, `COUNT` everything. A column handed to a function narrows the tables
+like any other column, but harder: `SUM(id)` may only be supplied by a table
+whose `id` is numeric.
+
+```sql
+SELECT COUNT(*) FROM users;
+SELECT MIN(title), MAX(published_at) FROM posts;
+SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id;
+```
+
+Once any item aggregates, every plain item has to be grouped, and the statement
+cannot end until it is. A key is a column of the relation the FROM clause
+produced, so `GROUP BY email` and `GROUP BY u.email` are the same key where one
+source supplies `email`. HAVING follows with the condition grammar of WHERE,
+over the grouped columns and aggregates of any column:
+
+```sql
+SELECT u.email, COUNT(p.id) AS posts_count
+FROM users AS u
+INNER JOIN posts AS p ON u.id = p.user_id
+GROUP BY u.email
+HAVING COUNT(p.id) >= 2;
+```
+
+**WITH: queries stacked on queries:** A statement may open with definitions,
+each a query of its own whose result is a table to everything after it. A
+definition's columns are its items, so they need names that differ: every
+aggregate is named and no column comes twice. A projected column keeps the
+foreign key it had, so the join graph runs through a definition as through the
+table it came from:
+
+```sql
+WITH c AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id)
+SELECT email, n FROM users INNER JOIN c ON users.id = c.user_id WHERE n > 1;
+```
+
+Every name a definition introduces, its own and its columns', is reserved
+from then on, in every spelling, since SQL hears `T` and `t` as one name.
+Section 6f is the grouping, 6g the stack definitions build and 6h the names it reserves.
+
 Two things have to be true of every statement the system produces. It has to be **grammatical**: a well-formed word or phrase. It also has to be **meaningful**: something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
 
 ## Architecture
@@ -578,7 +629,27 @@ so no sibling can observe the choice.
 
 ### 6. The latent state: semantics as algebra
 
-The state each rule is run against is a `Context`. It carries everything the statement has committed to so far and it answers three kinds of question out of three structures. Every operation that changes it works on a copy, so branches never see each other.
+The state each rule is run against is a `Context`. It carries everything the statement has committed to so far: the stack of definitions closed so far and the query being written over it. Every operation that changes it works on a copy, so branches never see each other.
+
+The query is a **virtual table**, the one object that owns the data structure of a SELECT as it is written. It is held in one part per stretch of its lifecycle (the selection while the projection is written, the sources while the FROM clause is placed, the refinement written against the closed relation afterwards), and the parts are bound together by a state machine whose transitions fall on keywords:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> PROJECTION
+    PROJECTION --> SOURCE: FROM
+    SOURCE --> FILTER: WHERE
+    SOURCE --> GROUPING: GROUP BY
+    FILTER --> GROUPING: GROUP BY
+    GROUPING --> HAVING: HAVING
+    SOURCE --> CLOSED: ; or )
+    FILTER --> CLOSED: ; or )
+    GROUPING --> CLOSED: ; or )
+    HAVING --> CLOSED: ; or )
+    CLOSED --> [*]
+```
+
+Entering SOURCE builds the join graph and leaving it builds the relation; closing a definition fixes the table it exports. The statement has a machine of its own one level up, `PREAMBLE -> DEFINITION -> PREAMBLE -> ... -> MAIN`, which only says which query is open. Both are tables of legal moves and nothing else: what a move builds is the virtual table's business, so the lifecycle can be read without the work getting in the way.
 
 #### 6a. Root fields: exactly one, as a polynomial
 
@@ -798,6 +869,112 @@ operand is a constant, so it is a lattice; a literal is one expression
 per class, so a second pass over the same registry builds nothing at
 all.
 ```
+
+#### 6f. Aggregates and grouping: typed fields and coverage
+
+An aggregate's argument is a field like any other, so it constrains the tables
+the way 6a does, with one more condition: the column has to be of a class the
+function accepts. Write $T(f)$ for the tables carrying a field and $T_K(f)$ for
+those carrying it with a class in $K$. The argument has to come from one of
+$T_K(f)$, and the other owners may not be in the clause at all, or the bare
+name would be ambiguous between them:
+
+```math
+C_K(f) \;=\; C\bigl(T_K(f)\bigr) \cdot \prod_{t \,\in\, T(f) \setminus T_K(f)} (1 + t)
+```
+
+$(1 + t)$ is the polynomial that is $1$ exactly when $t$ is absent, so the
+product forbids the owners of the wrong class outright. When every owner
+qualifies the product is empty and $C_K(f) = C(f)$. One table of these is built
+per class set a function asks for (numeric for `SUM` and `AVG`, ordered for
+`MIN` and `MAX`), all of them up front, and an aliased argument intersects with
+$T_K(f)$ instead.
+
+An aggregate is also a column: its function maps the argument's `Field` to the
+`Field` it produces, `COUNT` to a number that is never NULL, `MAX(created_at)`
+to a timestamp that may be. That is what HAVING compares, through exactly the
+operator gating of 6e, and what a definition exports.
+
+Grouping is written against the closed relation, so a key is a column of it
+rather than a spelling, and coverage is a question about columns:
+
+```math
+\text{may close} \iff \bigl(\text{no aggregate} \,\lor\, \text{no plain item} \,\lor\, \text{grouped}\bigr)
+\;\land\; \bigl(\text{grouped} \Rightarrow \forall\, i \in \text{plain} : \text{col}(i) \in \text{keys}\bigr)
+```
+
+with $\text{col}(i)$ the column the relation resolves the item's spelling to.
+It is asked in one place only, where the query would end, so the terminator
+of a mixed projection is simply not on offer until its keys cover it.
+
+One more rule appears here because the FROM clause can no longer be read off
+the polynomial alone: two nodes of one table, `users` and `users AS u`, are one
+variable to the algebra, yet a bare projected column would be ambiguous
+between them. Placing a node checks that every bare column keeps one supplier,
+and the same check filters what is offered, so the grammar never offers a node
+it would have to refuse.
+
+#### 6g. WITH: a stack of virtual tables
+
+A definition is a query of its own, and once it closes it is a table. So a
+statement with definitions is a stack: each definition is a virtual table
+written over everything defined before it and pushed under whatever comes
+next.
+
+```mermaid
+graph LR
+    main(["main query"]) -->|"stacked on"| b(["b"])
+    b -->|"stacked on"| a(["a"])
+    a -->|"stacked on"| schema(["the schema"])
+
+    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
+    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
+    class a,b,schema plain
+    class main accent
+```
+
+Every virtual table holds the stack below it as a `Catalog`, and the catalog
+folds the stack into the two things a query needs: one schema holding the
+physical tables and every export below them, and the reserved names of every
+layer. Every resolver of 6a to 6f then runs over that schema unchanged, which
+is the point. A derived table is a `Table` like any the schema declared: the
+algebra gets one more variable, the join graph one more vertex, the relation
+one more source.
+
+What a definition exports is read off its projection and its closed relation
+the moment it closes: one column per item, by output name. A plain column
+keeps its type, its nullability and its foreign key, and it keeps its
+**origin**, the schema column it is. A foreign key matches its target by
+origin rather than by table name, so the edge from `posts.user_id` to
+`users(id)` reaches the `id` of any definition that projected `users.id`, and
+a definition that projected `posts.user_id` still joins `users`. An aggregate
+has no origin, being a computed value, so nothing joins through it.
+
+A closed virtual table never changes, so the stack is persistent: pushing
+builds a new catalog over the old one, and every branch of the syntax graph
+shares the layers below the query it is writing.
+
+#### 6h. Reserved names: every spelling, at every level
+
+An invented name is an identifier minus a reserved set (section 4), and the set
+is assembled from the stack. Its base is the same for every name: keywords,
+the function names, and every table and column any layer defines. On top of it
+each use adds what the query has introduced itself:
+
+| the name being invented | may additionally not be |
+|---|---|
+| an alias, `u.` in the projection | an output alias; another spelling of an alias already opened |
+| an output name, `AS n` | another output name, any alias |
+| a definition, `WITH c` | anything the stack defines, earlier definitions included |
+| anything inside a definition | the definition's own name |
+
+SQL compares unquoted identifiers ignoring case, so each reserved name is
+excluded by a case-insensitive pattern rather than by the spelling it was
+written in: `USERS` is the table, `Select` is the keyword, and two definitions
+called `T` and `t` collide. The one name that may be written again is an alias
+already opened, which is the same scope written twice, and only exactly as it
+was written: its exclusion is every case of it minus that one spelling, a
+difference nested inside the group's own difference.
 
 ## License
 

@@ -10,12 +10,12 @@ Three kinds of draft exist, mirroring the kernel:
 * a **lattice** matches a constant string through Aho-Corasick;
 * an **expression** matches a regular expression through a TokTrie backed DFA;
 * a **group** is one inclusion minus any number of exclusions, and is what
-  alias resolution is built from - see `graph.alias`.
+  every invented name is built from - see `grammar.combinators.name`.
 
 A group is drafted from other drafts, but the kernel wants the *ids* of its
 members, so `spec` builds them first. That is cheap after the first time: the
-members of an alias group are one shared identifier expression plus one tiny
-lattice per excluded name, and all of them are memoised.
+members of a name group are one shared identifier expression plus one small
+case-insensitive expression per excluded name, and all of them are memoised.
 
 Indexes are immutable and carry no position - the position lives in the
 kernel's `Memory`, one per head - which is what lets a single index back every
@@ -172,7 +172,7 @@ class IndexFactory:
             return known
 
         # The members are built as one batch rather than one at a time: an
-        # alias group holds a lattice per reserved word, table and field, and
+        # name group holds an exclusion per reserved word, table and field, and
         # the kernel spreads a batch over its worker pool with the GIL dropped.
         members: tuple[IndexDraft, ...] = (draft.include,) + draft.excludes
         specs: list[IndexSpec | None] = [self.spec(member) for member in members]

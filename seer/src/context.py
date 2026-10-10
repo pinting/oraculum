@@ -1,313 +1,138 @@
 """Generation state shared by the nodes of the syntax graph.
 
-A context owns a `Conflicts` and a `Relationships`, and tracks the query
-through the two phases a SELECT is resolved in:
+A context is what a node of the graph carries: the statement as far as it has
+been written. That is
 
-1. **fields** - `Conflicts` narrows the table space as fields are selected,
-   qualified by an alias or not.
-2. **FROM / JOIN** - `Relationships` walks the foreign key graph to connect
-   the tables `Conflicts` ended up requiring.
-3. **WHERE** - `Relation` holds the virtual table the finished clause produced,
-   and the conditions are gated on the types of its columns.
+* the **stack** of virtual tables closed so far, as a `Catalog` - the `WITH`
+  definitions, each one readable by everything after it;
+* the **query** being written, a `VirtualTable` over that stack, or nothing
+  between two definitions;
+* the statement machine of `state.statement`, which says which of those is
+  open.
 
-Each boundary falls on a token. `enter_from()` is what the selector on the
-`FROM` keyword calls, and it is where the join graph is built, because only
-then is the required table set final; `enter_where()` is the same move one
-phase later, on the `WHERE` keyword, because only then is the FROM clause
-final. The second boundary only ever reads: a filter can neither require a
-table nor satisfy one.
+Everything about the data structure of a query is its virtual table's
+business. The context only opens queries, and pushes a closed definition onto
+the stack it hands to the next one.
 
 Everything a thunk asks is ordered and side effect free, and everything a
-selector applies happens on a `copy()`, so branches never see each other.
+selector applies happens on a `copy()`, so branches never see each other. A
+copy copies the open query alone: the stack below it is closed, so it is shared.
 
-Every operation that modifies a context traces the whole resolver state. See
-`debug.py`; tracing is off until a driver enables it.
+Every operation that modifies the statement traces the whole resolver state.
+See `debug.py`; tracing is off until a driver enables it.
 """
 
 from __future__ import annotations
 
 from . import debug
-from .conflicts import Conflicts
-from .operators import TypeClass
-from .relation import Operand, Relation
-from .relationships import JoinType, Neighbor, Relationships
-from .schema import RESERVED, Schema
-from .scopes import unqualify
-
-GLOBAL_NAMESPACE: str = ""
-
-def _qualified(context: "Context", field: str) -> str:
-    """`alias.field` when a namespace is open, otherwise just `field`."""
-
-    namespace: str = context.get_current_namespace()
-
-    return f"{namespace}.{field}" if namespace else field
+from .model import Schema
+from .query import Catalog, Exclusion, VirtualTable
+from .state import Machine, Phase, statement_machine
 
 class Context:
-    __slots__ = (
-        "_schema",
-        "_conflicts",
-        "_relationships",
-        "_relation",
-        "_current_namespace",
-        "_reserved",
-    )
+    __slots__ = ("_phase", "_catalog", "_query")
 
     def __init__(self, schema: Schema | None = None) -> None:
         if schema is None:
             return
 
-        self._schema = schema
-        self._conflicts = Conflicts(schema)
-        self._relationships: Relationships | None = None
-        self._relation: Relation | None = None
-        self._current_namespace: str = GLOBAL_NAMESPACE
-        self._reserved: tuple[str, ...] | None = None
+        self._phase: Machine[Phase] = statement_machine()
+        self._catalog: Catalog = Catalog(schema)
+        self._query: VirtualTable | None = None
 
     def copy(self) -> "Context":
         clone: Context = Context.__new__(Context)
 
-        clone._schema = self._schema
-        clone._conflicts = self._conflicts.copy()
-        clone._relationships = (
-            None if self._relationships is None else self._relationships.copy()
-        )
-        clone._relation = None if self._relation is None else self._relation.copy()
-        clone._current_namespace = self._current_namespace
-        clone._reserved = self._reserved
+        clone._phase = self._phase
+        clone._catalog = self._catalog
+        clone._query = None if self._query is None else self._query.copy()
 
         return clone
 
     @property
     def schema(self) -> Schema:
-        return self._schema
+        """The schema as declared."""
+
+        return self._catalog.physical
 
     @property
-    def conflicts(self) -> Conflicts:
-        return self._conflicts
+    def phase(self) -> Phase:
+        return self._phase.state
 
     @property
-    def relationships(self) -> Relationships | None:
-        return self._relationships
+    def catalog(self) -> Catalog:
+        """The stack of definitions closed so far."""
+
+        return self._catalog
 
     @property
-    def relation(self) -> Relation | None:
-        return self._relation
+    def query(self) -> VirtualTable:
+        """The query being written; there is one wherever the grammar asks."""
 
-    # -- field phase ------------------------------------------------------
+        assert self._query is not None, f"no query is open in the {self.phase.value}"
 
-    @debug.traced(lambda self, namespace: f"set_current_namespace({namespace})")
-    def set_current_namespace(self, namespace: str) -> None:
-        """Open an alias, consumed by the next `use_field`."""
+        return self._query
 
-        self._current_namespace = namespace
+    def _enter(self, phase: Phase) -> bool:
+        advanced: Machine[Phase] | None = self._phase.advance(phase)
 
-    def get_current_namespace(self) -> str:
-        return self._current_namespace
-
-    def get_fields(self) -> list[str]:
-        """Fields selectable right now, sorted so expansion is reproducible."""
-
-        return sorted(self._conflicts.get_fields(self._current_namespace))
-
-    def get_excluded_fields(self) -> list[str]:
-        return sorted(self._conflicts.get_excluded_fields(self._current_namespace))
-
-    @debug.traced(lambda self, field: f"use_field({_qualified(self, field)})")
-    def use_field(self, field: str) -> bool:
-        namespace: str = self._current_namespace
-
-        self._current_namespace = GLOBAL_NAMESPACE
-
-        return self._conflicts.use_field(namespace, field)
-
-    def get_namespaces(self) -> list[str]:
-        return self._conflicts.scopes.names()
-
-    def get_reserved_names(self) -> tuple[str, ...]:
-        """Names an alias may not spell.
-
-        The SQL keywords of `schema.RESERVED` in both cases, plus every table
-        and column name of the schema. An alias that spelled one of those would
-        be ambiguous with the token it shadows - `SELECT users.email` would
-        open an alias called `users` rather than reference the table - so
-        `graph.alias` subtracts them from the identifier pattern.
-
-        Constant for a schema, so it is computed once and carried by `copy()`
-        rather than rebuilt per branch.
-        """
-
-        if self._reserved is None:
-            names: set[str] = {word for word in RESERVED}
-
-            names.update(word.lower() for word in RESERVED)
-            names.update(self._schema.get_names())
-
-            self._reserved = tuple(sorted(names))
-
-        return self._reserved
-
-    # -- phase boundary ---------------------------------------------------
-
-    @debug.traced(lambda self: "enter_from()")
-    def enter_from(self) -> None:
-        """Build the join graph over whatever `Conflicts` ended up requiring.
-
-        Called by the selector on the `FROM` keyword. Idempotent, because a
-        branch may reach it more than once while the engine expands.
-        """
-
-        self._enter_from()
-
-    def _enter_from(self) -> None:
-        if self._relationships is not None:
-            return
-
-        self._relationships = Relationships(
-            self._schema,
-            self._conflicts.get_required_tables(),
-        )
-
-    # -- FROM / JOIN phase ------------------------------------------------
-
-    def get_required_tables(self) -> list[str]:
-        """Nodes the FROM clause still has to supply, as `"table"` or `"table alias"`."""
-
-        return sorted(self._conflicts.get_required_tables())
-
-    def get_excluded_tables(self) -> list[str]:
-        return sorted(self._conflicts.get_excluded_tables())
-
-    @debug.traced(lambda self, node: f"use_table({node})")
-    def use_table(self, node: str) -> bool:
-        """Open a FROM entry at `node` and satisfy it.
-
-        Mirrors `Relationships.use_table`, which refuses a node that is not
-        required, then delegates to `Conflicts`.
-        """
-
-        self._enter_from()
-
-        assert self._relationships is not None
-
-        if node not in self._conflicts.get_required_tables():
+        if advanced is None or advanced is self._phase:
             return False
 
-        if not self._conflicts.use_table(node):
+        self._phase = advanced
+
+        return True
+
+    # -- definitions ------------------------------------------------------
+
+    def get_reserved_names(self) -> Exclusion:
+        """What a definition's name may not spell: anything the stack defines."""
+
+        return self._catalog.reserved
+
+    @debug.traced(lambda self, name: f"begin_definition({name})")
+    def begin_definition(self, name: str) -> bool:
+        """Open the query of `WITH <name> AS (...)`."""
+
+        if not self._catalog.reserved.allows(name) or not self._enter(Phase.DEFINITION):
             return False
 
-        return self._relationships.use_table(node)
+        self._query = VirtualTable(self._catalog, name)
 
-    def get_joinable_neighbors(self) -> tuple[Neighbor, ...]:
-        """Tables reachable from the current FROM entry by a foreign key."""
+        return True
 
-        if self._relationships is None:
-            return ()
+    @debug.traced(lambda self: "end_definition()")
+    def end_definition(self) -> bool:
+        """Close the open definition and push it onto the stack."""
 
-        return self._relationships.get_joinable_neighbors(
-            self._conflicts.get_excluded_tables()
-        )
-
-    @debug.traced(
-        lambda self, neighbor, join_type=JoinType.INNER: f"join_table({neighbor.format(join_type)})"
-    )
-    def join_table(self, neighbor: Neighbor, join_type: JoinType = JoinType.INNER) -> bool:
-        """Join `neighbor` into the current entry, satisfying it if required."""
-
-        if self._relationships is None:
+        if self._query is None or not self._phase.is_at(Phase.DEFINITION):
             return False
 
-        if neighbor not in self.get_joinable_neighbors():
+        if not self._query.close() or not self._enter(Phase.PREAMBLE):
             return False
 
-        if neighbor.table in self._conflicts.get_required_tables():
-            self._conflicts.use_table(neighbor.table)
+        self._catalog = self._catalog.push(self._query)
+        self._query = None
 
-        return self._relationships.join_table(neighbor, join_type)
+        return True
 
-    def get_head(self) -> str | None:
-        if self._relationships is None:
-            return None
+    # -- the main query ---------------------------------------------------
 
-        return self._relationships.head
+    @debug.traced(lambda self: "begin_main()")
+    def begin_main(self) -> bool:
+        """Open the main query, over every definition closed so far."""
 
-    def get_used_nodes(self) -> tuple[str, ...]:
-        """The nodes the FROM clause has placed, in the order it placed them."""
-
-        if self._relationships is None:
-            return ()
-
-        return self._relationships.get_used_nodes()
-
-    # -- second phase boundary --------------------------------------------
-
-    @debug.traced(lambda self: "enter_where()")
-    def enter_where(self) -> None:
-        """Fix the virtual table over the FROM clause as it now stands.
-
-        Called by the selector on the `WHERE` keyword. Idempotent for the same
-        reason `enter_from` is: a branch may reach it more than once while the
-        engine expands.
-        """
-
-        self._enter_where()
-
-    def _enter_where(self) -> None:
-        if self._relation is not None or self._relationships is None:
-            return
-
-        self._relation = Relation(self._schema, self._relationships.get_used_nodes())
-
-    # -- WHERE phase ------------------------------------------------------
-
-    def get_operands(self, kind: TypeClass | None = None) -> tuple[Operand, ...]:
-        """Columns a condition may name, optionally only those of one class.
-
-        Empty until the `WHERE` keyword has been taken, because until then
-        there is no closed FROM clause to read them off.
-        """
-
-        if self._relation is None:
-            return ()
-
-        return self._relation.get_operands(kind)
-
-    @debug.traced(lambda self, text: f"use_filter({text})")
-    def use_filter(self, text: str) -> bool:
-        """Record a condition, once it has been written whole."""
-
-        if self._relation is None:
+        if not self._enter(Phase.MAIN):
             return False
 
-        return self._relation.use_filter(text)
+        self._query = VirtualTable(self._catalog)
 
-    def get_used_filters(self) -> tuple[str, ...]:
-        if self._relation is None:
-            return ()
-
-        return self._relation.get_used_filters()
-
-    # -- completion -------------------------------------------------------
-
-    def is_satisfied(self) -> bool:
-        return self._conflicts.is_satisfied()
+        return True
 
     def __str__(self) -> str:
-        """The state block `debug.py` prints after every modifying operation.
+        query: str = "" if self._query is None else f"\n{self._query}"
 
-        `Conflicts.__str__` supplies the first six lines; then the FROM clause
-        as `Relationships` has it so far, empty until phase two begins, and the
-        conditions `Relation` has taken, empty until phase three does.
-        """
-
-        references: str = "" if self._relationships is None else str(self._relationships)
-        filters: str = "" if self._relation is None else str(self._relation)
-
-        return (
-            f"{self._conflicts}\n"
-            f"Used references  = {references}\n"
-            f"Used filters     = {filters}"
-        )
+        return f"Statement        = {self._phase}\nStack            = {self._catalog}{query}"
 
     def __repr__(self) -> str:
-        return f"Context(required={self.get_required_tables()})"
+        return f"Context(phase={self.phase.name}, query={self._query!r})"

@@ -51,10 +51,7 @@ import yaml
 
 import kernel as kl
 
-from src.engine import Engine
-from src.factory import IndexFactory
-from src.graph import root
-from src.schema import Schema, parse_schema
+from src import Context, Engine, IndexFactory, Schema, parse_schema, root
 
 VOCABULARY_PATH: Path = ROOT.parent / "vocabulary.tiktoken"
 SCHEMA_PATH: Path = ROOT / "schema.sql"
@@ -151,7 +148,7 @@ class Feeder:
 
         engine: Engine = Engine(
             self.vocabulary,
-            self.schema,
+            Context(self.schema),
             root(),
             factory=self.factory,
             threads=self.threads,

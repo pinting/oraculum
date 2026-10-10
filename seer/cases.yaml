@@ -305,14 +305,15 @@
     # Every keyword is upper case.
     - select email from users;
     - Select Email From Users;
-    # The projection is columns, bare or qualified - nothing else.
+    # The projection is columns and aggregates over them - nothing else, and
+    # only an aggregate is named.
     - SELECT * FROM users;
     - SELECT DISTINCT email FROM users;
     - SELECT email AS e FROM users;
-    - SELECT COUNT(id) FROM users;
     - SELECT 1 FROM users;
-    # No clause follows the WHERE clause.
-    - SELECT email FROM users GROUP BY email;
+    - SELECT LOWER(email) FROM users;
+    - SELECT COUNT(DISTINCT email) FROM users;
+    # No clause follows GROUP BY and HAVING.
     - SELECT email FROM users ORDER BY email;
     - SELECT email FROM users LIMIT 10;
     # A condition is one operator between two operands.
@@ -391,10 +392,7 @@
     - SELECT _.email FROM users AS _;
     - SELECT __.email FROM users AS __;
     - SELECT _1.email FROM users AS _1;
-    # The reserved list carries each keyword upper and lower cased, and
-    # neither of these is either. Then one as long as an alias gets.
-    - SELECT Select.email FROM users AS Select;
-    - SELECT WhErE.email FROM users AS WhErE;
+    # One as long as an alias gets.
     - SELECT abcdefghijklmnopqrstuvwxyz0123456789.email FROM users AS abcdefghijklmnopqrstuvwxyz0123456789;
 
 - group: aliases the exclusion group blocks
@@ -413,6 +411,12 @@
     - SELECT AS.email FROM users AS AS;
     - SELECT ON.email FROM users AS ON;
     - SELECT NULL.email FROM users AS NULL;
+    # SQL compares identifiers ignoring case, so a reserved name is reserved
+    # in every spelling of it: these are the keywords and tables themselves.
+    - SELECT Select.email FROM users AS Select;
+    - SELECT WhErE.email FROM users AS WhErE;
+    - SELECT USERS.email FROM users AS USERS;
+    - SELECT Email.email FROM users AS Email;
     # An identifier cannot open with a digit.
     - SELECT 1u.email FROM users AS 1u;
 
@@ -636,3 +640,333 @@
     - SELECT email, body FROM users , comments ;
     - SELECT email FROM users WHERE users.id = -1 ;
     - "SELECT email FROM users WHERE created_at = '2024-01-31 12:30:00' ;"
+
+# -- aggregates, GROUP BY and HAVING ---------------------------------------
+
+- group: aggregates in the projection
+  expect: completed
+  queries:
+    # COUNT takes any column or `*`, and an aggregate alone needs no
+    # GROUP BY: the whole relation is one group.
+    - SELECT COUNT(*) FROM users;
+    - SELECT COUNT(id) FROM users;
+    - SELECT COUNT(email), COUNT(verified) FROM users;
+    - SELECT COUNT( * ) FROM users;
+    - "SELECT COUNT(\n\temail\n) FROM users;"
+    # SUM and AVG take numbers, MIN and MAX anything with an order.
+    - SELECT SUM(user_id) FROM posts;
+    - SELECT AVG(user_id) FROM posts;
+    - SELECT MIN(title), MAX(published_at) FROM posts;
+    - SELECT MIN(created_at), MAX(email), MIN(id) FROM users;
+    # Qualified arguments, and names given with AS.
+    - SELECT COUNT(u.id) FROM users AS u;
+    - SELECT COUNT(*) AS n FROM users;
+    - SELECT COUNT(*) AS n, MAX(created_at) AS latest FROM users;
+    - SELECT MAX(p.published_at) AS latest FROM posts AS p;
+    # `COUNT(*)` demands no table, so any table may open the FROM clause,
+    # and it may still be joined.
+    - SELECT COUNT(*) FROM posts;
+    - SELECT COUNT(*) FROM users INNER JOIN posts ON users.id = posts.user_id;
+    # The argument narrows the tables like any column: `title` is posts.
+    - SELECT COUNT(title) FROM posts;
+    - SELECT COUNT(title), COUNT(c.body) FROM posts INNER JOIN comments AS c ON posts.id = c.post_id;
+
+- group: aggregates the types refuse
+  expect: stuck
+  queries:
+    # SUM and AVG want numbers, MIN and MAX an order, and `*` is COUNT's.
+    - SELECT SUM(title) FROM posts;
+    - SELECT AVG(email) FROM users;
+    - SELECT SUM(created_at) FROM users;
+    - SELECT MIN(verified) FROM users;
+    - SELECT MAX(verified) FROM users;
+    - SELECT SUM(*) FROM users;
+    - SELECT MIN(*) FROM users;
+    - SELECT COUNT(u.*) FROM users AS u;
+    # A function is spelled upper case, takes one argument and nests in
+    # nothing.
+    - SELECT count(*) FROM users;
+    - SELECT COUNT() FROM users;
+    - SELECT COUNT(id, email) FROM users;
+    - SELECT COUNT(COUNT(id)) FROM users;
+    - SELECT COUNT (id) FROM users;
+    # The argument has to be a column the schema has.
+    - SELECT COUNT(nickname) FROM users;
+    - SELECT SUM(1) FROM users;
+
+- group: aggregates and plain columns need a GROUP BY
+  expect: stuck
+  queries:
+    # A plain column beside an aggregate has no one value per row without
+    # a grouping, so the statement cannot end.
+    - SELECT email, COUNT(*) FROM users;
+    - SELECT title, MAX(published_at) FROM posts;
+    - SELECT email, COUNT(*) FROM users WHERE verified = TRUE;
+
+- group: GROUP BY
+  expect: completed
+  queries:
+    - SELECT email FROM users GROUP BY email;
+    - SELECT email, COUNT(*) FROM users GROUP BY email;
+    - SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id;
+    - SELECT user_id, SUM(id), AVG(id) FROM posts GROUP BY user_id;
+    # Keys in any order, and more of them than the projection needs.
+    - SELECT email, first_name, COUNT(*) FROM users GROUP BY first_name, email;
+    - SELECT email FROM users GROUP BY first_name, email, verified;
+    - SELECT COUNT(*) FROM users GROUP BY verified;
+    # A key is a column, however it is spelled: one node supplies `email`,
+    # so the bare key groups the qualified item and the other way round.
+    - SELECT u.email FROM users AS u GROUP BY email;
+    - SELECT u.email, email FROM users AS u GROUP BY u.email;
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id GROUP BY users.email, posts.title;
+    # After a WHERE clause, and over a join.
+    - SELECT email, COUNT(*) FROM users WHERE verified = TRUE GROUP BY email;
+    - SELECT title, COUNT(c.id) FROM posts INNER JOIN comments AS c ON posts.id = c.post_id GROUP BY title;
+    - SELECT u.email, COUNT(p.id) AS n FROM users AS u LEFT JOIN posts AS p ON u.id = p.user_id GROUP BY u.email;
+    - "SELECT email FROM users GROUP BY email ;"
+    - "SELECT email FROM users\nGROUP\tBY\n\temail\n,\tfirst_name;"
+
+- group: GROUP BY that leaves a column ungrouped
+  expect: stuck
+  queries:
+    # Every plain column has to be grouped once anything is.
+    - SELECT email FROM users GROUP BY first_name;
+    - SELECT email, first_name, COUNT(*) FROM users GROUP BY email;
+    - SELECT u.email, COUNT(*) FROM users AS u GROUP BY u.first_name;
+    # A column is grouped once, however it is spelled.
+    - SELECT email FROM users GROUP BY email, email;
+    - SELECT u.email FROM users AS u GROUP BY u.email, email;
+    # Keys are columns of the relation, nothing else, and the bare name two
+    # nodes supply is no column at all.
+    - SELECT email FROM users GROUP BY COUNT(*);
+    - SELECT email FROM users GROUP BY nickname;
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id GROUP BY email, title, id;
+    - SELECT email FROM users GROUP BY;
+    - SELECT email FROM users GROUP email;
+    - SELECT email FROM users GROUP BY email WHERE verified = TRUE;
+
+- group: HAVING
+  expect: completed
+  queries:
+    # An aggregate over any column, compared like the column its function
+    # produces: COUNT is a number that is never NULL.
+    - SELECT email, COUNT(*) FROM users GROUP BY email HAVING COUNT(*) > 1;
+    - SELECT email FROM users GROUP BY email HAVING COUNT(id) >= 2;
+    - SELECT user_id FROM posts GROUP BY user_id HAVING MAX(published_at) > '2024-01-01';
+    - SELECT user_id FROM posts GROUP BY user_id HAVING MIN(title) LIKE 'a%';
+    - SELECT user_id FROM posts GROUP BY user_id HAVING SUM(id) IS NULL;
+    # A grouped column, by any of its spellings, and the right hand side a
+    # grouped column of the same class.
+    - SELECT email FROM users GROUP BY email HAVING email LIKE 'a%';
+    - SELECT u.email FROM users AS u GROUP BY email HAVING u.email != 'a';
+    - SELECT title FROM posts GROUP BY title, body HAVING MAX(title) = body;
+    # The condition grammar of WHERE, whole.
+    - SELECT email FROM users GROUP BY email HAVING COUNT(*) > 1 AND (email = 'a' OR NOT email = 'b');
+    - SELECT email FROM users WHERE verified = TRUE GROUP BY email HAVING COUNT(*) > 1 OR MAX(created_at) IS NOT NULL;
+    - SELECT u.email, COUNT(p.id) AS posts_count FROM users AS u INNER JOIN posts AS p ON u.id = p.user_id GROUP BY u.email HAVING COUNT(p.id) >= 2;
+
+- group: HAVING past what it may name
+  expect: stuck
+  queries:
+    # Only a grouped column stands bare in HAVING.
+    - SELECT email, COUNT(*) FROM users GROUP BY email HAVING first_name = 'a';
+    - SELECT email FROM users GROUP BY email HAVING users.id > 1;
+    # The function's result decides the operators: COUNT is never NULL and
+    # a number, MAX(created_at) a timestamp.
+    - SELECT email FROM users GROUP BY email HAVING COUNT(*) IS NULL;
+    - SELECT email FROM users GROUP BY email HAVING COUNT(*) LIKE 'a%';
+    - SELECT email FROM users GROUP BY email HAVING MAX(created_at) > 5;
+    - SELECT email FROM users GROUP BY email HAVING SUM(email) > 1;
+    # An aggregate belongs to HAVING and the projection, never to WHERE,
+    # and HAVING follows a GROUP BY.
+    - SELECT email FROM users WHERE COUNT(*) > 1;
+    - SELECT email FROM users HAVING COUNT(*) > 1;
+    - SELECT COUNT(*) FROM users HAVING COUNT(*) > 1;
+    - SELECT email FROM users GROUP BY email HAVING;
+
+- group: names the functions and the projection reserve
+  expect: stuck
+  queries:
+    # A function name is reserved in every spelling, as an alias and as
+    # the name of an item.
+    - SELECT COUNT.email FROM users AS COUNT;
+    - SELECT count.email FROM users AS count;
+    - SELECT Max.email FROM users AS Max;
+    - SELECT COUNT(*) AS COUNT FROM users;
+    - SELECT COUNT(*) AS sum FROM users;
+    # An item may not be named after a keyword, a table or a column.
+    - SELECT COUNT(*) AS FROM FROM users;
+    - SELECT COUNT(*) AS users FROM users;
+    - SELECT COUNT(*) AS email FROM users;
+    - SELECT COUNT(*) AS Email FROM users;
+    # Nor after another item, nor an alias, in any spelling - and an alias
+    # may not be an item's name either, whichever came first.
+    - SELECT COUNT(*) AS n, COUNT(id) AS n FROM users;
+    - SELECT COUNT(*) AS n, COUNT(id) AS N FROM users;
+    - SELECT COUNT(*) AS u, u.email FROM users AS u;
+    - SELECT u.email, COUNT(*) AS u FROM users AS u GROUP BY u.email;
+    - SELECT u.email, COUNT(*) AS U FROM users AS u GROUP BY u.email;
+    # Only an aggregate is named.
+    - SELECT email AS e FROM users;
+
+- group: names the projection leaves free
+  expect: completed
+  queries:
+    - SELECT COUNT(*) AS counted FROM users;
+    - SELECT COUNT(*) AS n, COUNT(id) AS m FROM users;
+    - SELECT COUNT(*) AS Total FROM users;
+    - SELECT u.email, COUNT(*) AS u2 FROM users AS u GROUP BY u.email;
+    # An alias is written again exactly as it was opened.
+    - SELECT U.email, U.first_name FROM users AS U;
+
+- group: one alias, one spelling
+  expect: stuck
+  queries:
+    # SQL hears `U` as `u`, so a second spelling would be one alias to it
+    # and a second scope here.
+    - SELECT u.email, U.first_name FROM users AS u;
+    - SELECT u.email, U.first_name FROM users AS u, users AS U;
+
+- group: a bare name two nodes would supply
+  expect: stuck
+  queries:
+    # Two nodes of one table are one variable to the algebra, and a bare
+    # column would still be ambiguous between them.
+    - SELECT email, u.first_name FROM users, users AS u;
+    - SELECT email, u.first_name FROM users AS u, users;
+    - SELECT body, c.id FROM posts, comments AS c;
+    - SELECT COUNT(email), u.id FROM users, users AS u;
+
+# -- WITH: virtual tables stacked under the main query ---------------------
+
+- group: WITH definitions
+  expect: completed
+  queries:
+    # A definition is a table to whatever follows it.
+    - WITH c AS (SELECT email FROM users) SELECT email FROM c;
+    - WITH c AS (SELECT email, first_name FROM users) SELECT first_name FROM c;
+    - WITH c AS (SELECT u.email FROM users AS u) SELECT email FROM c;
+    - WITH c AS (SELECT email FROM users WHERE verified = TRUE) SELECT email FROM c;
+    - WITH c AS (SELECT email FROM users) SELECT x.email FROM c AS x;
+    - WITH c AS (SELECT email FROM users) SELECT COUNT(*) FROM c;
+    # Several, each over the ones before it.
+    - WITH a AS (SELECT email FROM users), b AS (SELECT title FROM posts) SELECT email, title FROM a, b;
+    - WITH a AS (SELECT id, email FROM users), b AS (SELECT email FROM a) SELECT email FROM b;
+    - WITH a AS (SELECT id FROM users), b AS (SELECT id FROM a), c AS (SELECT id FROM b) SELECT id FROM c;
+    # The brackets carry their whitespace; the comma carries its own.
+    - WITH c AS ( SELECT email FROM users ) SELECT email FROM c;
+    - "WITH c AS (\n  SELECT email FROM users\n)\nSELECT email FROM c;"
+    - WITH a AS (SELECT email FROM users),b AS (SELECT title FROM posts) SELECT title FROM b;
+    - WITH c AS (SELECT email FROM users WHERE (verified = TRUE)) SELECT email FROM c;
+    # A definition does not have to be read.
+    - WITH c AS (SELECT email FROM users) SELECT title FROM posts;
+    # The names are only names: an alias inside a definition is its own.
+    - WITH c AS (SELECT u.email FROM users AS u) SELECT u.email FROM c AS u;
+
+- group: WITH definitions that do not hold
+  expect: stuck
+  queries:
+    # A definition exports a table, and a table's columns need names that
+    # differ - so every aggregate is named, and no column comes twice.
+    - WITH c AS (SELECT COUNT(*) FROM users) SELECT email FROM users;
+    - WITH c AS (SELECT user_id, COUNT(*) FROM posts GROUP BY user_id) SELECT user_id FROM c;
+    - WITH c AS (SELECT email, email FROM users) SELECT email FROM c;
+    - WITH c AS (SELECT u.email, v.email FROM users AS u, users AS v) SELECT email FROM c;
+    # The body is a query of its own, with its own rules.
+    - WITH c AS (SELECT email, COUNT(*) AS n FROM users) SELECT n FROM c;
+    - WITH c AS (SELECT email FROM users GROUP BY first_name) SELECT email FROM c;
+    # A definition only exports what it projected.
+    - WITH c AS (SELECT email FROM users) SELECT first_name FROM c;
+    - WITH c AS (SELECT email FROM users) SELECT email FROM c WHERE verified = TRUE;
+    # One terminator, after the main query; none in or after a definition.
+    - WITH c AS (SELECT email FROM users);
+    - WITH c AS (SELECT email FROM users;) SELECT email FROM c;
+    - WITH c AS (SELECT email FROM users)SELECT email FROM c;
+    - WITH c AS SELECT email FROM users SELECT email FROM c;
+    - WITH c (SELECT email FROM users) SELECT email FROM c;
+    - WITH SELECT email FROM users;
+
+- group: reserved names across the stack
+  expect: stuck
+  queries:
+    # A definition may not be named after a table, a column, a keyword or
+    # a function, in any spelling.
+    - WITH users AS (SELECT email FROM users) SELECT email FROM users;
+    - WITH Users AS (SELECT email FROM users) SELECT email FROM Users;
+    - WITH email AS (SELECT email FROM users) SELECT email FROM email;
+    - WITH SELECT AS (SELECT email FROM users) SELECT email FROM SELECT;
+    - WITH COUNT AS (SELECT email FROM users) SELECT email FROM COUNT;
+    # Nor after one before it.
+    - WITH c AS (SELECT email FROM users), c AS (SELECT title FROM posts) SELECT title FROM c;
+    - WITH T AS (SELECT email FROM users), t AS (SELECT title FROM posts) SELECT title FROM t;
+    # Nor after a column one before it exports.
+    - WITH k AS (SELECT COUNT(*) AS n FROM users), n AS (SELECT email FROM users) SELECT email FROM n;
+    # Inside, it is not a table yet, and its own name is reserved.
+    - WITH a AS (SELECT id FROM users), b AS (SELECT id FROM b) SELECT id FROM b;
+    - WITH c AS (SELECT c.email FROM users AS c) SELECT email FROM c;
+    - WITH c AS (SELECT COUNT(*) AS c FROM users) SELECT c FROM c;
+    # After it, a definition and its columns are names like any table's.
+    - WITH c AS (SELECT email FROM users) SELECT c.email FROM c;
+    - WITH c AS (SELECT email FROM users) SELECT C.email FROM c AS C;
+    - WITH k AS (SELECT COUNT(*) AS n FROM users) SELECT x.n FROM k AS n;
+    - WITH k AS (SELECT COUNT(*) AS n FROM users) SELECT COUNT(*) AS n FROM k;
+    - WITH k AS (SELECT COUNT(*) AS n FROM users) SELECT COUNT(*) AS N FROM k;
+
+- group: reserved names that stay free across the stack
+  expect: completed
+  queries:
+    # The names a definition chose for itself are free afterwards unless
+    # it exported them.
+    - WITH c AS (SELECT u.email FROM users AS u) SELECT u.first_name FROM users AS u;
+    - WITH k AS (SELECT COUNT(*) AS n FROM users) SELECT COUNT(*) AS m FROM k;
+    - WITH T AS (SELECT email FROM users), t2 AS (SELECT title FROM posts) SELECT title FROM t2;
+    - WITH k AS (SELECT COUNT(*) AS N FROM users) SELECT x.N FROM k AS x;
+
+- group: joins through a definition
+  expect: completed
+  queries:
+    # A projected column keeps its foreign key and where it came from, so
+    # the join graph runs through the definition both ways.
+    - WITH p AS (SELECT user_id, title FROM posts) SELECT email, title FROM users INNER JOIN p ON users.id = p.user_id;
+    - WITH a AS (SELECT id, email FROM users) SELECT email, title FROM a INNER JOIN posts ON a.id = posts.user_id;
+    - WITH p AS (SELECT id, title FROM posts) SELECT title, c.body FROM p INNER JOIN comments AS c ON p.id = c.post_id;
+    - WITH a AS (SELECT id, email FROM users), b AS (SELECT id FROM a) SELECT email, title FROM a INNER JOIN posts ON a.id = posts.user_id;
+    - WITH p AS (SELECT user_id, title FROM posts) SELECT x.title, u.email FROM p AS x INNER JOIN users AS u ON x.user_id = u.id;
+
+- group: joins a definition cannot answer
+  expect: stuck
+  queries:
+    # An aggregate is a computed value: it has no foreign key to follow.
+    - WITH p AS (SELECT MAX(user_id) AS m FROM posts) SELECT m, email FROM p INNER JOIN users ON p.m = users.id;
+    # A key that was not projected is not there to join on.
+    - WITH p AS (SELECT title FROM posts) SELECT email, title FROM users INNER JOIN p ON users.id = p.user_id;
+
+- group: WITH, functions and GROUP BY together
+  expect: completed
+  queries:
+    - WITH c AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) SELECT email, n FROM users INNER JOIN c ON users.id = c.user_id;
+    - WITH c AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) SELECT email FROM users INNER JOIN c ON users.id = c.user_id WHERE n > 1;
+    - WITH p AS (SELECT user_id, MAX(published_at) AS latest FROM posts GROUP BY user_id) SELECT email, latest FROM users LEFT JOIN p ON users.id = p.user_id WHERE latest > '2024-01-01';
+    - WITH p AS (SELECT user_id, SUM(id) AS s FROM posts GROUP BY user_id) SELECT email FROM users INNER JOIN p ON users.id = p.user_id WHERE s IS NULL;
+    - WITH p AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) SELECT SUM(n) AS total FROM p;
+    - WITH p AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) SELECT n, COUNT(*) FROM p GROUP BY n HAVING COUNT(*) > 2;
+    - WITH a AS (SELECT id, email FROM users), b AS (SELECT email, COUNT(*) AS n FROM a GROUP BY email) SELECT n FROM b;
+    - WITH c AS (SELECT post_id, COUNT(*) AS n FROM comments GROUP BY post_id HAVING COUNT(*) > 3) SELECT title, n FROM posts INNER JOIN c ON posts.id = c.post_id;
+    - WITH u AS (SELECT id, email FROM users WHERE verified = TRUE), p AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) SELECT email, n FROM u INNER JOIN p ON u.id = p.user_id WHERE n >= 2;
+    - WITH p AS (SELECT user_id, AVG(id) AS mean FROM posts GROUP BY user_id) SELECT email, mean FROM users INNER JOIN p ON users.id = p.user_id GROUP BY email, mean HAVING mean > 1.5;
+    - WITH c AS (SELECT post_id, MIN(body) AS first_body FROM comments GROUP BY post_id) SELECT title FROM posts INNER JOIN c ON posts.id = c.post_id GROUP BY title HAVING MAX(first_body) LIKE 'a%';
+
+- group: WITH, functions and GROUP BY that do not meet
+  expect: stuck
+  queries:
+    # A count is a number that is never NULL, wherever it is read.
+    - WITH p AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) SELECT email FROM users INNER JOIN p ON users.id = p.user_id WHERE n IS NULL;
+    - WITH p AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) SELECT n FROM p WHERE n LIKE '1%';
+    # MAX(title) is text, so it cannot be summed one level up.
+    - WITH p AS (SELECT user_id, MAX(title) AS t FROM posts GROUP BY user_id) SELECT SUM(t) AS x FROM p;
+    # The main query has its own grouping rules.
+    - WITH p AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) SELECT user_id, SUM(n) FROM p;
+    - WITH p AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) SELECT user_id, n FROM p GROUP BY user_id;
+    # An exported name is a column, and grouping on it is grouping on a
+    # column - not on the aggregate behind it.
+    - WITH p AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) SELECT n FROM p GROUP BY COUNT(*);

@@ -1,13 +1,9 @@
 """The procedural generation engine.
 
-A `Thunk` is a lazily evaluated piece of the syntax graph: given a `Context` it
-produces the `Node`s that may follow. A `Node` pairs an `IndexDraft` with the
-context, the selector that records what was matched, and the thunk for whatever
-comes next.
-
-The walking itself happens in the kernel. `Engine` builds the root nodes, hands
-them to a `kernel.Runner` as heads, and registers itself as the runner's
-resolver. From then on the division of labour is:
+The graph itself is made of the `Thunk`s and `Node`s of `thunk.py`; the
+walking happens in the kernel. `Engine` builds the root nodes over the context
+it is handed, gives them to a `kernel.Runner` as heads, and registers itself as
+the runner's resolver. From then on the division of labour is:
 
 * the **kernel** owns the indexes and the heads, advances every head over each
   token across its worker pool, and builds the indexes the next heads need;
@@ -23,103 +19,23 @@ or worker threads is known here.
 
 from __future__ import annotations
 
-import threading
-from typing import Callable, Sequence
+from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
 
 import kernel as kl
 
-from .context import Context
-from .factory import IndexDraft, IndexFactory, IndexSpec
-from .schema import Schema
+from .factory import IndexFactory, IndexSpec
+from .thunk import Node, Thunk
 
-Selector = Callable[[Context, str], Context] | None
-ThunkFn = Callable[[Context], list["Node"]]
+if TYPE_CHECKING:
+    from ..context import Context
 
 # One head as the kernel reports it: `id`, `index_id`, `node`, `rule`,
 # `matched` and `payload`. Snapshots, not handles - the live state stays in
 # the kernel.
 Head = kl.Head
-
-class Thunk:
-    """A node generator: terminal, ready, or deferred until first use.
-
-    `deferred` exists so the graph can be recursive - `joins()` and
-    `fields()` refer to themselves - without building it eagerly. The
-    resolved function is memoised.
-    """
-
-    __slots__ = ("_fn", "_factory", "_lock", "_terminal")
-
-    def __init__(self, fn: ThunkFn | None, factory: Callable[[], "Thunk"] | None, terminal: bool) -> None:
-        self._fn = fn
-        self._factory = factory
-        self._lock = threading.Lock() if factory is not None else None
-        self._terminal = terminal
-
-    @classmethod
-    def terminal(cls) -> "Thunk":
-        return cls(None, None, True)
-
-    @classmethod
-    def new(cls, fn: ThunkFn) -> "Thunk":
-        return cls(fn, None, False)
-
-    @classmethod
-    def deferred(cls, factory: Callable[[], "Thunk"]) -> "Thunk":
-        return cls(None, factory, False)
-
-    def is_terminal(self) -> bool:
-        return self._terminal
-
-    def call(self, ctx: Context) -> list["Node"] | None:
-        """Nodes that may follow, or `None` once the graph is complete."""
-
-        if self._terminal:
-            return None
-
-        fn: ThunkFn | None = self._fn
-
-        if fn is None:
-            fn = self._resolve()
-
-        return fn(ctx)
-
-    def _resolve(self) -> ThunkFn:
-        assert self._lock is not None and self._factory is not None
-
-        with self._lock:
-            if self._fn is None:
-                resolved: Thunk = self._factory()
-
-                if resolved._terminal:
-                    self._fn = lambda _ctx: []
-                elif resolved._fn is not None:
-                    self._fn = resolved._fn
-                else:
-                    self._fn = resolved._resolve()
-
-            return self._fn
-
-class Node:
-    """A graph node waiting for its index to be built.
-
-    This is what a head carries as its payload, and what comes back when the
-    kernel reports that head as finished.
-    """
-
-    __slots__ = ("draft", "ctx", "selector", "thunk")
-
-    def __init__(self, draft: IndexDraft, ctx: Context, selector: Selector, thunk: Thunk) -> None:
-        self.draft = draft
-        self.ctx = ctx
-        self.selector = selector
-        self.thunk = thunk
-
-    def __repr__(self) -> str:
-        return f"Node({self.draft})"
 
 class Engine:
     """Drives generation: exposes the legal next tokens and consumes one."""
@@ -129,7 +45,7 @@ class Engine:
     def __init__(
         self,
         vocabulary: kl.Vocabulary,
-        schema: Schema,
+        context: "Context",
         thunk: Thunk,
         factory: IndexFactory | None = None,
         threads: int = 1,
@@ -137,7 +53,6 @@ class Engine:
         self._vocabulary = vocabulary
         self._factory = factory if factory is not None else IndexFactory(vocabulary)
 
-        context: Context = Context(schema)
         nodes: list[Node] | None = thunk.call(context)
 
         if nodes is None:
@@ -175,16 +90,20 @@ class Engine:
 
         Called by the kernel, with the GIL taken back for the duration. The
         selector runs on a copy of the node's context, so the branches of the
-        graph never see each other's selections.
+        graph never see each other's selections, and a selector that refuses
+        what was matched ends the branch with nothing to follow.
 
         `None` means the end of the graph; a list - possibly empty - names the
         indexes that may come next.
         """
 
-        ctx: Context = node.ctx
+        ctx: "Context | None" = node.ctx
 
         if node.selector is not None:
-            ctx = node.selector(ctx, matched)
+            ctx = node.selector(node.ctx, matched)
+
+            if ctx is None:
+                return []
 
         children: list[Node] | None = node.thunk.call(ctx)
 

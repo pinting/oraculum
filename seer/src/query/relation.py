@@ -1,12 +1,11 @@
-"""The virtual table a FROM clause produces.
+"""The relation a closed FROM clause produces.
 
 Up to the `FROM` keyword the modelling runs forwards: `Conflicts` decides which
 tables the selected fields demand and `Relationships` connects them by
 contracting the foreign key graph. A WHERE clause runs the other way. Its FROM
 clause is already closed, so the columns a filter may name are not a constraint
 to be solved - they are a fixed set, the one relation the entries and their
-joins produced. Building it is what `Context.enter_where` does, and it is the
-second and last phase boundary of a statement.
+joins produced. Building it is what leaving the SOURCE clause does.
 
 Closing the clause makes the two things SQL leaves to a resolver decidable by
 counting:
@@ -23,7 +22,9 @@ static source from a dynamic one - which is the point.
 
 An `Operand` is one such column, together with how it is written and the
 `Field` it came from. The field is what carries the type, and the type is what
-`operators.py` gates the conditions on.
+`operators.py` gates the conditions on. An aggregate over a column is an
+operand too, of the type its function produces, which is what a HAVING
+condition compares.
 """
 
 from __future__ import annotations
@@ -31,9 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from .operators import TypeClass, classify
-from .schema import Field, Schema
-from .scopes import reference_name, unqualify
+from ..model import Field, Function, Schema, TypeClass, classify, column_name, reference_name, unqualify
 
 @dataclass(frozen=True)
 class Operand:
@@ -56,13 +55,38 @@ class Operand:
 
         return self.node == other.node and self.name == other.name
 
+    @property
+    def kind(self) -> TypeClass:
+        return classify(self.field.type)
+
+    def aggregated(self, function: Function) -> "Operand":
+        """`FN(self)`, a value of the type `function` produces.
+
+        It belongs to no node, so it is never the same column as anything.
+        """
+
+        text: str = function.spell(self.text)
+
+        return Operand("", text, text, function.apply(self.field, text))
+
+    @staticmethod
+    def star(function: Function) -> "Operand":
+        """`FN(*)`, for the function that takes one."""
+
+        text: str = function.spell(None)
+
+        return Operand("", text, text, function.apply(None, text))
+
     def __str__(self) -> str:
         return self.text
 
 class Relation:
-    """The columns a WHERE clause may filter on, and the filters written so far."""
+    """The columns a closed FROM clause offers, and how each may be spelled.
 
-    __slots__ = ("_schema", "_nodes", "_operands", "_used_filters")
+    Immutable once built, so every branch that copies a query shares it.
+    """
+
+    __slots__ = ("_nodes", "_operands", "_by_text")
 
     def __init__(self, schema: Schema | None = None, nodes: Iterable[str] = ()) -> None:
         if schema is None:
@@ -71,10 +95,9 @@ class Relation:
         # A node cannot appear twice in one FROM clause, but the record is
         # accumulated across entries, so it is deduplicated in order rather
         # than trusted.
-        self._schema = schema
         self._nodes: tuple[str, ...] = tuple(dict.fromkeys(nodes))
         self._operands = self._build_operands(schema, self._nodes)
-        self._used_filters: tuple[str, ...] = ()
+        self._by_text: dict[str, Operand] = {operand.text: operand for operand in self._operands}
 
     @staticmethod
     def _build_operands(schema: Schema, nodes: tuple[str, ...]) -> tuple[Operand, ...]:
@@ -93,7 +116,7 @@ class Relation:
             qualifier: str = reference_name(node)
 
             for column, field in table.fields.items():
-                operands.append(Operand(node, column, f"{qualifier}.{column}", field))
+                operands.append(Operand(node, column, column_name(qualifier, column), field))
                 owners.setdefault(column, []).append((node, field))
 
         for column, supplying in owners.items():
@@ -107,20 +130,6 @@ class Relation:
             operands.append(Operand(node, column, column, field))
 
         return tuple(sorted(operands, key=lambda operand: operand.text))
-
-    def copy(self) -> "Relation":
-        clone: Relation = Relation.__new__(Relation)
-
-        clone._schema = self._schema
-        clone._nodes = self._nodes
-        clone._operands = self._operands
-        clone._used_filters = self._used_filters
-
-        return clone
-
-    @property
-    def schema(self) -> Schema:
-        return self._schema
 
     def get_nodes(self) -> tuple[str, ...]:
         """The FROM nodes the relation was built over."""
@@ -137,32 +146,21 @@ class Relation:
         if kind is None:
             return self._operands
 
-        return tuple(
-            operand
-            for operand in self._operands
-            if classify(operand.field.type) is kind
-        )
+        return tuple(operand for operand in self._operands if operand.kind is kind)
+
+    def resolve(self, text: str) -> Operand | None:
+        """The column a spelling names here, or `None` where it names nothing.
+
+        A bare name two nodes supply is not an operand, so it resolves to
+        nothing, which is SQL's own answer.
+        """
+
+        return self._by_text.get(text)
 
     def get_names(self) -> tuple[str, ...]:
         """Every spelling on offer, which is what a thunk turns into lattices."""
 
         return tuple(operand.text for operand in self._operands)
-
-    def get_used_filters(self) -> tuple[str, ...]:
-        return self._used_filters
-
-    def use_filter(self, text: str) -> bool:
-        """Record a condition, once it has been written whole."""
-
-        if not text:
-            return False
-
-        self._used_filters = self._used_filters + (text,)
-
-        return True
-
-    def __str__(self) -> str:
-        return ", ".join(self._used_filters)
 
     def __repr__(self) -> str:
         return f"Relation(nodes={list(self._nodes)})"

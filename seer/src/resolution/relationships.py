@@ -1,9 +1,7 @@
-"""FROM / JOIN resolution over the foreign key graph.
+"""FROM / JOIN resolution: walking the foreign key graph of `joins.py`.
 
 Once `conflicts.py` knows which tables the query needs, they have to be
-connected by foreign keys. Nodes are table names - including aliased variants
-such as `"comments c"` - and edges are the foreign keys between them, carrying
-the column pair the `ON` clause is written from.
+connected by foreign keys.
 
 Joining merges the neighbour into the head via the graph's `merge_vertices`, so
 the head's neighbourhood becomes the union of both. That models SQL: once two
@@ -16,55 +14,11 @@ syntax graph must expand the same way on every run.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Iterable, NamedTuple
+from typing import Iterable
 
-from .backend import JoinGraph
-from .schema import Schema
-from .scopes import reference_name, sql_name, unqualify
-
-class JoinType(Enum):
-    INNER = "INNER JOIN"
-    LEFT = "LEFT JOIN"
-    RIGHT = "RIGHT JOIN"
-    FULL = "FULL JOIN"
-
-    def __str__(self) -> str:
-        return self.value
-
-JOIN_TYPES: list[JoinType] = list(JoinType)
-
-class Neighbor(NamedTuple):
-    table: str
-    src_field: str
-    dst_field: str
-
-    def __str__(self) -> str:
-        return f"{self.table} ON {self.src_field} = {self.dst_field}"
-
-    def format(self, join_type: JoinType = JoinType.INNER) -> str:
-        """The clause as SQL, so an aliased node gets its `AS`."""
-
-        return f"{join_type} {sql_name(self.table)} ON {self.src_field} = {self.dst_field}"
-
-@dataclass(frozen=True)
-class FieldRef:
-    node: str
-    field: str
-
-@dataclass(frozen=True)
-class EdgeLabel:
-    src: FieldRef
-    dst: FieldRef
-
-    def orient(self, head_node: str, neighbor_node: str) -> Neighbor:
-        """Point the edge away from the head, so `src` is the head's column."""
-
-        if self.src.node == head_node or self.dst.node == neighbor_node:
-            return Neighbor(neighbor_node, self.src.field, self.dst.field)
-
-        return Neighbor(neighbor_node, self.dst.field, self.src.field)
+from ..model import Schema, sql_name
+from ..runtime import JoinGraph
+from .joins import JoinType, Neighbor, edges
 
 class Relationships:
     """The FROM clause: pick a required table, then walk the foreign keys."""
@@ -83,47 +37,7 @@ class Relationships:
         self._head: str | None = None
         self._used_references: tuple[str, ...] = ()
         self._used_nodes: tuple[str, ...] = ()
-        self._graph = JoinGraph(self._build_edges(schema, required))
-
-    @staticmethod
-    def _build_edges(
-        schema: Schema,
-        required: Iterable[str],
-    ) -> list[tuple[str, str, EdgeLabel]]:
-        nodes: list[str] = sorted(set(schema.tables.keys()) | set(required))
-        edges: list[tuple[str, str, EdgeLabel]] = []
-
-        for i, first in enumerate(nodes):
-            for second in nodes[i + 1:]:
-                first_table, _ = unqualify(first)
-                second_table, _ = unqualify(second)
-
-                left = schema.tables.get(first_table)
-                right = schema.tables.get(second_table)
-
-                if left is None or right is None:
-                    continue
-
-                first_ref: str = reference_name(first)
-                second_ref: str = reference_name(second)
-
-                for column in left.references(second_table):
-                    assert column.reference is not None
-
-                    edges.append((first, second, EdgeLabel(
-                        src=FieldRef(first, f"{first_ref}.{column.name}"),
-                        dst=FieldRef(second, f"{second_ref}.{column.reference.column}"),
-                    )))
-
-                for column in right.references(first_table):
-                    assert column.reference is not None
-
-                    edges.append((first, second, EdgeLabel(
-                        src=FieldRef(second, f"{second_ref}.{column.name}"),
-                        dst=FieldRef(first, f"{first_ref}.{column.reference.column}"),
-                    )))
-
-        return edges
+        self._graph = JoinGraph(edges(schema, required))
 
     def copy(self) -> "Relationships":
         clone: Relationships = Relationships.__new__(Relationships)
@@ -152,7 +66,7 @@ class Relationships:
 
         `_used_references` is the same history rendered as SQL, which is what
         the debug block prints; this is the structural half, and it is what the
-        virtual table of `relation.py` is built over. Contraction destroys the
+        closed relation of `query.relation` is built over. Contraction destroys the
         vertices as it goes, so the record has to be kept rather than read back
         off the graph.
         """
