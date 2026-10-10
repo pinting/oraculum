@@ -85,14 +85,14 @@ docs:
 		mv "$(DIST)/$(SQLGLOT_WHEEL).part" "$(DIST)/$(SQLGLOT_WHEEL)"
 	fi
 
-	# test.py and cases.yaml ride along so the corpus can be run in the browser.
+	# The test suite rides along so the corpus can be run in the browser.
 	echo ">> packing the seer sources"
 
 	rm -f $(DIST)/seer.zip.part
 
 	zip -q -r $(DIST)/seer.zip.part \
 		$(SEER)/src $(SEER)/core.py $(SEER)/main.py $(SEER)/schema.sql \
-		$(SEER)/test.py $(SEER)/cases.yaml \
+		$(SEER)/test \
 		-x '*__pycache__*' '*.pyc'
 
 	mv $(DIST)/seer.zip.part $(DIST)/seer.zip

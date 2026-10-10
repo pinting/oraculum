@@ -17,6 +17,13 @@ how the stack is read. It folds the stack into the two things a query needs:
 A closed virtual table never changes, so a stack is persistent: pushing builds
 a new catalog over the old one, and every branch of the syntax graph shares the
 layers below it.
+
+A recursive definition reads itself before it is closed, which a stack of
+closed layers cannot express. So a catalog may carry one **provisional**
+table besides its layers - the definition, as the members written so far
+export it - which its schema and reserved names include, but which is no
+layer: pushing the definition once it closes stacks it on the catalog without
+the provisional table, `base`.
 """
 
 from __future__ import annotations
@@ -30,11 +37,19 @@ if TYPE_CHECKING:
     from .virtual import VirtualTable
 
 class Catalog:
-    __slots__ = ("_physical", "_top", "_schema", "_reserved")
+    __slots__ = ("_physical", "_top", "_provisional", "_base", "_schema", "_reserved")
 
-    def __init__(self, physical: Schema, top: "VirtualTable | None" = None) -> None:
+    def __init__(
+        self,
+        physical: Schema,
+        top: "VirtualTable | None" = None,
+        provisional: tuple[str, Table] | None = None,
+        base: "Catalog | None" = None,
+    ) -> None:
         self._physical = physical
         self._top = top
+        self._provisional = provisional
+        self._base: Catalog = self if base is None else base
 
         tables: dict[str, Table] = dict(physical.tables)
 
@@ -44,6 +59,13 @@ class Catalog:
             assert layer.name is not None and layer.name not in tables
 
             tables[layer.name] = layer.export()
+
+        if provisional is not None:
+            name, table = provisional
+
+            assert name not in tables
+
+            tables[name] = table
 
         self._schema = Schema(tables)
         self._reserved: Exclusion = base_reserved(self._schema)
@@ -59,6 +81,23 @@ class Catalog:
         """The virtual table stacked last, if any."""
 
         return self._top
+
+    @property
+    def base(self) -> "Catalog":
+        """This catalog without its provisional table, which is where a layer is pushed."""
+
+        return self._base
+
+    @property
+    def provisional(self) -> str | None:
+        """The name of the definition being read before it is closed, if any."""
+
+        return None if self._provisional is None else self._provisional[0]
+
+    def reading(self, name: str, table: Table) -> "Catalog":
+        """This catalog, with the definition `name` readable as `table` before it closes."""
+
+        return Catalog(self._physical, self._top, (name, table), self._base)
 
     @property
     def schema(self) -> Schema:
@@ -92,7 +131,7 @@ class Catalog:
 
         assert query.name is not None and query.is_closed()
 
-        return Catalog(self._physical, query)
+        return Catalog(self._base._physical, query)
 
     def __str__(self) -> str:
         return ", ".join(

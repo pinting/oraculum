@@ -15,9 +15,7 @@ from __future__ import annotations
 
 from typing import Iterator
 
-from ..model import Schema, TypeClass, classify
-
-Kinds = frozenset[TypeClass]
+from ..model import Kinds, Schema, TypeClass, classify
 
 class ColumnIndex:
     __slots__ = ("_tables", "_owners", "_classes")

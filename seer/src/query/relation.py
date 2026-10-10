@@ -22,63 +22,26 @@ static source from a dynamic one - which is the point.
 
 An `Operand` is one such column, together with how it is written and the
 `Field` it came from. The field is what carries the type, and the type is what
-`operators.py` gates the conditions on. An aggregate over a column is an
-operand too, of the type its function produces, which is what a HAVING
-condition compares.
+`operators.py` gates the conditions on. A function over operands is an operand
+too, of the type it produces, which is what a HAVING condition compares and a
+GROUP BY may key on.
+
+Every operand has a **key**, the value it is regardless of spelling. A column
+is keyed by its node, so `email` and `users.email` are one key; a call by its
+function and its arguments' keys. The projection's expressions render to the
+same keys (`Relation.key`), which is how grouping tells whether an item is a
+grouped value.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
-from ..model import Field, Function, Schema, TypeClass, classify, column_name, reference_name, unqualify
+from ..model import Field, Schema, TypeClass, column_name, reference_name, unqualify
+from .operand import Operand
 
-@dataclass(frozen=True)
-class Operand:
-    """One column of the virtual table, and how a condition names it."""
-
-    node: str
-    """The FROM node it came from, `"users"` or `"users u"`."""
-
-    name: str
-    """The column name, unqualified."""
-
-    text: str
-    """How it is written: `"email"` bare, `"u.email"` qualified."""
-
-    field: Field
-    """The schema column, which is what carries the type."""
-
-    def same_column(self, other: "Operand") -> bool:
-        """Whether both name the same column, however each is spelled."""
-
-        return self.node == other.node and self.name == other.name
-
-    @property
-    def kind(self) -> TypeClass:
-        return classify(self.field.type)
-
-    def aggregated(self, function: Function) -> "Operand":
-        """`FN(self)`, a value of the type `function` produces.
-
-        It belongs to no node, so it is never the same column as anything.
-        """
-
-        text: str = function.spell(self.text)
-
-        return Operand("", text, text, function.apply(self.field, text))
-
-    @staticmethod
-    def star(function: Function) -> "Operand":
-        """`FN(*)`, for the function that takes one."""
-
-        text: str = function.spell(None)
-
-        return Operand("", text, text, function.apply(None, text))
-
-    def __str__(self) -> str:
-        return self.text
+if TYPE_CHECKING:
+    from .expression import Column
 
 class Relation:
     """The columns a closed FROM clause offers, and how each may be spelled.
@@ -88,7 +51,12 @@ class Relation:
 
     __slots__ = ("_nodes", "_operands", "_by_text")
 
-    def __init__(self, schema: Schema | None = None, nodes: Iterable[str] = ()) -> None:
+    def __init__(
+        self,
+        schema: Schema | None = None,
+        nodes: Iterable[str] = (),
+        nullable: frozenset[str] = frozenset(),
+    ) -> None:
         if schema is None:
             return
 
@@ -96,12 +64,18 @@ class Relation:
         # accumulated across entries, so it is deduplicated in order rather
         # than trusted.
         self._nodes: tuple[str, ...] = tuple(dict.fromkeys(nodes))
-        self._operands = self._build_operands(schema, self._nodes)
+        self._operands = self._build_operands(schema, self._nodes, nullable)
         self._by_text: dict[str, Operand] = {operand.text: operand for operand in self._operands}
 
     @staticmethod
-    def _build_operands(schema: Schema, nodes: tuple[str, ...]) -> tuple[Operand, ...]:
-        """Every way a column of the clause may be named, sorted by spelling."""
+    def _build_operands(
+        schema: Schema, nodes: tuple[str, ...], nullable: frozenset[str]
+    ) -> tuple[Operand, ...]:
+        """Every way a column of the clause may be named, sorted by spelling.
+
+        A column of a node an outer join pads is NULL wherever the join found
+        no partner, whatever the schema says of it.
+        """
 
         operands: list[Operand] = []
         owners: dict[str, list[tuple[str, Field]]] = {}
@@ -116,7 +90,10 @@ class Relation:
             qualifier: str = reference_name(node)
 
             for column, field in table.fields.items():
-                operands.append(Operand(node, column, column_name(qualifier, column), field))
+                if node in nullable:
+                    field = field.optional()
+
+                operands.append(Operand.column(node, column, column_name(qualifier, column), field))
                 owners.setdefault(column, []).append((node, field))
 
         for column, supplying in owners.items():
@@ -127,7 +104,7 @@ class Relation:
 
             node, field = supplying[0]
 
-            operands.append(Operand(node, column, column, field))
+            operands.append(Operand.column(node, column, column, field))
 
         return tuple(sorted(operands, key=lambda operand: operand.text))
 
@@ -156,6 +133,25 @@ class Relation:
         """
 
         return self._by_text.get(text)
+
+    def operand(self, column: "Column") -> Operand:
+        """The operand a column of the projection is, now the clause is closed.
+
+        Every column the projection named resolves: a bare name two nodes
+        would supply was never offered, and FROM placed what each demanded.
+        """
+
+        operand: Operand | None = self.resolve(column.text)
+
+        assert operand is not None, f"{column.text} does not resolve in the closed relation"
+
+        return operand
+
+    def field(self, column: "Column") -> Field:
+        return self.operand(column).field
+
+    def key(self, column: "Column") -> str:
+        return self.operand(column).key
 
     def get_names(self) -> tuple[str, ...]:
         """Every spelling on offer, which is what a thunk turns into lattices."""

@@ -38,6 +38,34 @@
     - SELECT email FROM users WHERE email = 'a' AND users.id > 1;
     - SELECT email FROM users WHERE NOT email LIKE 'a%';
     - SELECT email FROM users WHERE (email = 'a' OR email = 'b') AND NOT users.id = 1;
+    - SELECT COUNT(*) FROM users;
+    - SELECT MIN(title), MAX(published_at) FROM posts;
+    - SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id;
+    - |-
+      SELECT u.email, COUNT(p.id) AS posts_count
+      FROM users AS u
+      INNER JOIN posts AS p ON u.id = p.user_id
+      GROUP BY u.email
+      HAVING COUNT(p.id) >= 2;
+    - |-
+      WITH c AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id)
+      SELECT email, n FROM users INNER JOIN c ON users.id = c.user_id WHERE n > 1;
+    - |-
+      WITH authors(author, n) AS (SELECT user_id, COUNT(*) FROM posts GROUP BY user_id)
+      SELECT email, n FROM users INNER JOIN authors ON users.id = authors.author;
+    - SELECT LOWER(email) AS mail, LENGTH(TRIM(last_name)), id + 1 FROM users;
+    - SELECT COALESCE(verified, FALSE), CAST(created_at AS TEXT) FROM users;
+    - SELECT CASE WHEN verified IS NULL THEN 'unknown' ELSE 'known' END AS state FROM users;
+    - SELECT COUNT(DISTINCT user_id), SUM(CASE WHEN published_at IS NULL THEN 1 ELSE 0 END) FROM posts;
+    - SELECT LOWER(email), COUNT(*) FROM users GROUP BY LOWER(email);
+    - SELECT user_id, COUNT(*) + 1, RANK() OVER (ORDER BY user_id) FROM posts GROUP BY user_id;
+    - SELECT email FROM users WHERE users.id IN (1, 2, 3) AND created_at BETWEEN '2024-01-01' AND '2024-12-31';
+    - SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id ORDER BY n DESC LIMIT 3 OFFSET 1;
+    - SELECT DISTINCT LOWER(email) AS e FROM users ORDER BY e;
+    - SELECT email AS label FROM users UNION SELECT title FROM posts ORDER BY label LIMIT 5;
+    - |-
+      WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT n + 1 FROM t WHERE n < 3)
+      SELECT n FROM t;
 
 - group: the projection
   expect: completed
@@ -305,23 +333,13 @@
     # Every keyword is upper case.
     - select email from users;
     - Select Email From Users;
-    # The projection is columns and aggregates over them - nothing else, and
-    # only an aggregate is named.
+    # Every item is a value of its own: no star, and no subquery anywhere.
     - SELECT * FROM users;
-    - SELECT DISTINCT email FROM users;
-    - SELECT email AS e FROM users;
-    - SELECT 1 FROM users;
-    - SELECT LOWER(email) FROM users;
-    - SELECT COUNT(DISTINCT email) FROM users;
-    # No clause follows GROUP BY and HAVING.
-    - SELECT email FROM users ORDER BY email;
-    - SELECT email FROM users LIMIT 10;
-    # A condition is one operator between two operands.
-    - SELECT email FROM users WHERE users.id IN (1, 2);
-    - SELECT email FROM users WHERE users.id BETWEEN 1 AND 2;
+    - SELECT users.* FROM users;
     - SELECT email FROM users WHERE users.id = (SELECT id FROM posts);
+    - SELECT email FROM users WHERE users.id IN (SELECT user_id FROM posts);
+    - SELECT email FROM (SELECT email FROM users) AS u;
     # One statement, and it is a SELECT.
-    - SELECT email FROM users UNION SELECT email FROM users;
     - INSERT INTO users VALUES (1);
     - UPDATE users SET email = 'a';
     - DELETE FROM users;
@@ -378,7 +396,7 @@
   queries:
     # A strict prefix of a reserved name is not that name - no exclusion
     # accepts yet, so the group may end.
-    - SELECT user.email FROM users AS user;
+    - SELECT use.email FROM users AS use;
     - SELECT emai.email FROM users AS emai;
     - SELECT usersX.email FROM users AS usersX;
     - SELECT users_.email FROM users AS users_;
@@ -386,7 +404,7 @@
     # Past the name, the exclusion died on the extra character.
     - SELECT email2.email FROM users AS email2;
     - SELECT SELECTED.email FROM users AS SELECTED;
-    - SELECT NOTHING.email FROM users AS NOTHING;
+    - SELECT NOTE.email FROM users AS NOTE;
     - SELECT ONE.email FROM users AS ONE;
     # A bare underscore is an identifier, and nothing reserves it.
     - SELECT _.email FROM users AS _;
@@ -692,7 +710,6 @@
     - SELECT COUNT (id) FROM users;
     # The argument has to be a column the schema has.
     - SELECT COUNT(nickname) FROM users;
-    - SELECT SUM(1) FROM users;
 
 - group: aggregates and plain columns need a GROUP BY
   expect: stuck
@@ -806,8 +823,9 @@
     - SELECT COUNT(*) AS u, u.email FROM users AS u;
     - SELECT u.email, COUNT(*) AS u FROM users AS u GROUP BY u.email;
     - SELECT u.email, COUNT(*) AS U FROM users AS u GROUP BY u.email;
-    # Only an aggregate is named.
-    - SELECT email AS e FROM users;
+    # A column renamed is named like any other item.
+    - SELECT email AS first_name FROM users;
+    - SELECT email AS e, first_name AS E FROM users;
 
 - group: names the projection leaves free
   expect: completed
@@ -970,3 +988,535 @@
     # An exported name is a column, and grouping on it is grouping on a
     # column - not on the aggregate behind it.
     - WITH p AS (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) SELECT n FROM p GROUP BY COUNT(*);
+
+# -- outer joins pad with NULLs -------------------------------------------
+
+- group: an outer join makes the padded side nullable
+  expect: completed
+  queries:
+    # `title` is NOT NULL in the schema, but not once a LEFT JOIN may find
+    # no post for a user.
+    - SELECT email, title FROM users LEFT JOIN posts ON users.id = posts.user_id WHERE title IS NULL;
+    - SELECT email, title FROM users RIGHT JOIN posts ON users.id = posts.user_id WHERE email IS NULL;
+    - SELECT email, title FROM users FULL JOIN posts ON users.id = posts.user_id WHERE users.id IS NULL OR posts.id IS NULL;
+    - |-
+      SELECT email, c.body
+      FROM users
+      INNER JOIN posts ON users.id = posts.user_id
+      LEFT JOIN comments AS c ON posts.id = c.post_id
+      WHERE c.body IS NULL;
+    # A RIGHT JOIN pads everything the entry held before it.
+    - |-
+      SELECT email, c.body
+      FROM users
+      INNER JOIN posts ON users.id = posts.user_id
+      RIGHT JOIN comments AS c ON posts.id = c.post_id
+      WHERE email IS NULL AND posts.id IS NULL;
+
+- group: an inner join pads nothing
+  expect: stuck
+  queries:
+    - SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id WHERE title IS NULL;
+    # The side that is kept keeps its own nullability.
+    - SELECT email, title FROM users LEFT JOIN posts ON users.id = posts.user_id WHERE email IS NULL;
+    - SELECT email, title FROM users RIGHT JOIN posts ON users.id = posts.user_id WHERE title IS NULL;
+
+# -- expressions -----------------------------------------------------------
+
+- group: scalar functions
+  expect: completed
+  queries:
+    - SELECT LOWER(email) FROM users;
+    - SELECT UPPER(first_name), TRIM(last_name) FROM users;
+    - SELECT LENGTH(body) FROM comments;
+    - SELECT ABS(user_id), ROUND(user_id) FROM posts;
+    - SELECT CAST(id AS TEXT) FROM users;
+    - SELECT CAST(created_at AS TEXT) FROM users;
+    - SELECT COALESCE(verified, FALSE) FROM users;
+    - SELECT COALESCE(published_at, created_at) FROM users INNER JOIN posts ON users.id = posts.user_id;
+    - SELECT COALESCE(title, 'untitled') FROM posts;
+    # Calls nest two deep, over a column or a literal.
+    - SELECT LENGTH(TRIM(email)) FROM users;
+    - SELECT UPPER(LOWER(email)) FROM users;
+    - SELECT LOWER('ABC') FROM users;
+    - SELECT LOWER( email ) FROM users;
+    - SELECT LOWER(u.email) FROM users AS u;
+
+- group: scalar functions the types refuse
+  expect: stuck
+  queries:
+    # Text functions take text, numeric ones numbers.
+    - SELECT LOWER(id) FROM users;
+    - SELECT LENGTH(created_at) FROM users;
+    - SELECT ABS(email) FROM users;
+    - SELECT ROUND(verified) FROM users;
+    # COALESCE keeps one class across its arguments.
+    - SELECT COALESCE(verified, 1) FROM users;
+    - SELECT COALESCE(email, users.id) FROM users;
+    # A third level of nesting is not offered, nor any function the subset
+    # does not know.
+    - SELECT LOWER(UPPER(TRIM(email))) FROM users;
+    - SELECT SUBSTR(email, 1, 2) FROM users;
+    - SELECT CAST(id AS INTEGER) FROM users;
+    - SELECT LOWER (email) FROM users;
+
+- group: arithmetic
+  expect: completed
+  queries:
+    - SELECT id + 1 FROM users;
+    - SELECT id * 2 - 1 FROM users;
+    - SELECT user_id / 2 FROM posts;
+    - SELECT LENGTH(body) + LENGTH(title) FROM posts;
+    - SELECT ABS(id - 10) FROM users;
+    - SELECT id - -1 FROM users;
+    - SELECT COUNT(*) * 2 FROM users;
+    - SELECT SUM(id) / COUNT(id) FROM users;
+    - SELECT MAX(id) + 1 AS next FROM users;
+
+- group: arithmetic only over numbers, spaced
+  expect: stuck
+  queries:
+    - SELECT email + 1 FROM users;
+    - SELECT id + email FROM users;
+    - SELECT created_at + 1 FROM users;
+    - SELECT LOWER(email) * 2 FROM users;
+    # Without the spaces `id--1` would open a comment.
+    - SELECT id+1 FROM users;
+    - SELECT id--1 FROM users;
+
+- group: any item may be named
+  expect: completed
+  queries:
+    - SELECT email AS mail FROM users;
+    - SELECT email AS e, first_name AS f FROM users;
+    - SELECT LOWER(email) AS lowered FROM users;
+    - SELECT id + 1 AS next, CAST(id AS TEXT) AS label FROM users;
+    - SELECT 1 AS one FROM users;
+    - SELECT 'x' AS tag, email FROM users;
+
+- group: literals as items
+  expect: completed
+  queries:
+    - SELECT 1 FROM users;
+    - SELECT 'a', TRUE, 2.5 FROM users;
+    - SELECT email, 0 FROM users;
+
+- group: DISTINCT
+  expect: completed
+  queries:
+    - SELECT DISTINCT email FROM users;
+    - SELECT DISTINCT verified, LOWER(first_name) FROM users;
+    - SELECT COUNT(DISTINCT email) FROM users;
+    - SELECT COUNT(DISTINCT user_id) AS authors FROM posts;
+    - SELECT SUM(DISTINCT user_id), AVG(DISTINCT user_id) FROM posts;
+    - SELECT COUNT(DISTINCT LOWER(email)) FROM users;
+    - SELECT DISTINCT user_id, COUNT(*) FROM posts GROUP BY user_id;
+
+- group: DISTINCT where it means nothing
+  expect: stuck
+  queries:
+    - SELECT DISTINCT DISTINCT email FROM users;
+    - SELECT email, DISTINCT first_name FROM users;
+    - SELECT COUNT(DISTINCT *) FROM users;
+    - SELECT MIN(DISTINCT email) FROM users;
+    - SELECT MAX(DISTINCT id) FROM users;
+
+# -- grouping over expressions ----------------------------------------------
+
+- group: GROUP BY an expression
+  expect: completed
+  queries:
+    - SELECT LOWER(email), COUNT(*) FROM users GROUP BY LOWER(email);
+    - SELECT LENGTH(title), COUNT(*) FROM posts GROUP BY LENGTH(title);
+    # A value built from grouped columns is single valued per group too.
+    - SELECT LOWER(email), COUNT(*) FROM users GROUP BY email;
+    - SELECT user_id + 1, COUNT(*) FROM posts GROUP BY user_id;
+    - SELECT CASE WHEN verified IS NULL THEN 'n' ELSE 'y' END AS v, COUNT(*) FROM users GROUP BY verified;
+    # So is anything an aggregate is computed into, and any constant.
+    - SELECT user_id, COUNT(*) + 1 FROM posts GROUP BY user_id;
+    - SELECT user_id, 'x', COUNT(*) FROM posts GROUP BY user_id;
+    - SELECT COUNT(*) + 1 FROM posts;
+    - SELECT ROUND(AVG(user_id)) FROM posts;
+    - SELECT user_id, COALESCE(MAX(published_at), MIN(published_at)) FROM posts GROUP BY user_id;
+    # HAVING may compare a computed key, or a function over a grouped one.
+    - SELECT LOWER(email), COUNT(*) FROM users GROUP BY LOWER(email) HAVING LOWER(email) LIKE 'a%';
+    - SELECT email, COUNT(*) FROM users GROUP BY email HAVING LENGTH(email) > 5;
+    - SELECT user_id FROM posts GROUP BY user_id HAVING COUNT(DISTINCT title) > 1;
+    - SELECT user_id FROM posts GROUP BY user_id HAVING SUM(LENGTH(body)) > 10;
+
+- group: GROUP BY an expression covers that expression only
+  expect: stuck
+  queries:
+    - SELECT email, COUNT(*) FROM users GROUP BY LOWER(email);
+    - SELECT LOWER(first_name), COUNT(*) FROM users GROUP BY email;
+    - SELECT id + 1, COUNT(*) FROM users GROUP BY email;
+    - SELECT email, COUNT(*) + users.id FROM users GROUP BY email;
+    - SELECT LOWER(email) FROM users GROUP BY UPPER(email);
+    # HAVING only reads grouped values and aggregates.
+    - SELECT LOWER(email), COUNT(*) FROM users GROUP BY LOWER(email) HAVING email = 'a';
+    - SELECT email FROM users GROUP BY email HAVING LENGTH(first_name) > 5;
+
+# -- conditions ------------------------------------------------------------
+
+- group: IN and BETWEEN
+  expect: completed
+  queries:
+    - SELECT email FROM users WHERE users.id IN (1, 2, 3);
+    - SELECT email FROM users WHERE users.id NOT IN (1);
+    - SELECT email FROM users WHERE email IN ('a', 'b');
+    - SELECT email FROM users WHERE created_at IN ('2024-01-01');
+    - SELECT email FROM users WHERE users.id BETWEEN 1 AND 10;
+    - SELECT email FROM users WHERE users.id NOT BETWEEN 1 AND 10;
+    - SELECT email FROM users WHERE email BETWEEN 'a' AND first_name;
+    - SELECT email FROM users WHERE created_at BETWEEN '2024-01-01' AND '2024-12-31 23:59:59';
+    - SELECT email FROM users WHERE users.id BETWEEN 1 AND 3 AND email IN ('x') OR NOT users.id IN (2);
+    - SELECT user_id FROM posts GROUP BY user_id HAVING COUNT(*) BETWEEN 1 AND 2;
+    - SELECT user_id FROM posts GROUP BY user_id HAVING user_id IN (1, 2);
+    # The left side of a condition may be a function over a column.
+    - SELECT email FROM users WHERE LOWER(email) = 'a';
+    - SELECT email FROM users WHERE LENGTH(TRIM(email)) > 3;
+    - SELECT email FROM users WHERE ABS(users.id) IN (1, 2);
+
+- group: IN and BETWEEN over the types they make sense for
+  expect: stuck
+  queries:
+    # A boolean has no order to range over, and no list is offered for it.
+    - SELECT email FROM users WHERE verified BETWEEN FALSE AND TRUE;
+    - SELECT email FROM users WHERE verified IN (TRUE);
+    # The bounds and the list have the class of the left side.
+    - SELECT email FROM users WHERE users.id BETWEEN 'a' AND 'b';
+    - SELECT email FROM users WHERE users.id IN ('a');
+    - SELECT email FROM users WHERE email IN (1, 2);
+    # The list is literals, at least one.
+    - SELECT email FROM users WHERE users.id IN ();
+    - SELECT email FROM users WHERE users.id IN (users.id);
+    - SELECT email FROM users WHERE users.id BETWEEN 1;
+
+# -- ORDER BY and LIMIT -----------------------------------------------------
+
+- group: ORDER BY and LIMIT
+  expect: completed
+  queries:
+    - SELECT email FROM users ORDER BY email;
+    - SELECT email FROM users ORDER BY email DESC;
+    - SELECT email FROM users ORDER BY email ASC, users.id DESC;
+    - SELECT email FROM users ORDER BY first_name;
+    - SELECT email FROM users ORDER BY LOWER(email);
+    - SELECT LOWER(email) AS e FROM users ORDER BY e;
+    - SELECT email FROM users LIMIT 10;
+    - SELECT email FROM users LIMIT 10 OFFSET 5;
+    - SELECT email FROM users ORDER BY email LIMIT 1;
+    - SELECT email FROM users WHERE verified = TRUE ORDER BY created_at DESC LIMIT 3 OFFSET 1;
+    # A grouped result sorts by grouped values, aggregates and its names.
+    - SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id ORDER BY n DESC;
+    - SELECT user_id, COUNT(*) FROM posts GROUP BY user_id ORDER BY COUNT(*) DESC, user_id;
+    - SELECT user_id FROM posts GROUP BY user_id ORDER BY MAX(published_at);
+    - SELECT COUNT(*) FROM posts ORDER BY COUNT(*);
+    - SELECT LOWER(email), COUNT(*) FROM users GROUP BY LOWER(email) ORDER BY LOWER(email);
+    # A deduplicated one only by its names.
+    - SELECT DISTINCT email FROM users ORDER BY email;
+    - SELECT DISTINCT LOWER(email) AS e FROM users ORDER BY e DESC;
+
+- group: ORDER BY only what the result can be sorted by
+  expect: stuck
+  queries:
+    - SELECT user_id, COUNT(*) FROM posts GROUP BY user_id ORDER BY title;
+    - SELECT COUNT(*) FROM posts ORDER BY title;
+    - SELECT DISTINCT email FROM users ORDER BY first_name;
+    - SELECT DISTINCT email FROM users ORDER BY LOWER(email);
+    # A name two items go by is ambiguous; one value is sorted by once.
+    - SELECT u.id, p.id FROM users AS u INNER JOIN posts AS p ON u.id = p.user_id ORDER BY id;
+    - SELECT email FROM users ORDER BY email, email;
+    - SELECT email FROM users ORDER BY email, users.email;
+    # An output name is no column a function can be applied to.
+    - SELECT LOWER(email) AS e FROM users ORDER BY UPPER(e);
+    # The order is fixed: ORDER BY, LIMIT, OFFSET, nothing else after.
+    - SELECT email FROM users OFFSET 5;
+    - SELECT email FROM users LIMIT 1 ORDER BY email;
+    - SELECT email FROM users LIMIT 1 OFFSET 1 OFFSET 2;
+    - SELECT email FROM users ORDER BY email WHERE verified = TRUE;
+    - SELECT email FROM users LIMIT -1;
+    - SELECT email FROM users LIMIT 1.5;
+
+# -- CASE and windows -------------------------------------------------------
+
+- group: CASE
+  expect: completed
+  queries:
+    - SELECT CASE WHEN verified IS NULL THEN 'unknown' ELSE 'known' END FROM users;
+    - SELECT CASE WHEN u.id > 10 THEN email END FROM users AS u;
+    - SELECT CASE WHEN u.id > 10 THEN email WHEN u.id > 5 THEN first_name ELSE 'x' END AS who FROM users AS u;
+    - SELECT CASE WHEN LOWER(email) LIKE 'a%' THEN 1 ELSE 0 END FROM users;
+    - SELECT SUM(CASE WHEN verified = TRUE THEN 1 ELSE 0 END) AS verified_count FROM users;
+    - SELECT CASE WHEN COUNT(*) > 1 THEN 'many' ELSE 'one' END FROM posts;
+    - SELECT CASE WHEN created_at < '2024-01-01' THEN created_at END FROM users;
+
+- group: CASE keeps one class across its branches
+  expect: stuck
+  queries:
+    - SELECT CASE WHEN u.id > 10 THEN email ELSE u.id END FROM users AS u;
+    - SELECT CASE WHEN verified THEN 1 END FROM users;
+    - SELECT CASE WHEN email > 1 THEN 1 END FROM users;
+    - SELECT CASE email WHEN 'a' THEN 1 END FROM users;
+    - SELECT CASE WHEN verified IS NULL THEN 1 ELSE 2 FROM users;
+    - SELECT CASE END FROM users;
+
+- group: window functions
+  expect: completed
+  queries:
+    - SELECT email, ROW_NUMBER() OVER (ORDER BY created_at DESC) AS r FROM users;
+    - SELECT email, ROW_NUMBER() OVER () FROM users;
+    - SELECT email, RANK() OVER (PARTITION BY verified ORDER BY email) FROM users;
+    - SELECT title, DENSE_RANK() OVER (PARTITION BY user_id ORDER BY published_at DESC, title) FROM posts;
+    - SELECT title, COUNT(*) OVER (PARTITION BY user_id) FROM posts;
+    - SELECT title, SUM(user_id) OVER (ORDER BY title) AS running FROM posts;
+    - SELECT title, MAX(published_at) OVER(PARTITION BY user_id) FROM posts;
+    # A window is evaluated per row, so it does not make the query grouped -
+    # but in a grouped one it reads grouped values only.
+    - SELECT user_id, COUNT(*), RANK() OVER (ORDER BY user_id) FROM posts GROUP BY user_id;
+    - SELECT ROW_NUMBER() OVER (ORDER BY email) + 1 FROM users;
+
+- group: window functions where they cannot stand
+  expect: stuck
+  queries:
+    # Ranking needs an order, and only exists over a window.
+    - SELECT email, RANK() OVER () FROM users;
+    - SELECT email, ROW_NUMBER() FROM users;
+    - SELECT email, COUNT(DISTINCT email) OVER () FROM users;
+    # Not inside an aggregate, not in WHERE, not over a column the grouping drops.
+    - SELECT SUM(ROW_NUMBER() OVER ()) FROM users;
+    - SELECT email FROM users WHERE ROW_NUMBER() OVER () > 1;
+    - SELECT user_id, RANK() OVER (ORDER BY title) FROM posts GROUP BY user_id;
+    - SELECT email, ROW_NUMBER() OVER (ORDER BY COUNT(*)) FROM users;
+
+# -- compounds --------------------------------------------------------------
+
+- group: set operators
+  expect: completed
+  queries:
+    - SELECT email FROM users UNION SELECT title FROM posts;
+    - SELECT email FROM users UNION ALL SELECT title FROM posts;
+    - SELECT u.id FROM users AS u INTERSECT SELECT user_id FROM posts;
+    - SELECT u.id FROM users AS u EXCEPT SELECT user_id FROM posts;
+    - SELECT email, first_name FROM users UNION SELECT title, body FROM posts;
+    - SELECT email FROM users UNION SELECT title FROM posts UNION ALL SELECT body FROM comments;
+    - SELECT user_id, COUNT(*) FROM posts GROUP BY user_id UNION SELECT user_id, COUNT(*) FROM comments GROUP BY user_id;
+    - SELECT email FROM users WHERE verified = TRUE UNION SELECT DISTINCT LOWER(email) FROM users;
+    # The compound is sorted and limited after its last member, by the names
+    # its first member gave.
+    - SELECT email FROM users UNION SELECT title FROM posts ORDER BY email;
+    - SELECT email AS label FROM users UNION SELECT title FROM posts ORDER BY label DESC LIMIT 5;
+    - SELECT u.id FROM users AS u EXCEPT SELECT user_id FROM posts LIMIT 3;
+
+- group: set operators over members of one shape
+  expect: stuck
+  queries:
+    # Every member produces as many columns as the first, of the same classes.
+    - SELECT email FROM users UNION SELECT title, body FROM posts;
+    - SELECT email, first_name FROM users UNION SELECT title FROM posts;
+    - SELECT email FROM users UNION SELECT posts.id FROM posts;
+    - SELECT created_at FROM users UNION SELECT title FROM posts;
+    # ORDER BY belongs to the compound, and names its first member's columns.
+    - SELECT email FROM users ORDER BY email UNION SELECT title FROM posts;
+    - SELECT email FROM users LIMIT 1 UNION SELECT title FROM posts;
+    - SELECT email FROM users UNION SELECT title FROM posts ORDER BY title;
+    - SELECT email FROM users UNION SELECT title FROM posts ORDER BY LOWER(email);
+    - SELECT COUNT(*) FROM users UNION SELECT COUNT(*) FROM posts ORDER BY COUNT(*);
+    # Neither INTERSECT ALL nor EXCEPT ALL exists in SQLite.
+    - SELECT email FROM users INTERSECT ALL SELECT title FROM posts;
+    - SELECT email FROM users EXCEPT ALL SELECT title FROM posts;
+    - SELECT email FROM users UNION;
+
+# -- definitions: column lists and recursion --------------------------------
+
+- group: a definition's column list
+  expect: completed
+  queries:
+    - WITH t(a, b) AS (SELECT email, first_name FROM users) SELECT a, b FROM t;
+    # The list names what the body need not: an aggregate, a duplicate.
+    - WITH t(n) AS (SELECT COUNT(*) FROM users) SELECT n FROM t;
+    - WITH t(a, b) AS (SELECT email, email FROM users) SELECT a FROM t;
+    - WITH t(lowered) AS (SELECT LOWER(email) FROM users) SELECT lowered FROM t ORDER BY lowered;
+    # A column keeps its lineage under its new name, so joins still follow it.
+    - |-
+      WITH authors(author, n) AS (SELECT user_id, COUNT(*) FROM posts GROUP BY user_id)
+      SELECT email, n FROM users INNER JOIN authors ON users.id = authors.author;
+    - WITH t(x) AS (SELECT email FROM users UNION SELECT title FROM posts) SELECT x FROM t;
+
+- group: a column list names every column, once, freshly
+  expect: stuck
+  queries:
+    - WITH t(a, b) AS (SELECT email FROM users) SELECT a FROM t;
+    - WITH t(a) AS (SELECT email, first_name FROM users) SELECT a FROM t;
+    - WITH t(a, a) AS (SELECT email, first_name FROM users) SELECT a FROM t;
+    - WITH t(a, A) AS (SELECT email, first_name FROM users) SELECT a FROM t;
+    # The names are invented, so they spell nothing the stack defines.
+    - WITH t(email) AS (SELECT email FROM users) SELECT email FROM t;
+    - WITH t(t) AS (SELECT email FROM users) SELECT email FROM t;
+    - WITH t(users) AS (SELECT email FROM users) SELECT users FROM t;
+    - WITH t(COUNT) AS (SELECT email FROM users) SELECT email FROM t;
+    - WITH t() AS (SELECT email FROM users) SELECT email FROM t;
+    # The body's own names are gone once the list renames them.
+    - WITH t(a) AS (SELECT email FROM users) SELECT email FROM t;
+
+- group: WITH RECURSIVE
+  expect: completed
+  queries:
+    - |-
+      WITH RECURSIVE t(n) AS (
+          SELECT 1 FROM users
+          UNION ALL
+          SELECT n + 1 FROM t WHERE n < 3
+      )
+      SELECT n FROM t;
+    - |-
+      WITH RECURSIVE reach AS (
+          SELECT u.id AS uid FROM users AS u WHERE u.id = 1
+          UNION
+          SELECT user_id FROM posts INNER JOIN reach ON posts.user_id = reach.uid
+      )
+      SELECT title FROM posts INNER JOIN reach ON posts.user_id = reach.uid;
+    # It may be joined with other tables, inner joins only.
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT a.n + b.id FROM t AS a, users AS b WHERE a.n < 3) SELECT n FROM t;
+    # A definition under WITH RECURSIVE need not read itself.
+    - WITH RECURSIVE t AS (SELECT email FROM users) SELECT email FROM t;
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION SELECT 2 FROM posts) SELECT n FROM t;
+    # Nor every member after the first, and later definitions read it closed.
+    - |-
+      WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION SELECT 2 FROM posts UNION ALL SELECT n + 1 FROM t WHERE n < 4),
+      s AS (SELECT n, COUNT(*) AS c FROM t GROUP BY n)
+      SELECT n, c FROM s ORDER BY n;
+
+- group: WITH RECURSIVE keeps its recursive member simple
+  expect: stuck
+  queries:
+    # Without RECURSIVE a definition cannot read itself.
+    - WITH t(n) AS (SELECT 1 FROM users UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t;
+    # Nor can the first member, nor one joined by INTERSECT or EXCEPT.
+    - WITH RECURSIVE t(n) AS (SELECT n FROM t) SELECT n FROM t;
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users INTERSECT SELECT n FROM t) SELECT n FROM t;
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users EXCEPT SELECT n FROM t) SELECT n FROM t;
+    # The recursive member reads itself once, by inner joins only, and is last.
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT n + 1 FROM t, t AS t2) SELECT n FROM t;
+    # Two aliases only the definition supplies would have to place it twice,
+    # so the second is never offered the column.
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT a.n + b.n FROM t AS a, t AS b) SELECT n FROM t;
+    - |-
+      WITH RECURSIVE reach AS (
+          SELECT u.id AS uid FROM users AS u
+          UNION
+          SELECT user_id FROM posts LEFT JOIN reach ON posts.user_id = reach.uid
+      )
+      SELECT uid FROM reach;
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT n + 1 FROM t WHERE n < 3 UNION SELECT 5 FROM users) SELECT n FROM t;
+    # It does not aggregate, deduplicate, window, group, sort or limit.
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT COUNT(n) FROM t) SELECT n FROM t;
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT DISTINCT n + 1 FROM t) SELECT n FROM t;
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT ROW_NUMBER() OVER () FROM t) SELECT n FROM t;
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT n + 1 FROM t GROUP BY n) SELECT n FROM t;
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT n + 1 FROM t ORDER BY n) SELECT n FROM t;
+    - WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT n + 1 FROM t LIMIT 3) SELECT n FROM t;
+    # RECURSIVE is said once, before the first definition.
+    - WITH a AS (SELECT email FROM users), RECURSIVE t AS (SELECT email FROM users) SELECT email FROM t;
+    - WITH RECURSIVE RECURSIVE t AS (SELECT email FROM users) SELECT email FROM t;
+
+# -- placement: bare names and aliases --------------------------------------
+
+- group: a FROM clause the aliases leave room for
+  expect: completed
+  queries:
+    # `u` has to be `users`, which supplies `email` too, so it alone is the
+    # FROM clause.
+    - SELECT email, u.first_name FROM users AS u;
+    - SELECT id, u.email FROM users AS u;
+    - SELECT title, u.email FROM posts, users AS u;
+    - SELECT title, u.email FROM users AS u, posts;
+
+- group: a FROM clause the aliases leave no room for
+  expect: stuck
+  queries:
+    # A bare `users` beside `u` would make `email` ambiguous.
+    - SELECT email, u.first_name FROM users, users AS u;
+    # `title` needs posts, `u.email` users, and both supply `id`: nothing
+    # after `u.` is offered at all.
+    - SELECT id, title, u.email FROM posts, users AS u;
+    # Two aliases of tables sharing a bare column cannot both be placed.
+    - SELECT email, u.first_name, v.last_name FROM users AS u, users AS v;
+    - SELECT body, c.post_id, p.title FROM comments AS c, posts AS p;
+
+# -- names the new constructs reserve ----------------------------------------
+
+- group: names the new functions and keywords reserve
+  expect: stuck
+  queries:
+    - SELECT LOWER.email FROM users AS LOWER;
+    - SELECT coalesce.email FROM users AS coalesce;
+    - SELECT Row_Number.email FROM users AS Row_Number;
+    - SELECT email AS over FROM users;
+    - SELECT email AS PARTITION FROM users;
+    - SELECT email AS Recursive FROM users;
+    - SELECT email AS true FROM users;
+    - SELECT email AS intersect FROM users;
+    - WITH case AS (SELECT email FROM users) SELECT email FROM case;
+    - WITH cast(a) AS (SELECT email FROM users) SELECT a FROM cast;
+    - WITH t(over) AS (SELECT email FROM users) SELECT over FROM t;
+    # Every word SQLite or PostgreSQL keeps for itself is refused too, since
+    # the statement has to run there.
+    - SELECT NOTHING.email FROM users AS NOTHING;
+    - SELECT user.email FROM users AS user;
+    - SELECT email AS key FROM users;
+    - WITH window AS (SELECT email FROM users) SELECT email FROM window;
+
+- group: names that only start like the new keywords
+  expect: completed
+  queries:
+    - SELECT lowered.email FROM users AS lowered;
+    - SELECT email AS overall FROM users;
+    - SELECT email AS cases FROM users;
+    - WITH truth(a) AS (SELECT email FROM users) SELECT a FROM truth;
+
+# -- everything at once --------------------------------------------------------
+
+- group: WITH, functions, GROUP BY, ORDER BY and compounds together
+  expect: completed
+  queries:
+    - |-
+      WITH activity(author, posted) AS (
+          SELECT user_id, COUNT(*) FROM posts GROUP BY user_id
+          UNION ALL
+          SELECT user_id, COUNT(DISTINCT post_id) FROM comments GROUP BY user_id
+      ),
+      totals AS (
+          SELECT author, SUM(posted) AS total, MAX(posted) AS peak
+          FROM activity
+          GROUP BY author
+          HAVING SUM(posted) > 1
+      )
+      SELECT LOWER(email) AS mail, total, RANK() OVER (ORDER BY total DESC) AS place
+      FROM users
+      INNER JOIN totals ON users.id = totals.author
+      WHERE verified IS NOT NULL
+      ORDER BY place, mail
+      LIMIT 10;
+    - |-
+      WITH recent AS (
+          SELECT user_id, title, published_at
+          FROM posts
+          WHERE published_at BETWEEN '2024-01-01' AND '2024-12-31'
+      )
+      SELECT CASE WHEN COUNT(*) > 2 THEN 'busy' ELSE 'quiet' END AS mood, LENGTH(MAX(title)) AS longest
+      FROM recent
+      GROUP BY user_id
+      ORDER BY longest DESC;
+    - |-
+      WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT n + 1 FROM t WHERE n < 3),
+      squares AS (SELECT n, n * n AS square FROM t)
+      SELECT DISTINCT square FROM squares ORDER BY square DESC;
+    - |-
+      SELECT COALESCE(u.first_name, 'nobody') AS who, COUNT(p.id) AS n, ROUND(AVG(p.user_id)) AS size
+      FROM users AS u
+      LEFT JOIN posts AS p ON u.id = p.user_id
+      GROUP BY u.first_name
+      HAVING COUNT(p.id) IN (0, 1, 2) OR AVG(LENGTH(p.body)) > 10
+      ORDER BY n DESC, who
+      LIMIT 5 OFFSET 0;

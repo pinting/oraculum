@@ -1,14 +1,22 @@
-"""GROUP BY: the columns a query groups on, and what they cover.
+"""GROUP BY: the values a query groups on, and what they cover.
 
 Grouping is written against the closed relation, like a filter, so a key is an
-`Operand` and two spellings of one column are one key: `GROUP BY u.email` and
-`GROUP BY email` say the same thing where one node supplies `email`, and the
-second is refused once the first is in.
+`Operand`: a column, or a scalar function over columns. Two spellings of one
+column are one key - `GROUP BY u.email` and `GROUP BY email` say the same thing
+where one node supplies `email` - and a column is grouped once.
 
-What grouping decides is which plain columns the projection may keep. Once any
-item aggregates, every item that does not has to be a grouped column, because
-anything else has no single value per group. `covers` is that test, asked of
-the projection's plain items as the relation resolves them.
+What grouping decides is which values the projection may keep. Once a query
+aggregates, every item has to be single valued per group, and a value is when
+
+* it is a grouped key itself, however it is spelled;
+* it is an aggregate, which folds the group into one value;
+* it is a constant;
+* everything it is computed from is, recursively - `LOWER(email)` over a
+  grouped `email`, `COUNT(*) + 1`, `ROW_NUMBER() OVER (ORDER BY email)`.
+
+A column that is none of these has no single value per group, and SQL refuses
+it. `covers` is that test, over the projection's expressions rendered to the
+keys the relation gives them.
 
 A grouping is a value; adding a key answers with a new one.
 """
@@ -16,9 +24,10 @@ A grouping is a value; adding a key answers with a new one.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Callable
 
-from .relation import Operand
+from .expression import Column, Expr, Literal, Star
+from .operand import Operand
 
 @dataclass(frozen=True)
 class Grouping:
@@ -28,22 +37,31 @@ class Grouping:
         return bool(self.keys)
 
     def contains(self, operand: Operand) -> bool:
-        """Whether `operand` is a grouped column, however it is spelled."""
+        """Whether `operand` is a grouped value, however it is spelled."""
 
-        return any(key.same_column(operand) for key in self.keys)
+        return any(key.same_value(operand) for key in self.keys)
 
     def add(self, key: Operand) -> "Grouping | None":
         """Group on `key` too; `None` where that column is already grouped."""
 
-        if self.contains(key):
+        if key.is_column and self.contains(key):
             return None
 
         return Grouping(self.keys + (key,))
 
-    def covers(self, columns: Iterable[Operand | None]) -> bool:
-        """Whether every column is grouped; one that resolved to nothing is not."""
+    def covers(self, expr: Expr, key: Callable[[Expr], str]) -> bool:
+        """Whether `expr` has a single value per group; `key` renders a value to its key."""
 
-        return all(column is not None and self.contains(column) for column in columns)
+        if expr.is_aggregate or isinstance(expr, (Literal, Star)):
+            return True
+
+        if any(grouped.key == key(expr) for grouped in self.keys):
+            return True
+
+        if isinstance(expr, Column):
+            return False
+
+        return all(self.covers(child, key) for child in expr.children())
 
     def __str__(self) -> str:
         return ", ".join(key.text for key in self.keys)

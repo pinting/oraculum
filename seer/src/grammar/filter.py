@@ -1,24 +1,26 @@
 """The WHERE clause: conditions over the relation the FROM clause produced.
 
-Its keyword closes the FROM clause, and every operand afterwards is a column
-of that one relation, written the way SQL's ambiguity rule allows.
+Its keyword closes the FROM clause, and every operand afterwards is a value
+of that one relation - a column, written the way SQL's ambiguity rule allows,
+or a scalar function over columns.
 """
 
 from __future__ import annotations
 
 from ..runtime import Thunk
-from .combinators import branch, dynamic, keyword, lat, ws
+from .combinators import branch, keyword, ws
 from .conditions import Continuation, Domain, filters
+from .operands import operands
 from .selectors import step
-from .tokens import NESTING_LIMIT
+from .tokens import EXPRESSION_DEPTH, NESTING_LIMIT
 
-def _columns(then: Continuation) -> Thunk:
-    return dynamic(lambda ctx: [
-        lat(operand.text, None, then(operand)) for operand in ctx.query.refinement.operands()
-    ])
+def _left(then: Continuation) -> Thunk:
+    columns = lambda ctx: ctx.query.refinement.operands()
+
+    return operands(columns, columns, None, lambda operand: (None, then(operand)), EXPRESSION_DEPTH)
 
 WHERE: Domain = Domain(
-    left=_columns,
+    left=_left,
     right=lambda ctx, kind: ctx.query.refinement.operands(kind),
     record=lambda ctx, text: ctx.query.use_filter(text),
 )

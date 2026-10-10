@@ -3,29 +3,44 @@
 An SQL autocomplete framework which guarantees grammatical and semantical correctness in the following subset of the language.
 
 ```xml
-<statement>  := [WITH <definition> [, <definition>]*] <select> ;
-<definition> := <name> AS ( <select> )
+<statement>   := [WITH [RECURSIVE] <definition> [, <definition>]*] <query> ;
+<definition>  := <name> [( <name> [, <name>]* )] AS ( <query> )
 
-<select>     := SELECT <items> FROM <entry> [, <entry>]*
-                [WHERE <filters>] [GROUP BY <keys> [HAVING <filters>]]
+<query>       := <member> [<set operator> <member>]*
+                 [ORDER BY <sort key> [, <sort key>]*] [LIMIT <count> [OFFSET <count>]]
+<member>      := SELECT [DISTINCT] <items> FROM <entry> [, <entry>]*
+                 [WHERE <filters>] [GROUP BY <keys> [HAVING <filters>]]
+<set operator>:= UNION | UNION ALL | INTERSECT | EXCEPT
 
-<items>      := <item> [, <item>]*
-<item>       := <field ref> | <aggregate> [AS <name>]
-<aggregate>  := COUNT(*) | <function>(<field ref>)
-<function>   := COUNT | SUM | AVG | MIN | MAX
-<field ref>  := <field> | <alias>.<field>
+<items>       := <item> [, <item>]*
+<item>        := <value> [AS <name>]
+<value>       := <term> [(+ | - | * | /) <term>]*
+<term>        := <field ref> | <literal> | <call> | <aggregate> | <ranking> | <case>
+<call>        := <scalar>(<value> [, <value>]*) | CAST(<value> AS TEXT)
+<scalar>      := ABS | COALESCE | LENGTH | LOWER | ROUND | TRIM | UPPER
+<aggregate>   := COUNT(*) | <function>([DISTINCT] <value>) [<window>]
+<function>    := COUNT | SUM | AVG | MIN | MAX
+<ranking>     := (ROW_NUMBER | RANK | DENSE_RANK)() <window>
+<window>      := OVER ([PARTITION BY <field ref> [, ...]] [ORDER BY <field ref> [ASC | DESC] [, ...]])
+<case>        := CASE [WHEN <value> (<operator> <value> | IS [NOT] NULL) THEN <value>]+
+                 [ELSE <value>] END
+<field ref>   := <field> | <alias>.<field>
 
-<entry>      := <source> [<join>]*
-<join>       := <join type> <source> ON <column ref> = <column ref>
-<source>     := <table> [AS <alias>]
-<join type>  := INNER JOIN | LEFT JOIN | RIGHT JOIN | FULL JOIN
+<entry>       := <source> [<join>]*
+<join>        := <join type> <source> ON <column ref> = <column ref>
+<source>      := <table> [AS <alias>]
+<join type>   := INNER JOIN | LEFT JOIN | RIGHT JOIN | FULL JOIN
 
-<keys>       := <operand> [, <operand>]*
-<filters>    := <predicate> [(AND | OR) <predicate>]*
-<predicate>  := [NOT] (<condition> | "(" <filters> ")")
-<condition>  := <operand> <operator> <operand | literal>
-              | <operand> IS [NOT] NULL
-<operand>    := <column> | <qualifier>.<column> | <aggregate>   (aggregates in HAVING only)
+<keys>        := <operand> [, <operand>]*
+<sort key>    := (<output name> | <operand> | <aggregate>) [ASC | DESC]
+<filters>     := <predicate> [(AND | OR) <predicate>]*
+<predicate>   := [NOT] (<condition> | "(" <filters> ")")
+<condition>   := <operand> <operator> <operand | literal>
+               | <operand> [NOT] BETWEEN <operand | literal> AND <operand | literal>
+               | <operand> [NOT] IN (<literal> [, <literal>]*)
+               | <operand> IS [NOT] NULL
+<operand>     := <column> | <qualifier>.<column> | <scalar>(<operand>)
+               | <aggregate>                                (in HAVING and ORDER BY)
 ```
 
 ## Setup
@@ -39,7 +54,7 @@ Each project builds itself, from its own directory:
 ```bash
 cd seer
 make build       # seer and the kernel, natively
-make test        # the corpus, one character at a time
+make test        # the corpus, one character at a time, then run in SQLite
 make run         # interactive: the graph offers tokens, you pick one
 make live        # the same, with a model doing the picking
 make wasm        # the same kernel, cross compiled to WebAssembly
@@ -357,7 +372,7 @@ HAVING COUNT(p.id) >= 2;
 **WITH: queries stacked on queries:** A statement may open with definitions,
 each a query of its own whose result is a table to everything after it. A
 definition's columns are its items, so they need names that differ: every
-aggregate is named and no column comes twice. A projected column keeps the
+computed item is named and no name comes twice. A projected column keeps the
 foreign key it had, so the join graph runs through a definition as through the
 table it came from:
 
@@ -369,6 +384,70 @@ SELECT email, n FROM users INNER JOIN c ON users.id = c.user_id WHERE n > 1;
 Every name a definition introduces, its own and its columns', is reserved
 from then on, in every spelling, since SQL hears `T` and `t` as one name.
 Section 6f is the grouping, 6g the stack definitions build and 6h the names it reserves.
+
+A column list names the columns instead, so the body needs no names of its
+own, only as many items as the list has names:
+
+```sql
+WITH authors(author, n) AS (SELECT user_id, COUNT(*) FROM posts GROUP BY user_id)
+SELECT email, n FROM users INNER JOIN authors ON users.id = authors.author;
+```
+
+**Expressions:** An item is any value: a column, a literal, a scalar function
+over values, arithmetic, a `CASE`, an aggregate over a value, a window. Every
+function says what it accepts, so `LOWER(` only offers what can be text and
+`id + ` only what can be a number, and every item may be named:
+
+```sql
+SELECT LOWER(email) AS mail, LENGTH(TRIM(last_name)), id + 1 FROM users;
+SELECT COALESCE(verified, FALSE), CAST(created_at AS TEXT) FROM users;
+SELECT CASE WHEN verified IS NULL THEN 'unknown' ELSE 'known' END AS state FROM users;
+SELECT COUNT(DISTINCT user_id), SUM(CASE WHEN published_at IS NULL THEN 1 ELSE 0 END) FROM posts;
+```
+
+A grouping key may be an expression too, and grouping covers whatever is built
+from grouped values alone: `LOWER(email)` over `GROUP BY email`, but `email`
+not over `GROUP BY LOWER(email)`:
+
+```sql
+SELECT LOWER(email), COUNT(*) FROM users GROUP BY LOWER(email);
+SELECT user_id, COUNT(*) + 1, RANK() OVER (ORDER BY user_id) FROM posts GROUP BY user_id;
+```
+
+**Conditions, sorting and limits:** A condition may range with `BETWEEN`, test
+membership with `IN`, and take a scalar function on its left. After the body
+come `ORDER BY` and `LIMIT`, sorting by whatever the result can be sorted by:
+any value of a plain query, the grouped values and aggregates of a grouped
+one, and the output names of a `SELECT DISTINCT`:
+
+```sql
+SELECT email FROM users WHERE users.id IN (1, 2, 3) AND created_at BETWEEN '2024-01-01' AND '2024-12-31';
+SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id ORDER BY n DESC LIMIT 3 OFFSET 1;
+SELECT DISTINCT LOWER(email) AS e FROM users ORDER BY e;
+```
+
+**Compounds:** Members joined by `UNION`, `UNION ALL`, `INTERSECT` and `EXCEPT`
+produce the first member's columns, each as many and of the same class, and the
+compound is sorted and limited after its last member, by the first member's
+names:
+
+```sql
+SELECT email AS label FROM users UNION SELECT title FROM posts ORDER BY label LIMIT 5;
+```
+
+**Recursion:** Under `WITH RECURSIVE` a member after a union may read the
+definition it belongs to, as the members before it produced it. That member
+stays a simple select - no aggregate, window, `DISTINCT`, grouping or sorting,
+the definition read once and by inner joins only - and it is the last:
+
+```sql
+WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT n + 1 FROM t WHERE n < 3)
+SELECT n FROM t;
+```
+
+Section 6i is how expressions are written before the FROM clause exists, 6j
+the placement rule aliases add to it, 6k sorting and 6l compounds and
+recursion.
 
 Two things have to be true of every statement the system produces. It has to be **grammatical**: a well-formed word or phrase. It also has to be **meaningful**: something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
 
@@ -631,7 +710,7 @@ so no sibling can observe the choice.
 
 The state each rule is run against is a `Context`. It carries everything the statement has committed to so far: the stack of definitions closed so far and the query being written over it. Every operation that changes it works on a copy, so branches never see each other.
 
-The query is a **virtual table**, the one object that owns the data structure of a SELECT as it is written. It is held in one part per stretch of its lifecycle (the selection while the projection is written, the sources while the FROM clause is placed, the refinement written against the closed relation afterwards), and the parts are bound together by a state machine whose transitions fall on keywords:
+The query is a **virtual table**, the one object that owns the data structure of a SELECT as it is written. It is held in one part per stretch of its lifecycle (the selection while the projection is written, the sources while the FROM clause is placed, the refinement written against the closed relation afterwards, the presentation once the body is complete), and the parts are bound together by a state machine whose transitions fall on keywords:
 
 ```mermaid
 stateDiagram-v2
@@ -642,14 +721,23 @@ stateDiagram-v2
     SOURCE --> GROUPING: GROUP BY
     FILTER --> GROUPING: GROUP BY
     GROUPING --> HAVING: HAVING
-    SOURCE --> CLOSED: ; or )
-    FILTER --> CLOSED: ; or )
-    GROUPING --> CLOSED: ; or )
-    HAVING --> CLOSED: ; or )
+    state body <<choice>>
+    SOURCE --> body
+    FILTER --> body
+    GROUPING --> body
+    HAVING --> body
+    body --> ORDERING: ORDER BY
+    body --> LIMITING: LIMIT
+    ORDERING --> LIMITING: LIMIT
+    body --> CLOSED: ; ) or a set operator
+    ORDERING --> CLOSED: ; or )
+    LIMITING --> CLOSED: ; or )
     CLOSED --> [*]
 ```
 
-Entering SOURCE builds the join graph and leaving it builds the relation; closing a definition fixes the table it exports. The statement has a machine of its own one level up, `PREAMBLE -> DEFINITION -> PREAMBLE -> ... -> MAIN`, which only says which query is open. Both are tables of legal moves and nothing else: what a move builds is the virtual table's business, so the lifecycle can be read without the work getting in the way.
+Entering SOURCE builds the join graph and leaving it builds the relation; leaving the body fixes the result, which the presentation sorts and a definition exports. Which of the drawn moves a query may take is decided in one place, and it is where the rules spanning parts live: the projection has to be complete before FROM, the body complete before anything after it (its FROM clause supplying what the projection demanded, its grouping covering every item), and a recursive member never groups, sorts or limits.
+
+The statement has a machine of its own one level up, `PREAMBLE -> DECLARATION -> DEFINITION -> PREAMBLE -> ... -> MAIN`, which only says which query is open: a definition is declared (its name, its column list) and then opened at the `SELECT` of its body. A compound query runs one clause machine per member, each ended by the set operator that opens the next. Both machines are tables of legal moves and nothing else: what a move builds is the virtual table's business, so the lifecycle can be read without the work getting in the way.
 
 #### 6a. Root fields: exactly one, as a polynomial
 
@@ -886,33 +974,42 @@ C_K(f) \;=\; C\bigl(T_K(f)\bigr) \cdot \prod_{t \,\in\, T(f) \setminus T_K(f)} (
 $(1 + t)$ is the polynomial that is $1$ exactly when $t$ is absent, so the
 product forbids the owners of the wrong class outright. When every owner
 qualifies the product is empty and $C_K(f) = C(f)$. One table of these is built
-per class set a function asks for (numeric for `SUM` and `AVG`, ordered for
-`MIN` and `MAX`), all of them up front, and an aliased argument intersects with
-$T_K(f)$ instead.
+per class set a position asks for (numeric for `SUM` and `AVG`, ordered for
+`MIN` and `MAX`, text for `LOWER`), the first time one asks and shared from
+then on, and an aliased argument intersects with $T_K(f)$ instead.
 
 An aggregate is also a column: its function maps the argument's `Field` to the
 `Field` it produces, `COUNT` to a number that is never NULL, `MAX(created_at)`
 to a timestamp that may be. That is what HAVING compares, through exactly the
 operator gating of 6e, and what a definition exports.
 
-Grouping is written against the closed relation, so a key is a column of it
-rather than a spelling, and coverage is a question about columns:
+Grouping is written against the closed relation, so a key is a value of it
+rather than a spelling: a column, or a scalar function over columns. Every
+value has a **key** that two spellings of it share - a column is keyed by the
+node supplying it, a call by its function and its arguments' keys - and an
+item of the projection renders to the same keys once the relation resolves
+its columns. Coverage is then a recursive question about values:
 
 ```math
-\text{may close} \iff \bigl(\text{no aggregate} \,\lor\, \text{no plain item} \,\lor\, \text{grouped}\bigr)
-\;\land\; \bigl(\text{grouped} \Rightarrow \forall\, i \in \text{plain} : \text{col}(i) \in \text{keys}\bigr)
+\text{covered}(v) \iff \text{key}(v) \in \text{keys} \;\lor\; v \text{ is an aggregate or a constant}
+\;\lor\; \bigl(v \text{ is not a column} \land \forall\, c \in \text{children}(v) : \text{covered}(c)\bigr)
 ```
 
-with $\text{col}(i)$ the column the relation resolves the item's spelling to.
-It is asked in one place only, where the query would end, so the terminator
-of a mixed projection is simply not on offer until its keys cover it.
+and a query that aggregates (it groups, or an item holds an aggregate) may only
+leave its body once every item is covered. `LOWER(email)` is covered by
+`GROUP BY email` because its child is; `email` is not covered by
+`GROUP BY LOWER(email)`, being a column whose key is not grouped; and a window
+is no aggregate, so its arguments and keys have to be covered like any value of
+the row. It is asked in one place only, where the body would be left, so the
+terminator, the `ORDER BY` and the `LIMIT` of an uncovered projection are
+simply not on offer until its keys cover it.
 
 One more rule appears here because the FROM clause can no longer be read off
 the polynomial alone: two nodes of one table, `users` and `users AS u`, are one
 variable to the algebra, yet a bare projected column would be ambiguous
 between them. Placing a node checks that every bare column keeps one supplier,
 and the same check filters what is offered, so the grammar never offers a node
-it would have to refuse.
+it would have to refuse. Section 6j is the rest of that rule.
 
 #### 6g. WITH: a stack of virtual tables
 
@@ -958,14 +1055,19 @@ shares the layers below the query it is writing.
 
 An invented name is an identifier minus a reserved set (section 4), and the set
 is assembled from the stack. Its base is the same for every name: keywords,
-the function names, and every table and column any layer defines. On top of it
-each use adds what the query has introduced itself:
+the function names, and every table and column any layer defines. The keywords
+are not only the grammar's own: a statement has to run where it is sent, and
+a dialect refuses an unquoted alias spelling one of its keywords (SQLite
+`NOTHING`, PostgreSQL `USER`), so the set is every keyword SQLite knows and
+every word PostgreSQL reserves. On top of it each use adds what the query has
+introduced itself:
 
 | the name being invented | may additionally not be |
 |---|---|
 | an alias, `u.` in the projection | an output alias; another spelling of an alias already opened |
 | an output name, `AS n` | another output name, any alias |
 | a definition, `WITH c` | anything the stack defines, earlier definitions included |
+| a column of a definition's list, `WITH c(a, b)` | the definition's name, another name of the list |
 | anything inside a definition | the definition's own name |
 
 SQL compares unquoted identifiers ignoring case, so each reserved name is
@@ -975,6 +1077,144 @@ called `T` and `t` collide. The one name that may be written again is an alias
 already opened, which is the same scope written twice, and only exactly as it
 was written: its exclusion is every case of it minus that one spelling, a
 difference nested inside the group's own difference.
+
+#### 6i. Expressions: written before the FROM clause exists
+
+The projection is written before anything says which table a column comes
+from, so an expression cannot be typed the way a condition is. What it can be
+is constrained: every value is written at a **position** that says which
+classes it may have, how deep calls may still nest, and whether an aggregate or
+a window may stand there. `LOWER(` writes its argument at a text position, so a
+column there is demanded with $C_{\{\text{text}\}}(f)$ of 6f, and only columns
+some table can supply as text are on offer.
+
+A value's class is either fixed by its shape (`LOWER(...)` is text, `id + 1`
+numeric, `COUNT(*)` numeric) or follows other values (`MAX(x)` is whatever `x`
+is, `COALESCE(x, y)` whatever both are), down to the columns, which are the only
+thing still open. That gives every value a **narrowing**: the columns that have
+to be of a class for the value to be. A value written where its class was free
+is narrowed when something asks for one, by demanding its columns again under
+the narrower class:
+
+```math
+P \;\leftarrow\; P \cdot C_K(f) \qquad\text{and}\qquad C(f) \cdot C_K(f) = C_K(f)
+```
+
+since $C_K(f)$ implies $C(f)$. So `id + ` narrows `id` to numeric at the `+`, and a
+comparison inside a `CASE` narrows its left side to the class it compares in.
+The operator is only offered where the narrowed product is still non-zero, so
+it never opens onto a value nothing could be.
+
+The tree itself is never stored half built. Every emitter takes a
+continuation that is handed the finished value, so each branch of the graph
+carries the part it has written in the closures ahead of it, and the virtual
+table learns of an item only when it is complete. That moment is not the
+item's last token, because a value does not know it is finished: `id` may yet
+become `id + 1`. It is the separator after it - the comma, or the whitespace
+before `AS` or `FROM` - and both readings live on as separate heads until the
+next character tells them apart:
+
+```mermaid
+graph LR
+    id(["id"]) -->|"␣ (commits id)"| a(["AS / FROM"])
+    id -->|"␣+␣"| plus(["a numeric term"])
+    id -->|", (commits id)"| next(["the next item"])
+    plus -->|"…"| tail(["id + 1"])
+
+    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
+    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
+    class id,a,plus,next plain
+    class tail accent
+```
+
+What the separator may be is decided before the item is committed: an item of
+a definition with no name of its own, or with one another item already goes
+by, is only offered `AS`. After the FROM clause the same functions are written
+over the closed relation, where every column has a type, so there they are
+typed as written and a call over columns is an operand like a column is.
+
+#### 6j. Placement: aliases are nodes too
+
+The algebra decides which tables the bare columns need and each alias scope
+which table its alias may be. What neither sees is the rule SQL applies across
+both: a bare column has exactly one supplier among the nodes of the FROM
+clause, and every alias is a node that will be placed. So
+`SELECT email, u.first_name` leaves exactly one FROM clause, `users AS u`
+alone: a bare `users` beside it would make `email` ambiguous. And
+`SELECT id, title, u.email` leaves none at all: `title` needs `posts`, `u.email`
+needs `users`, and both supply `id`.
+
+**Placeability** is the question whether a FROM clause can still be written:
+is there a table for every alias not placed yet, and a set of the tables the
+algebra still requires, such that no bare column has two suppliers among them
+and the nodes already placed, and the product holds with all of them present?
+The search is exhaustive and small, a handful of candidate tables per alias
+and a handful more the algebra needs. The projection offers a column only
+where the answer stays yes, a new alias only where some column would, and the
+FROM clause places a node only where it does, so a statement is never written
+into a corner it cannot leave: not into a dead end, and not into a FROM clause
+waiting forever for a node it could never place.
+
+#### 6k. Sorting: what the result can still be sorted by
+
+`ORDER BY` and `LIMIT` are written once the body is complete, against its
+result. What a key may be depends on what the result is:
+
+| the result | may be sorted by |
+|---|---|
+| a plain query | any value of the relation, a function over one, an output name |
+| an aggregated one | the grouped values, functions over them, any aggregate, an output name |
+| `SELECT DISTINCT` | its output names |
+| a compound | the output names of its first member |
+
+An output name is only on offer where exactly one item goes by it, since a
+name two items share is ambiguous, and it is written as a whole, never inside
+a function: PostgreSQL reads `ORDER BY e` as the output `e` but `UPPER(e)` as a
+column that does not exist. A value sorted by once is not offered again,
+however it is spelled, and the `ORDER BY` itself is only offered where
+something is left to sort by.
+
+#### 6l. Compounds and recursion: siblings, and a layer read before it closes
+
+The members of a compound are siblings, not a stack: each is a query of its
+own over the same catalog, none reads another. What ties them is their result.
+The first member fixes a **shape**, its arity and each column's class, and
+every member after it is written under that shape: its items are offered at
+positions of the classes the first member produced, and `FROM` only once it has
+as many. A definition's column list is a shape too, of arity alone.
+
+The compound's result is its members' merged: named by the first, NULL wherever
+any member may be, and keeping a lineage only where the members agree on whose
+values they hold. A column that is `users.id` in one member and `posts.user_id`
+(a key pointing at `users.id`) in the next holds user ids either way, so it
+stays joinable from every key that points at users; one that is `users.id` in
+one member and `posts.id` in the next holds nothing in particular, and nothing
+joins through it.
+
+A recursive definition reads itself before it is closed, which a stack of
+closed layers cannot express. So the catalog a recursive member is written over
+carries one **provisional** table besides its layers: the definition as the
+members before it export it. It is in the member's schema and reserved names
+like any table, but it is no layer, so the definition is pushed onto the stack
+without it once it closes:
+
+```mermaid
+graph LR
+    rec(["member 2: … FROM t"]) -->|"reads, provisionally"| t(["t: member 1's result"])
+    rec -->|"written over"| a(["the stack below t"])
+    m1(["member 1"]) -->|"written over"| a
+
+    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
+    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
+    class m1,t,a plain
+    class rec accent
+```
+
+A member that may read the definition is one that follows a union in a
+`WITH RECURSIVE` statement, and it has to stay what both SQLite and PostgreSQL
+accept as a recursive term: no aggregate, window or `DISTINCT`, no grouping or
+sorting, the definition placed once at most and by inner joins only, and,
+once it is placed, no further set operator.
 
 ## License
 

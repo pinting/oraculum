@@ -1,12 +1,19 @@
-"""The projection: `<item> [, <item>]*`.
+"""The projection: `[DISTINCT] <item> [, <item>]*`.
 
-    <item>       := <column ref> | <aggregate> [AS <name>]
-    <aggregate>  := COUNT "(" "*" ")" | <function> "(" <column ref> ")"
-    <column ref> := <column> | <alias>.<column>
+    <item> := <value> [AS <name>]
 
-The column lattices are read off the query, so a name drops out the moment
-nothing that could supply it is left - and inside a function, the moment
-nothing could supply it with a type the function accepts.
+A value is whatever `expressions.py` writes, and its columns are demanded as
+they are taken. The item itself is committed on the separator after it - the
+comma, or the whitespace before `AS` or `FROM` - rather than on its own last
+token, because a value does not know it is finished when its last token is
+written: `id` may still become `id + 1`. The separator is the first token that
+says it is, and both readings stay alive as two heads until then.
+
+What may follow an item is read off the selection before the item is
+committed: a shaped projection offers the comma only while it is short of its
+arity and `FROM` only once it has it, and a named one offers `FROM` and the
+comma only after an `AS` where the item has no name of its own, or one another
+item already goes by.
 """
 
 from __future__ import annotations
@@ -14,67 +21,92 @@ from __future__ import annotations
 from typing import Callable
 
 from ..context import Context
-from ..model import FUNCTIONS, Function
-from ..query import Exclusion, NameUse
+from ..query import Exclusion, Expr, NameUse, Selection
 from ..runtime import Selector, Thunk
-from .combinators import branch, comma, dot, dynamic, exp, guard, keyword, lat, name, ws
-from .selectors import select
-from .tokens import LPAREN, RPAREN
+from .combinators import branch, comma, dynamic, exp, guard, lat, name, ws
+from .values import Position, value
+from .selectors import select, step
+from .tokens import COMMA, EXPRESSION_DEPTH, WHITESPACE
 
-Columns = Callable[[Context], list[str]]
-
-_open_qualifier: Selector = select(lambda ctx, matched: ctx.query.open_qualifier(matched))
-_select_column: Selector = select(lambda ctx, matched: ctx.query.use_column(matched))
 _name_item: Selector = select(lambda ctx, matched: ctx.query.name_item(matched))
-
-def _select_argument(function: Function) -> Selector:
-    return select(lambda ctx, matched: ctx.query.use_aggregate(function, matched))
-
-def _select_star(function: Function) -> Selector:
-    return select(lambda ctx, _matched: ctx.query.use_aggregate(function, None))
+_use_distinct: Selector = step(lambda ctx: ctx.query.use_distinct())
 
 def reserved(use: NameUse) -> Callable[[Context], Exclusion]:
     return lambda ctx: ctx.query.selection.reserved(use)
 
-def column_ref(columns: Columns, selector: Selector, next: Thunk) -> Thunk:
-    """A column bare, or `<alias>.<column>`, which opens the alias first."""
+def item_position(selection: Selection) -> Position:
+    """Where the next item is written: of the class a shape may fix."""
 
-    bare: Thunk = dynamic(lambda ctx: [lat(column, selector, next) for column in columns(ctx)])
-    qualified: Thunk = name(reserved(NameUse.QUALIFIER), _open_qualifier, dot(bare))
+    allowed: bool = selection.allows_aggregates
 
-    return branch([qualified, bare])
-
-def naming(next: Thunk) -> Thunk:
-    """An optional `AS <name>` after an aggregate, where the query allows none."""
-
-    return branch([
-        guard(lambda ctx: ctx.query.selection.can_end_item(), next),
-        keyword("AS", None, ws(name(reserved(NameUse.OUTPUT), _name_item, next))),
-    ])
-
-def aggregate(function: Function, next: Thunk) -> Thunk:
-    """`FN(<column ref>)`, or `FN(*)` for a function that takes it."""
-
-    closing: Thunk = exp(RPAREN, None, naming(next))
-
-    arguments: list[Thunk] = [
-        column_ref(lambda ctx: ctx.query.selection.arguments(function), _select_argument(function), closing),
-    ]
-
-    if function.star:
-        arguments.append(lat("*", _select_star(function), closing))
-
-    return lat(function.name, None, exp(LPAREN, None, branch(arguments)))
+    return Position(selection.item_kinds(), EXPRESSION_DEPTH, allowed, allowed)
 
 def items(next: Thunk) -> Thunk:
-    """A comma separated item list."""
+    """A comma separated item list, then `next` - which starts at `FROM`."""
 
-    fork: Thunk = branch([
-        next,
-        Thunk.deferred(lambda: comma(items(next))),
-    ])
+    # One value grammar per position an item can be written at, built on first
+    # use: building one is cheap, but every expansion would build it again.
+    values: dict[Position, Thunk] = {}
+
+    def item(ctx: Context) -> list[Thunk]:
+        position: Position = item_position(ctx.query.selection)
+
+        if position not in values:
+            values[position] = value(position, end)
+
+        return [values[position]]
+
+    loop: Thunk = dynamic(item)
+
+    def end(expr: Expr) -> Thunk:
+        commit: Selector = select(lambda ctx, _matched: ctx.query.add_item(expr))
+
+        def build(ctx: Context) -> list[Thunk]:
+            selection: Selection = ctx.query.selection
+
+            if not selection.admits(expr):
+                return []
+
+            unnamed: bool = not selection.needs_name(expr)
+            more: bool = selection.can_follow()
+            last: bool = selection.can_end()
+
+            following: list[Thunk] = []
+
+            if more:
+                following.append(comma(loop))
+
+            if last:
+                following.append(ws(next))
+
+            named: Thunk = branch(following)
+
+            options: list[Thunk] = []
+            after: list[Thunk] = [lat("AS", None, ws(name(reserved(NameUse.OUTPUT), _name_item, named)))]
+
+            if unnamed and more:
+                options.append(exp(COMMA, commit, loop))
+
+            if unnamed and last:
+                after.append(next)
+
+            options.append(exp(WHITESPACE, commit, branch(after)))
+
+            return options
+
+        return dynamic(build)
+
+    return loop
+
+def projection(next: Thunk) -> Thunk:
+    """The items, `DISTINCT` first where the query may deduplicate."""
+
+    listed: Thunk = items(next)
 
     return branch([
-        column_ref(lambda ctx: ctx.query.selection.columns(), _select_column, fork),
-        *(aggregate(function, fork) for function in FUNCTIONS),
+        listed,
+        guard(
+            lambda ctx: not ctx.query.selection.is_simple,
+            lat("DISTINCT", _use_distinct, ws(listed)),
+        ),
     ])

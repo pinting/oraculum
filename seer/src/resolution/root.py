@@ -15,7 +15,8 @@ in the clause at all, or the bare name would be ambiguous between them:
     C_K(f) = C(T_K(f)) * prod_{t in T(f) - T_K(f)} (1 + t)
 
 which is `C(f)` itself when every owner qualifies. One constraint table is
-built per class set the functions ask for, all of them up front.
+built per class set a position asks for, the first time one asks, and shared
+by every copy from then on.
 
 The algebra itself is the kernel's business, through `runtime.backend`. What
 this module does depend on is that the questions come in batches: a selection
@@ -30,7 +31,7 @@ algebra and the constraint tables, which are immutable once built.
 
 from __future__ import annotations
 
-from typing import Iterable, NamedTuple, Sequence
+from typing import NamedTuple, Sequence
 
 from ..runtime import Algebra, Poly
 from .columns import ColumnIndex, Kinds
@@ -64,6 +65,7 @@ def _constraints(algebra: Algebra, index: ColumnIndex, kinds: Kinds | None) -> C
 class Root:
     __slots__ = (
         "_algebra",
+        "_index",
         "_tables",
         "_constraints",
         "_current",
@@ -72,17 +74,18 @@ class Root:
         "_used_tables",
     )
 
-    def __init__(self, index: ColumnIndex | None = None, kinds: Iterable[Kinds] = ()) -> None:
+    def __init__(self, index: ColumnIndex | None = None) -> None:
         if index is None:
             return
 
         self._algebra: Algebra = Algebra(sorted(index.tables))
+        self._index: ColumnIndex = index
         self._tables: frozenset[str] = index.tables
 
-        self._constraints: dict[Kinds | None, Constraints] = {
-            restriction: _constraints(self._algebra, index, restriction)
-            for restriction in (None, *kinds)
-        }
+        # A cache rather than state: a table depends on the schema alone, so
+        # every copy shares the one dictionary and whichever builds a table
+        # first builds it for all of them.
+        self._constraints: dict[Kinds | None, Constraints] = {}
 
         self._current: Poly = self._algebra.one()
         self._fields: frozenset[str] = frozenset()
@@ -102,6 +105,7 @@ class Root:
         clone: Root = Root.__new__(Root)
 
         clone._algebra = self._algebra
+        clone._index = self._index
         clone._tables = self._tables
         clone._constraints = self._constraints
         clone._current = self._current
@@ -111,10 +115,22 @@ class Root:
 
         return clone
 
+    def _table(self, kinds: Kinds | None) -> Constraints:
+        """The constraints of every field as an argument restricted to `kinds`."""
+
+        table: Constraints | None = self._constraints.get(kinds)
+
+        if table is None:
+            table = _constraints(self._algebra, self._index, kinds)
+
+            self._constraints[kinds] = table
+
+        return table
+
     def _surviving(self, kinds: Kinds | None) -> tuple[frozenset[str], frozenset[str]]:
         """The field names that still have a product, and the ones that do not."""
 
-        table: Constraints = self._constraints[kinds]
+        table: Constraints = self._table(kinds)
         alive: Sequence[bool] = self._algebra.nonzero(self._current, table.polys)
 
         return (
@@ -136,7 +152,7 @@ class Root:
     def use_field(self, field: str, kinds: Kinds | None = None) -> bool:
         """Multiply the running product by this field's constraint."""
 
-        constraint: Poly | None = self._constraints[kinds].by_name.get(field)
+        constraint: Poly | None = self._table(kinds).by_name.get(field)
 
         if constraint is None:
             return False

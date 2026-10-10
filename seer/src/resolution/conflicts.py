@@ -18,7 +18,7 @@ the items, this keeps only what they imply about the tables.
 
 from __future__ import annotations
 
-from ..model import ARGUMENT_KINDS, Schema, unqualify
+from ..model import Schema, unqualify
 from .columns import ColumnIndex, Kinds
 from .root import Root
 from .scopes import Scopes
@@ -31,7 +31,7 @@ class Conflicts:
             return
 
         self._index: ColumnIndex = ColumnIndex(schema)
-        self._root = Root(self._index, ARGUMENT_KINDS)
+        self._root = Root(self._index)
         self._scopes = Scopes(self._index)
 
     def copy(self) -> "Conflicts":
