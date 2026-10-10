@@ -43,7 +43,7 @@ class Selection:
 
         self._schema: Schema = schema
         self._projection: Projection = Projection()
-        self._conflicts: Conflicts = Conflicts(schema)
+        self._conflicts: Conflicts = Conflicts(schema, contract.derivable)
         self._bare: frozenset[str] = frozenset()
         self._reserved: Exclusion = base
         self._contract: Contract = contract
@@ -77,6 +77,19 @@ class Selection:
     @property
     def is_simple(self) -> bool:
         return self._contract.simple
+
+    @property
+    def contract(self) -> Contract:
+        return self._contract
+
+    def enclosing_reserved(self) -> Exclusion:
+        """What a name invented in a subquery of this one may not spell.
+
+        Everything this one may not, and every alias and output name it has
+        introduced: a subquery that reused one would shadow it.
+        """
+
+        return self._reserved.including(self._projection.aliases(), self._conflicts.scopes.names())
 
     @property
     def once(self) -> frozenset[str]:
@@ -115,7 +128,7 @@ class Selection:
 
         bare: frozenset[str] = self._bare if scope else self._bare | {column}
 
-        return placeable(self._schema, trial, bare, (), self._contract.once)
+        return placeable(self._schema, trial, bare, (), self._contract.once, self._contract.derivable)
 
     # What an alias that has not been opened yet is called while it is asked
     # about: no identifier spells it, so it is never one that has.
@@ -171,7 +184,7 @@ class Selection:
         if not all(trial.use_field(column.qualifier, column.name, kinds) for column in columns):
             return False
 
-        return placeable(self._schema, trial, self._bare, (), self._contract.once)
+        return placeable(self._schema, trial, self._bare, (), self._contract.once, self._contract.derivable)
 
     @property
     def allows_aggregates(self) -> bool:
@@ -187,10 +200,29 @@ class Selection:
 
         return self._contract.admits(self._projection, expr)
 
-    def needs_name(self, expr: Expr) -> bool:
-        """Whether `expr` may only be added with an `AS`; see `contract.py`."""
+    def _requirement(self, expr: Expr) -> tuple[Column, Kinds] | None:
+        """The column `expr` is and the classes it has to be, where it meets a typed requirement."""
 
-        return self._contract.needs_name(self._projection, expr)
+        if not isinstance(expr, Column):
+            return None
+
+        required, kinds = self._contract.requirement(expr.name)
+
+        return (expr, kinds) if required and kinds is not None else None
+
+    def needs_name(self, expr: Expr) -> bool:
+        """Whether `expr` may only be added with an `AS`; see `contract.py`.
+
+        A column a derived table has to export under its name, but that can no
+        longer be of the classes required, can only be added renamed.
+        """
+
+        if self._contract.needs_name(self._projection, expr):
+            return True
+
+        requirement: tuple[Column, Kinds] | None = self._requirement(expr)
+
+        return requirement is not None and not self.can_narrow((requirement[0],), requirement[1])
 
     def can_follow(self) -> bool:
         """Whether another item may come after the one being written."""
@@ -199,10 +231,10 @@ class Selection:
 
         return self._contract.has_room(self._projection, 1) and self.can_supply(following)
 
-    def can_end(self) -> bool:
-        """Whether the item being written may be the last."""
+    def can_end(self, output: str | None) -> bool:
+        """Whether the item being written, going by `output`, may be the last."""
 
-        return self._contract.may_end_with_next(self._projection)
+        return self._contract.may_end_with(self._projection, output)
 
     def is_complete(self) -> bool:
         """Whether the projection may be left for the FROM clause."""
@@ -242,6 +274,12 @@ class Selection:
 
     def add(self, expr: Expr) -> bool:
         if not self.admits(expr):
+            return False
+
+        # A required column is committed as the class it is required as.
+        requirement: tuple[Column, Kinds] | None = self._requirement(expr)
+
+        if requirement is not None and not self.narrow((requirement[0],), requirement[1]):
             return False
 
         self._projection = self._projection.add(expr)

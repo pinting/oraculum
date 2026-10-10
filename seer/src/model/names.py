@@ -62,6 +62,10 @@ POSTGRES_RESERVED: frozenset[str] = frozenset({
 
 KEYWORDS: frozenset[str] = SQLITE_KEYWORDS | POSTGRES_RESERVED
 
+# What a derived table, `(SELECT ...) AS d`, is called in its node: it has no
+# name of its own, and this one spells no identifier, so it never collides.
+DERIVED: str = "(...)"
+
 def qualify(table: str, alias: str) -> str:
     """`"users u"` for an aliased table, `"users"` for a bare one."""
 

@@ -2,10 +2,11 @@
 
     <filters>   := <predicate> [(AND | OR) <predicate>]*
     <predicate> := [NOT] (<condition> | "(" <filters> ")")
-    <condition> := <operand> <operator> <operand | literal>
+    <condition> := <operand> <operator> <operand | literal | subquery>
                  | <operand> [NOT] BETWEEN <operand | literal> AND <operand | literal>
-                 | <operand> [NOT] IN "(" <literal> [, <literal>]* ")"
+                 | <operand> [NOT] IN "(" <literal> [, <literal>]* | <subquery> ")"
                  | <operand> IS [NOT] NULL
+                 | EXISTS "(" <subquery> ")"
 
 The shape is the same wherever conditions are written; what differs is which
 operands a clause may name, and that is a `Domain`. The domain emits the left
@@ -18,6 +19,12 @@ restriction rides in the continuation the way a join clause carries its
 A condition is recorded once written whole, on its last token. Where it took
 more than one value - the bounds of a `BETWEEN`, the list of an `IN` - the
 values before the last are set aside in the context's capture until then.
+
+A subquery stands where a value of the left side's class may: as the one value
+a comparison takes (`Scalar`), as the list of an `IN` (`Membership`), and on its
+own after `EXISTS`. It is recorded when it closes, and it may read the columns
+of the clause it stands in (`VirtualTable.exposes`), which is what makes a
+subquery correlated.
 """
 
 from __future__ import annotations
@@ -25,13 +32,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
-from ..context import Context
-from ..model import Arity, Operator, TypeClass, classify, literal_for, operators_for
-from ..query import Operand
+from ..context import Commit, Context
+from ..model import EQUALITY, ORDERING, Arity, Operator, TypeClass, classify, literal_for, operators_for
+from ..query import Existence, Membership, Operand, Scalar
 from ..runtime import Selector, Thunk
 from .combinators import branch, comma, dynamic, exp, keyword, lat, ws
 from .selectors import select
-from .tokens import LPAREN, RPAREN
+from .subquery import subquery
+from .tokens import LPAREN, RPAREN, SPACED_LPAREN
 
 Continuation = Callable[[Operand], Thunk]
 
@@ -87,10 +95,16 @@ def opposite(domain: Domain, left: Operand, selector: Selector, next: Thunk) -> 
 
     return dynamic(build)
 
-def listed(domain: Domain, left: Operand, operator: Operator, next: Thunk) -> Thunk:
-    """`( <literal> [, <literal>]* )`, recorded on the closing bracket."""
+def _recorded(domain: Domain, text: str) -> Commit:
+    """Record `text` once the subquery it ends with has closed."""
 
-    pattern: str | None = literal_for(classify(left.field.type))
+    return lambda ctx, _inner: domain.record(ctx, text)
+
+def listed(domain: Domain, left: Operand, operator: Operator, next: Thunk) -> Thunk:
+    """`( <literal> [, <literal>]* )` recorded on the closing bracket, or `( <subquery> )`."""
+
+    kind: TypeClass = classify(left.field.type)
+    pattern: str | None = literal_for(kind)
 
     assert pattern is not None, f"{operator} offered over a class with no literals"
 
@@ -99,7 +113,18 @@ def listed(domain: Domain, left: Operand, operator: Operator, next: Thunk) -> Th
     def more() -> Thunk:
         return branch([closing, comma(exp(pattern, _append, Thunk.deferred(more)))])
 
-    return exp(LPAREN, None, exp(pattern, _capture, Thunk.deferred(more)))
+    inner: Thunk = subquery(
+        Membership(frozenset({kind})), next, _recorded(domain, f"{left.text} {operator} (SELECT …)")
+    )
+
+    return exp(LPAREN, None, branch([exp(pattern, _capture, Thunk.deferred(more)), inner]))
+
+def scalar(domain: Domain, left: Operand, operator: Operator, next: Thunk) -> Thunk:
+    """`( <subquery> )`, one value of `left`'s class, as the right side of a comparison."""
+
+    purpose: Scalar = Scalar(frozenset({classify(left.field.type)}))
+
+    return exp(LPAREN, None, subquery(purpose, next, _recorded(domain, f"{left.text} {operator} (SELECT …)")))
 
 def operator_choices(domain: Domain, left: Operand, next: Thunk) -> Thunk:
     """The operators `left`'s type admits, each carrying what stands on its right.
@@ -108,29 +133,42 @@ def operator_choices(domain: Domain, left: Operand, next: Thunk) -> Thunk:
     others defer it to the last value they are followed by.
     """
 
-    options: list[Thunk] = []
+    def right(operator: Operator) -> Thunk:
+        """What stands on the right of `operator`, built only once it is written."""
 
-    for operator in operators_for(left.field):
         arity: Arity = operator.arity
 
-        if arity is Arity.UNARY:
-            commit: Selector = _record(domain, lambda _ctx, _m, o=operator: f"{left.text} {o}")
+        if arity is Arity.BINARY:
+            commit: Selector = _record(domain, lambda _ctx, matched: f"{left.text} {operator} {matched}")
+            sides: list[Thunk] = [opposite(domain, left, commit, next)]
 
-            options.append(lat(str(operator), commit, next))
-        elif arity is Arity.BINARY:
-            commit = _record(domain, lambda _ctx, matched, o=operator: f"{left.text} {o} {matched}")
+            # An equality or an order may compare with the one value a
+            # subquery produces; a pattern only with a pattern.
+            if operator in EQUALITY + ORDERING:
+                sides.append(scalar(domain, left, operator, next))
 
-            options.append(lat(str(operator), None, ws(opposite(domain, left, commit, next))))
-        elif arity is Arity.RANGE:
+            return branch(sides)
+
+        if arity is Arity.RANGE:
             commit = _record(
                 domain,
-                lambda ctx, matched, o=operator: f"{left.text} {o} {ctx.captured} AND {matched}",
+                lambda ctx, matched: f"{left.text} {operator} {ctx.captured} AND {matched}",
             )
             upper: Thunk = keyword("AND", None, ws(opposite(domain, left, commit, next)))
 
-            options.append(lat(str(operator), None, ws(opposite(domain, left, _capture, upper))))
+            return opposite(domain, left, _capture, upper)
+
+        return listed(domain, left, operator, next)
+
+    options: list[Thunk] = []
+
+    for operator in operators_for(left.field):
+        if operator.is_unary:
+            commit: Selector = _record(domain, lambda _ctx, _m, o=operator: f"{left.text} {o}")
+
+            options.append(lat(str(operator), commit, next))
         else:
-            options.append(lat(str(operator), None, ws(listed(domain, left, operator, next))))
+            options.append(lat(str(operator), None, ws(Thunk.deferred(lambda o=operator: right(o)))))
 
     return branch(options)
 
@@ -147,7 +185,11 @@ def condition(domain: Domain, next: Thunk) -> Thunk:
 def predicate(domain: Domain, next: Thunk, depth: int) -> Thunk:
     """One condition, optionally parenthesised, optionally negated."""
 
-    options: list[Thunk] = [condition(domain, next)]
+    exists: Thunk = lat("EXISTS", None, exp(SPACED_LPAREN, None, subquery(
+        Existence(), next, _recorded(domain, "EXISTS (SELECT …)")
+    )))
+
+    options: list[Thunk] = [condition(domain, next), exists]
 
     if depth > 0:
         closing: Thunk = exp(RPAREN, None, next)

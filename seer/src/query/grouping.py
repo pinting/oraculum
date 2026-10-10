@@ -10,7 +10,7 @@ aggregates, every item has to be single valued per group, and a value is when
 
 * it is a grouped key itself, however it is spelled;
 * it is an aggregate, which folds the group into one value;
-* it is a constant;
+* it is a constant - a literal, or a subquery that reads nothing of the row;
 * everything it is computed from is, recursively - `LOWER(email)` over a
   grouped `email`, `COUNT(*) + 1`, `ROW_NUMBER() OVER (ORDER BY email)`.
 
@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from .expression import Column, Expr, Literal, Star
+from .expression import Column, Expr, Literal, Star, Subquery
 from .operand import Operand
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ class Grouping:
     def covers(self, expr: Expr, key: Callable[[Expr], str]) -> bool:
         """Whether `expr` has a single value per group; `key` renders a value to its key."""
 
-        if expr.is_aggregate or isinstance(expr, (Literal, Star)):
+        if expr.is_aggregate or isinstance(expr, (Literal, Star, Subquery)):
             return True
 
         if any(grouped.key == key(expr) for grouped in self.keys):

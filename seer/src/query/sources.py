@@ -10,6 +10,13 @@ it, and SQL would still refuse the bare name between them. And a node may only
 be placed where the aliases still to come can be placed after it
 (`placement.py`).
 
+An entry may also be a derived table, `(SELECT ...) AS u`: in place of an
+alias the projection read off, exporting what it read, or - where the
+projection reads nothing of any table - under a new alias. A derived table is
+an entry on its own: it is joined to nothing and nothing joins it, since its
+columns are only known once its query has closed, after the join graph was
+built.
+
 Everything that might be offered is filtered by the same test that placing it
 applies, so the grammar never offers a node it would then have to refuse.
 
@@ -26,13 +33,13 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from ..model import Schema, unqualify
+from ..model import DERIVED, Schema, Table, qualify, unqualify
 from ..resolution import JOIN_TYPES, Conflicts, JoinType, Neighbor, Relationships
 from .placement import placeable
 from .selection import Selection
 
 class Sources:
-    __slots__ = ("_schema", "_selection", "_relationships", "_join_types")
+    __slots__ = ("_schema", "_selection", "_relationships", "_join_types", "_derived")
 
     def __init__(
         self,
@@ -48,6 +55,9 @@ class Sources:
         self._relationships = Relationships(schema, selection.conflicts.get_required_tables())
         self._join_types: tuple[JoinType, ...] = join_types
 
+        # The derived tables placed, by node: what each exports.
+        self._derived: dict[str, Table] = {}
+
     def copy(self, selection: Selection) -> "Sources":
         """A copy bound to `selection`, the copy of the one this was bound to."""
 
@@ -57,6 +67,7 @@ class Sources:
         clone._selection = selection
         clone._relationships = self._relationships.copy()
         clone._join_types = self._join_types
+        clone._derived = dict(self._derived)
 
         return clone
 
@@ -68,6 +79,11 @@ class Sources:
         """The nodes placed so far, in the order they were placed."""
 
         return self._relationships.get_used_nodes()
+
+    def derived(self) -> dict[str, Table]:
+        """The derived tables placed, by node."""
+
+        return dict(self._derived)
 
     def nullable(self) -> frozenset[str]:
         """The placed nodes an outer join may pad with NULLs."""
@@ -98,12 +114,16 @@ class Sources:
         if node in self._conflicts.get_required_tables() and not trial.use_table(node):
             return False
 
+        return self._leaves_placeable(trial, node)
+
+    def _leaves_placeable(self, trial: Conflicts, node: str) -> bool:
         return placeable(
             self._schema,
             trial,
             self._selection.bare_columns(),
             self.nodes() + (node,),
             self._selection.once,
+            self._selection.contract.derivable,
         )
 
     def entries(self) -> list[str]:
@@ -127,6 +147,61 @@ class Sources:
             return False
 
         return self._relationships.use_table(node)
+
+    # -- derived tables ---------------------------------------------------
+
+    def derivable(self) -> list[str]:
+        """The aliases a derived table may stand in for as the next entry.
+
+        Every alias still to be placed, where placing it as a derived table
+        leaves the rest placeable; none where the query may open no more.
+        """
+
+        if not self._selection.contract.derivable:
+            return []
+
+        return [
+            alias
+            for alias, _ in self._conflicts.scopes.open()
+            if self._admits_derived(alias)
+        ]
+
+    def may_derive_freely(self) -> bool:
+        """Whether a derived table may open the clause under a new alias.
+
+        Only where the projection asks nothing of any table, which is the one
+        place a FROM entry may be anything at all.
+        """
+
+        return (
+            self._selection.contract.derivable
+            and not self.nodes()
+            and self._conflicts.is_satisfied()
+        )
+
+    def _admits_derived(self, alias: str) -> bool:
+        trial: Conflicts = self._conflicts.copy()
+
+        if not trial.derive(alias):
+            return False
+
+        return self._leaves_placeable(trial, qualify(DERIVED, alias))
+
+    def place_derived(self, alias: str, table: Table) -> bool:
+        """Open a FROM entry at a derived table exporting `table`, called `alias`."""
+
+        if alias in self.derivable():
+            self._conflicts.derive(alias)
+        elif not self.may_derive_freely() or alias in self._conflicts.scopes:
+            return False
+
+        node: str = qualify(DERIVED, alias)
+
+        self._derived[node] = table
+
+        return self._relationships.use_table(node)
+
+    # -- joins ------------------------------------------------------------
 
     def neighbors(self) -> tuple[Neighbor, ...]:
         """Nodes the current entry may be joined to."""

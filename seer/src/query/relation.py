@@ -35,9 +35,9 @@ grouped value.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Iterable, Mapping
 
-from ..model import Field, Schema, TypeClass, column_name, reference_name, unqualify
+from ..model import Field, Schema, Table, TypeClass, column_name, reference_name, unqualify
 from .operand import Operand
 
 if TYPE_CHECKING:
@@ -56,6 +56,7 @@ class Relation:
         schema: Schema | None = None,
         nodes: Iterable[str] = (),
         nullable: frozenset[str] = frozenset(),
+        derived: Mapping[str, Table] | None = None,
     ) -> None:
         if schema is None:
             return
@@ -64,12 +65,15 @@ class Relation:
         # accumulated across entries, so it is deduplicated in order rather
         # than trusted.
         self._nodes: tuple[str, ...] = tuple(dict.fromkeys(nodes))
-        self._operands = self._build_operands(schema, self._nodes, nullable)
+        self._operands = self._build_operands(schema, self._nodes, nullable, derived or {})
         self._by_text: dict[str, Operand] = {operand.text: operand for operand in self._operands}
 
     @staticmethod
     def _build_operands(
-        schema: Schema, nodes: tuple[str, ...], nullable: frozenset[str]
+        schema: Schema,
+        nodes: tuple[str, ...],
+        nullable: frozenset[str],
+        derived: Mapping[str, Table],
     ) -> tuple[Operand, ...]:
         """Every way a column of the clause may be named, sorted by spelling.
 
@@ -82,7 +86,7 @@ class Relation:
 
         for node in nodes:
             name, _ = unqualify(node)
-            table = schema.tables.get(name)
+            table: Table | None = derived.get(node, schema.tables.get(name))
 
             if table is None:
                 continue

@@ -11,6 +11,7 @@ it is any value SQL computes per row or per group:
     Predicate   email LIKE 'a%', created_at IS NULL     (only inside CASE)
     Case        CASE WHEN ... THEN ... ELSE ... END
     Window      ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...)
+    Subquery    (SELECT MAX(id) FROM posts)
 
 The tree is written before the FROM clause exists, so a column is a name and
 nothing more: which table supplies it, and so which type it has, is the
@@ -45,6 +46,7 @@ from ..model import (
     Operator,
     Type,
     TypeClass,
+    classify,
     column_name,
     is_nullable,
 )
@@ -271,6 +273,28 @@ class Case(Expr):
         nullable: bool = self.otherwise is None or any(is_nullable(field) for field in fields)
 
         return Field(name=str(self), type=fields[0].type, is_nullable=nullable)
+
+@dataclass(frozen=True)
+class Subquery(Expr):
+    """A scalar subquery, `(SELECT ...)`: one value, the same for every row.
+
+    It reads nothing of the query it stands in - a projection is written
+    before its FROM clause, so there is nothing to read yet - which makes it a
+    constant as far as grouping can tell. `serial` tells two apart.
+    """
+
+    result: Field
+    serial: int
+
+    @property
+    def kind(self) -> TypeClass:
+        return classify(self.result.type)
+
+    def render(self, leaf: Leaf) -> str:
+        return f"(SELECT … #{self.serial})"
+
+    def field(self, resolve: Resolve) -> Field:
+        return Field(name=str(self), type=self.result.type, is_nullable=True)
 
 # How a key of a window, or of an ORDER BY, is ordered: `""`, `"ASC"` or `"DESC"`.
 Direction = str

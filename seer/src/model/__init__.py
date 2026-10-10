@@ -4,6 +4,7 @@ Nothing here changes while a statement is generated. Everything above reads it.
 """
 
 from .names import (
+    DERIVED,
     KEYWORDS,
     column_name,
     qualify,
@@ -27,6 +28,8 @@ from .functions import (
 )
 from .operators import (
     BINARY_OPERATORS,
+    EQUALITY,
+    ORDERING,
     LITERAL_CLASSES,
     LITERAL_TYPES,
     LITERALS,
@@ -57,6 +60,9 @@ __all__ = [
     "Role",
     "function_names",
     "BINARY_OPERATORS",
+    "EQUALITY",
+    "ORDERING",
+    "DERIVED",
     "KEYWORDS",
     "LITERAL_CLASSES",
     "LITERAL_TYPES",

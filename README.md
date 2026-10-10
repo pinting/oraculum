@@ -15,7 +15,7 @@ An SQL autocomplete framework which guarantees grammatical and semantical correc
 <items>       := <item> [, <item>]*
 <item>        := <value> [AS <name>]
 <value>       := <term> [(+ | - | * | /) <term>]*
-<term>        := <field ref> | <literal> | <call> | <aggregate> | <ranking> | <case>
+<term>        := <field ref> | <literal> | <call> | <aggregate> | <ranking> | <case> | <subquery>
 <call>        := <scalar>(<value> [, <value>]*) | CAST(<value> AS TEXT)
 <scalar>      := ABS | COALESCE | LENGTH | LOWER | ROUND | TRIM | UPPER
 <aggregate>   := COUNT(*) | <function>([DISTINCT] <value>) [<window>]
@@ -26,7 +26,7 @@ An SQL autocomplete framework which guarantees grammatical and semantical correc
                  [ELSE <value>] END
 <field ref>   := <field> | <alias>.<field>
 
-<entry>       := <source> [<join>]*
+<entry>       := <source> [<join>]* | <subquery> AS <alias>
 <join>        := <join type> <source> ON <column ref> = <column ref>
 <source>      := <table> [AS <alias>]
 <join type>   := INNER JOIN | LEFT JOIN | RIGHT JOIN | FULL JOIN
@@ -35,10 +35,12 @@ An SQL autocomplete framework which guarantees grammatical and semantical correc
 <sort key>    := (<output name> | <operand> | <aggregate>) [ASC | DESC]
 <filters>     := <predicate> [(AND | OR) <predicate>]*
 <predicate>   := [NOT] (<condition> | "(" <filters> ")")
-<condition>   := <operand> <operator> <operand | literal>
+<condition>   := <operand> <operator> <operand | literal | subquery>
                | <operand> [NOT] BETWEEN <operand | literal> AND <operand | literal>
-               | <operand> [NOT] IN (<literal> [, <literal>]*)
+               | <operand> [NOT] IN (<literal> [, <literal>]* | <query>)
                | <operand> IS [NOT] NULL
+               | EXISTS <subquery>
+<subquery>    := ( <query> )
 <operand>     := <column> | <qualifier>.<column> | <scalar>(<operand>)
                | <aggregate>                                (in HAVING and ORDER BY)
 ```
@@ -445,9 +447,25 @@ WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT n + 1 FROM t WHERE 
 SELECT n FROM t;
 ```
 
+**Subqueries:** A query may stand inside another: as the one value a
+comparison takes, as the list of an `IN`, after `EXISTS`, as a value of the
+projection and as a table of the FROM clause. One inside a condition reads the
+columns of the query around it, qualified, which is what makes it correlated:
+
+```sql
+SELECT email FROM users WHERE EXISTS (SELECT title FROM posts WHERE posts.user_id = users.id);
+SELECT title FROM posts WHERE published_at > (SELECT MIN(created_at) FROM users WHERE users.id = posts.user_id);
+SELECT email, (SELECT COUNT(*) FROM posts) AS total FROM users;
+SELECT d.user_id FROM (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) AS d WHERE d.n > 1;
+```
+
+A value is one row of one column, so its query aggregates and does not group.
+A derived table is read through its alias, and has to export what the
+projection already read off it.
+
 Section 6i is how expressions are written before the FROM clause exists, 6j
-the placement rule aliases add to it, 6k sorting and 6l compounds and
-recursion.
+the placement rule aliases add to it, 6k sorting, 6l compounds and
+recursion, and 6m subqueries.
 
 Two things have to be true of every statement the system produces. It has to be **grammatical**: a well-formed word or phrase. It also has to be **meaningful**: something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
 
@@ -1168,8 +1186,10 @@ result. What a key may be depends on what the result is:
 | a compound | the output names of its first member |
 
 An output name is only on offer where exactly one item goes by it, since a
-name two items share is ambiguous, and it is written as a whole, never inside
-a function: PostgreSQL reads `ORDER BY e` as the output `e` but `UPPER(e)` as a
+name two items share is ambiguous; outside a compound only where it is an `AS`
+alias or names, bare, the very column it comes from, since SQLite reads any
+other name as a column of the relation; and it is written as a whole, never
+inside a function: PostgreSQL reads `ORDER BY e` as the output `e` but `UPPER(e)` as a
 column that does not exist. A value sorted by once is not offered again,
 however it is spelled, and the `ORDER BY` itself is only offered where
 something is left to sort by.
@@ -1215,6 +1235,54 @@ A member that may read the definition is one that follows a union in a
 accept as a recursive term: no aggregate, window or `DISTINCT`, no grouping or
 sorting, the definition placed once at most and by inner joins only, and,
 once it is placed, no further set operator.
+
+#### 6m. Subqueries: a call stack of virtual tables
+
+A subquery is a virtual table like any other, written inside another one
+while that one waits. So beside the stack of closed layers (6g) the context
+keeps a second, shorter one: the **calls**, the queries suspended while a
+subquery inside them is written, innermost last. Each call remembers two
+things - where the grammar resumes once the subquery closes, and what the
+query around it does with the result - so one subquery grammar, built once,
+serves every place a subquery may stand, the way a return address lets one
+function serve every caller:
+
+```mermaid
+graph LR
+    main(["main query: WHERE …"]) -->|"suspended in"| call1(["call: resume after ), record the condition"])
+    call1 -->|"while writing"| sub(["subquery: SELECT …"])
+    sub -->|") closes it"| main
+
+    classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
+    classDef accent fill:#2f6fb5,stroke:#1b4670,color:#ffffff
+    class main,call1 plain
+    class sub accent
+```
+
+Where a subquery stands decides what it owes, its **purpose**, which becomes
+its contract the way a definition's frame does:
+
+| purpose | must produce |
+|---|---|
+| a value, `x = (…)` | one column of `x`'s class and one row: every item aggregates, nothing is grouped |
+| the list of an `IN` | one column of the left side's class |
+| an `EXISTS` | anything |
+| a derived table, `(…) AS d` | every column the projection read off `d`, of the class it read it as, and no name the projection uses bare |
+
+The last is the left-to-right problem in miniature: the projection names
+`d.user_id` before anything says what `d` is. So an alias may turn out to be a
+derived table wherever one may still be opened, which keeps every column some
+table has on offer to it, and the derived table that stands in for it later
+is written under a contract listing exactly what was read. Being a derived
+table is one more candidate in the placement search of 6j, and a clash-free
+one, since it supplies no bare column.
+
+A subquery inside a condition reads what is typed around it: the closed
+relation of a WHERE, the grouped columns of a HAVING, and whatever the queries
+around those expose in turn - always qualified, and never a name its own FROM
+clause shadows. One in the projection or the FROM clause reads nothing around
+it: the projection is written before there is anything to read, and a derived
+table has no LATERAL to read its neighbours with. Subqueries nest two deep.
 
 ## License
 

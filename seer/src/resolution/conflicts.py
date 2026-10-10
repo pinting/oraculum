@@ -26,13 +26,15 @@ from .scopes import Scopes
 class Conflicts:
     __slots__ = ("_index", "_root", "_scopes")
 
-    def __init__(self, schema: Schema | None = None) -> None:
+    def __init__(self, schema: Schema | None = None, derivable: bool = False) -> None:
+        """Resolution over `schema`; `derivable` where an alias may still turn out a derived table."""
+
         if schema is None:
             return
 
         self._index: ColumnIndex = ColumnIndex(schema)
         self._root = Root(self._index)
-        self._scopes = Scopes(self._index)
+        self._scopes = Scopes(self._index, derivable)
 
     def copy(self) -> "Conflicts":
         clone: Conflicts = Conflicts.__new__(Conflicts)
@@ -121,6 +123,11 @@ class Conflicts:
             self._root.use_table(table)
 
         return True
+
+    def derive(self, alias: str) -> bool:
+        """Satisfy `alias` with a derived table, which supplies no table the root needs."""
+
+        return self._scopes.derive(alias)
 
     def is_satisfied(self) -> bool:
         return self._root.is_satisfied() and self._scopes.is_satisfied()

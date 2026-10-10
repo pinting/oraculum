@@ -7,8 +7,10 @@ part, built when the body is left.
 
 What an ORDER BY may sort by depends on what the result is:
 
-* an **output name** is always on offer, for every name exactly one item goes
-  by - a name two items share would be ambiguous, and SQL refuses it;
+* an **output name** is on offer for every name exactly one item goes by - a
+  name two items share would be ambiguous, and SQL refuses it - where it is
+  an `AS` alias, or a column's own name that, bare, still names that column
+  (SQLite reads it as a column of the relation otherwise);
 * over a **plain** query, any value of the relation as well, columns and
   scalar functions over them;
 * over an **aggregated** one only single valued ones: grouped values,
@@ -118,7 +120,25 @@ class Presentation:
         """What one query's result may be sorted by, which depends on what the result is."""
 
         items = projection.items
-        named: tuple[Operand, ...] = outputs(result, lambda position, _: refinement.key(items[position].expr))
+
+        def spelled(position: int) -> bool:
+            # SQLite reads an ORDER BY name as an `AS` alias first and as a
+            # column of the relation otherwise, so a column item is only
+            # sorted by its name where that name, bare, is the same column.
+            item = items[position]
+
+            if item.alias is not None:
+                return True
+
+            bare: Operand | None = refinement.relation.resolve(item.output or "")
+
+            return bare is not None and bare.key == refinement.key(item.expr)
+
+        named: tuple[Operand, ...] = tuple(
+            output
+            for position, output in _positions(result, lambda position, _: refinement.key(items[position].expr))
+            if spelled(position)
+        )
 
         if projection.distinct:
             return cls(named)
@@ -136,19 +156,24 @@ class Presentation:
             f"Limit            = {self.limit or ''}{' OFFSET ' + self.offset if self.offset else ''}"
         )
 
+def _positions(result: Result, key: Callable[[int, str], str]) -> list[tuple[int, Operand]]:
+    """`outputs`, each with the position of the column it names."""
+
+    counts: Counter[str] = Counter(output.name.lower() for output in result if output.name)
+
+    return [
+        (position, Operand("", output.name, output.name, output.field, key(position, output.name)))
+        for position, output in enumerate(result)
+        if output.name and counts[output.name.lower()] == 1
+    ]
+
 def outputs(result: Result, key: Callable[[int, str], str]) -> tuple[Operand, ...]:
     """The columns of `result` an ORDER BY may name: those exactly one goes by.
 
     `key` gives each the key it shares with whatever else spells its value.
     """
 
-    counts: Counter[str] = Counter(output.name.lower() for output in result if output.name)
-
-    return tuple(
-        Operand("", output.name, output.name, output.field, key(position, output.name))
-        for position, output in enumerate(result)
-        if output.name and counts[output.name.lower()] == 1
-    )
+    return tuple(operand for _, operand in _positions(result, key))
 
 def can_sort(projection: Projection, compound: Result | None) -> bool:
     """Whether a result has anything to sort by.
