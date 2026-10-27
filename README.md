@@ -1,6 +1,8 @@
+> **Open to work:** I am currently focusing on my BSc and looking for a part-time role, either in Budapest or remote. If you have an opportunity that fits my skills, I would love to hear from you! You can reach me at [astameteo@posteo.net](mailto:astameteo@posteo.net) and my CV is available at [pinting.github.io/cv](https://pinting.github.io/cv)!
+
 # oraculum
 
-An SQL incremental semantic parser which guarantees grammatical and semantical correctness in the following subset of the language.
+An SQL incremental parser and enforcer which guarantees grammatical and semantical correctness in the following subset of the language.
 
 ```xml
 <statement>   := [WITH [RECURSIVE] <definition> [, <definition>]*] <query> ;
