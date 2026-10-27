@@ -1,8 +1,8 @@
-> **Open to work:** I am currently focusing on my BSc and looking for a part-time role, either in Budapest or remote. If you have an opportunity that fits my skills, I would love to hear from you! You can reach me at [astameteo@posteo.net](mailto:astameteo@posteo.net) and my CV is available at [pinting.github.io/cv](https://pinting.github.io/cv)!
+> **Open to work:** I am currently focusing on my BSc degree and looking for a part-time role either in Budapest or remote! If you have an opportunity that fits my skills, I would love to hear from you! You can reach me at [astameteo@posteo.net](mailto:astameteo@posteo.net) and my CV is available at [pinting.github.io/cv](https://pinting.github.io/cv)!
 
 # oraculum
 
-An SQL incremental parser and enforcer which guarantees grammatical and semantical correctness in the following subset of the language.
+An incremental SQL parser and enforcer which guarantees grammatical and semantic correctness in the following subset of the language.
 
 ```xml
 <statement>   := [WITH [RECURSIVE] <definition> [, <definition>]*] <query> ;
@@ -29,7 +29,7 @@ An SQL incremental parser and enforcer which guarantees grammatical and semantic
 <field ref>   := <field> | <alias>.<field>
 
 <entry>       := <source> [<join>]* | <subquery> AS <alias>
-<join>        := <join type> <source> ON <column ref> = <column ref>
+<join>        := <join type> <source> ON <field ref> = <field ref>
 <source>      := <table> [AS <alias>]
 <join type>   := INNER JOIN | LEFT JOIN | RIGHT JOIN | FULL JOIN
 
@@ -43,7 +43,7 @@ An SQL incremental parser and enforcer which guarantees grammatical and semantic
                | <operand> IS [NOT] NULL
                | EXISTS <subquery>
 <subquery>    := ( <query> )
-<operand>     := <column> | <qualifier>.<column> | <scalar>(<operand>)
+<operand>     := <field ref> | <scalar>(<operand>)
                | <aggregate>                                (in HAVING and ORDER BY)
 ```
 
@@ -52,7 +52,7 @@ An SQL incremental parser and enforcer which guarantees grammatical and semantic
 <p align="center">
   <a href="https://pinting.github.io/oraculum/">
     <img src="preview.png" max-width="1150">
-    Click here the open the WASM demo which runs 100% in your browser!
+    Click here to open the WASM demo which runs 100% in your browser!
   </a>
 </p>
 
@@ -63,8 +63,7 @@ The foundational experiments, designing the architectural layers of grammatical 
 ## Setup
 
 Needs [Rust](https://rustup.rs), [UV](https://docs.astral.sh/uv/getting-started/installation)
-and Python 3.14. Everything else is downloaded at a version this repository
-names.
+and Python 3.14. Everything else is automatically downloaded at the versions pinned by this repository.
 
 Each project builds itself, from its own directory:
 
@@ -167,14 +166,14 @@ CREATE TABLE comments (
 );
 ```
 
-**The projection:** One or more columns, each written root or scoped by an alias. An alias is invented by whoever is generating, since nothing in the schema names it, so it may be any identifier that no keyword, table or column already spells: `users2` is available, `users` is taken. Aliases are introduced here and nowhere else: `FROM users AS u` is reachable only once something has written `u.` in the projection.
+**The projection:** One or more columns, each written unqualified or scoped by an alias. An alias is invented by whoever is generating, since nothing in the schema names it, so it may be any identifier that no keyword, table or column already spells: `users2` is available, `users` is taken. Aliases are introduced here and nowhere else: `FROM users AS u` is reachable only once something has written `u.` in the projection.
 
 ```sql
 SELECT email, first_name FROM users;
 SELECT u.email, u.first_name FROM users AS u;
 ```
 
-What may be written is what the schema can still answer. `email` is on `users`alone, so writing it settles which table the clause needs. `body` is on `posts` and `comments`, so it leaves both open until something else decides between them. A name drops out once nothing that could supply it is left: after `SELECT id, title` the root `id` has to come from exactly one source and `title` has pinned that source to `posts`, so `users` is out and `first_name` is no longer offered.
+What may be written is what the schema can still answer. `email` is on `users` alone, so writing it settles which table the clause needs. `body` is on `posts` and `comments`, so it leaves both open until something else decides between them. A name drops out once nothing that could supply it is left: after `SELECT id, title` the unqualified `id` has to come from exactly one source and `title` has pinned that source to `posts`, so `users` is out and `first_name` is no longer offered.
 
 **The FROM clause:** One or more entries, comma separated, each a table optionally renamed by `AS`. Only tables the projection actually requires are ever offered and the statement cannot reach its terminator until every one of them has been supplied.
 
@@ -201,7 +200,7 @@ INNER JOIN comments AS c ON posts.id = c.post_id;
 
 A renamed source answers to its alias everywhere afterwards and to nothing else, so `FROM users AS u` makes the join `ON u.id = posts.user_id`, never `ON users.id`.
 
-**The WHERE clause:** Optional and written against the relation the FROM clause produced: every column of every source it placed, joined or not. Each is reachable scoped by its source's alias or table name and root wherever exactly one source supplies the name. A column does not have to be projected to be filtered on.
+**The WHERE clause:** Optional and written against the relation the FROM clause produced: every column of every source it placed, joined or not. Each is reachable scoped by its source's alias or table name and unqualified wherever exactly one source supplies the name. A column does not have to be projected to be filtered on.
 
 ```sql
 SELECT email FROM users WHERE created_at IS NOT NULL;
@@ -281,7 +280,7 @@ SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id ORDER BY n DESC LIMIT 
 SELECT DISTINCT LOWER(email) AS e FROM users ORDER BY e;
 ```
 
-**Compounds:** Members joined by `UNION`, `UNION ALL`, `INTERSECT` and `EXCEPT` produce the first member's columns, each as many and of the same type and the compound is sorted and limited after its last member, by the first member's names:
+**Compounds:** Members joined by `UNION`, `UNION ALL`, `INTERSECT` and `EXCEPT` must match the column count and types of the first member. The compound result takes the first member's column names, which can be used for sorting and limiting after the last member:
 
 ```sql
 SELECT email AS label FROM users UNION SELECT title FROM posts ORDER BY label LIMIT 5;
@@ -304,9 +303,9 @@ SELECT email, (SELECT COUNT(*) FROM posts) AS total FROM users;
 SELECT d.user_id FROM (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) AS d WHERE d.n > 1;
 ```
 
-A value is one row of one column, so its query aggregates and does not group. A derived table is read through its alias and has to export what the projection already read off it.
+When a subquery stands for a single value, it must return one row and one column - so it must aggregate without grouping. A derived table is read through its alias and has to export what the projection already read off it.
 
-Two things have to be true of every statement the system produces. It has to be grammatical: a well-formed word or phrase. It also has to be meaningful something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
+Two things have to be true of every statement the system produces. It has to be grammatical: a well-formed word or phrase. It also has to be meaningful: something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
 
 ## Layers in detail
 
@@ -526,7 +525,7 @@ The join graph has a vertex for each table and an edge for each foreign key, lab
 
 #### After FROM: the fixed relation
 
-Leaving `FROM` builds the relation: the columns of every placed table, each with its type and whether it can hold NULL. A column is always reachable in alias scope, as `u.email` and also in global scope, as `email`, where only one table supplies it.
+Leaving `FROM` builds the relation: the columns of every placed table, each with its type and whether it can hold NULL. A column is always reachable in alias scope (as `u.email`) and also in global scope (as `email`) whenever only one table supplies it.
 
 Before `FROM` a column could still come from several tables, which is why its type could still be narrowed. In the relation each column has exactly one supplier and one type, so from here on nothing is demanded or narrowed: every later clause only picks from what the relation offers. A scalar function over its columns, such as `LOWER(email)`, is one more value of the relation, of the type the function returns.
 
@@ -554,7 +553,7 @@ A key is a column not grouped yet or a scalar function over columns, which is a 
 
 Ending the body, at `ORDER BY`, `LIMIT` or the end of the query, fixes the result: the output columns with their names and types. A `WITH` definition exports this result and `ORDER BY` reads its output names from it.
 
-#### ORDER BY: how the result can be sorted by
+#### ORDER BY: how the result can be sorted
 
 `ORDER BY` opens once the body is complete. What it offers is read off the virtual table as the body left it: the output names of the result, the values of the relation and the grouping keys. An output name is offered when exactly one item has it. A plain query also offers every value of the relation. A grouped query offers grouped values, functions over them and aggregates of any column. After `SELECT DISTINCT` and in a compound only output names remain, since rows that were deduplicated or combined have nothing else to sort by. Each sort key may take `ASC` or `DESC` and a value already sorted by is not offered again in either scope.
 
