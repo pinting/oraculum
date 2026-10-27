@@ -279,7 +279,7 @@ SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id ORDER BY n DESC LIMIT 
 SELECT DISTINCT LOWER(email) AS e FROM users ORDER BY e;
 ```
 
-**Compounds:** Members joined by `UNION`, `UNION ALL`, `INTERSECT` and `EXCEPT` produce the first member's columns, each as many and of the same class and the compound is sorted and limited after its last member, by the first member's names:
+**Compounds:** Members joined by `UNION`, `UNION ALL`, `INTERSECT` and `EXCEPT` produce the first member's columns, each as many and of the same type and the compound is sorted and limited after its last member, by the first member's names:
 
 ```sql
 SELECT email AS label FROM users UNION SELECT title FROM posts ORDER BY label LIMIT 5;
@@ -308,9 +308,9 @@ Two things have to be true of every statement the system produces. It has to be 
 
 ## Layers in detail
 
-### 1. Tokens: characters, words, pieces of text
+### 1. Tokens
 
-A grammar talks about text: the word `tiger`, a comma, an identifier. A language model emits tokens from a fixed vocabulary, and the same text can be split many ways.
+A grammar talks about text: the word `tiger`, a comma, an identifier. A language model emits tokens from a fixed vocabulary and the same text can be split many ways.
 
 ```mermaid
 graph LR
@@ -358,7 +358,7 @@ For $L = \{\texttt{"tiger"}\}$ that is the handful of splits above; for an infin
 
 $c$ is many-to-one, so $c^{-1}(L)$ is the larger set. When $L$ is infinite there is nothing to enumerate, so it must be described by a machine. Regular languages are closed under inverse homomorphism, so whenever $L$ is regular, that machine is a finite automaton over $V$. The `kernel` calls it an index. Sections 2 to 4 are three ways of building one.
 
-### 2. Constants: a graph over the gaps in a string
+### 2. Constants
 
 Take the constant `tiger`. Put a node at every byte position: before the `t`, between each pair of letters, after the `r`. Six nodes for five characters. Positions are byte offsets, so a multi-byte character spans several nodes. Draw an edge from $i$ to $j$ whenever a vocabulary token spells exactly the bytes between them.
 
@@ -373,7 +373,7 @@ The accept condition is strictly "reached the end of the constant", not "has no 
 
 What remains is the out-edge labels grouped by source: two arrays. Finding the edges is one **Aho-Corasick** pass: a single automaton holding all 255,386 tokens as patterns, built once per vocabulary, reports every token occurring anywhere in `tiger` in one sweep. A standalone Go example: [`experiments/1-aot-ahocorasick/ahocorasick.go`](experiments/1-aot-ahocorasick/ahocorasick.go).
 
-### 3. Regular expressions: a state is the regex that is left
+### 3. Regular expressions
 
 A constant has a graph you can draw directly. A regular expression has to be explored and the trick is to let the states be regular expressions themselves.
 
@@ -449,7 +449,7 @@ The trade-off is explicit. The member automata cost $O\bigl(\sum_i |Q_i|\bigr)$ 
 
 ### 5. Lazy generation of an infinite graph
 
-Above the indexes sits the syntax graph: the SQL grammar, where each edge is an index and walking an edge means feeding tokens into that index until it accepts.
+The syntax graph sits above the indexes and encodes the SQL grammar. Each of its nodes is an index. Tokens are fed into a node's index until it accepts, which unlocks the node's outgoing edges: the routes the grammar allows next. Following a route resolves it into a new node whose index is the next lock to open, so the graph grows by one node each time an index completes. A node that receives a token its index cannot accept collapses and is removed from the heads of the kernel (the nodes it is currently feeding with incoming tokens).
 
 A simplified right-linear skeleton:
 
@@ -472,107 +472,102 @@ from   = source [ [ws] comma ws source [ [ws] comma ws [source ...] ] ]
 root   = SELECT ws fields ws FROM ws from [ws] semi
 ```
 
-Lists like `fields` and `from` repeat indefinitely. Each step forks into its own semantic history as aliases are invented and tables are narrowed. The full graph is infinite and cannot be built ahead of time.
+Lists like `fields` and `from` repeat indefinitely and every step forks into its own semantic history as aliases are invented and tables are narrowed. The full graph is infinite, so it is built lazily as the query is written. Static rules (`ws`, `comma`, `SELECT`) point to fixed indexes built once at startup. Dynamic rules (`field`, `table`, `alias`) ask the current semantic context which edges are legal and build only the next step. Each branch passes an updated copy of its context downstream, so the grammar grows one token at a time and a dead end is never built.
 
-Instead it is built lazily as the query is written. Static rules (`ws`, `comma`, `SELECT`) point to fixed indexes built once at startup. Dynamic rules (`field`, `table`, `alias`) ask the current semantic context which edges are legal and build only the next step. Each branch passes an updated copy of its context downstream, extending the grammar one token at a time and pruning dead ends before they exist.
+### 6. The semantic context / latent state
 
-### 6. The latent state
+The syntax graph only knows the grammar. The latent state under it checks the meaning: whether a column exists on a table the query can still use, or whether a join follows a foreign key. Each node of the graph carries a semantic context and passes a new copy of it on to the nodes that follow, so every branch keeps its own record of what the statement has committed to.
 
-Every rule runs against a `Context` that holds what the statement has committed to so far: the stack of closed definitions and the query being written. A rule never changes a context in place - it copies it, so branches never see each other's choices.
-
-The active query is a virtual table advanced by a state machine keyed on SQL keywords. As the `SELECT` unfolds, each keyword transition builds the next stage: tracking selected columns during the projection, building the join graph in `FROM`, filtering against the resulting relation in `WHERE`, `GROUP BY` and `HAVING`, then sorting or limiting. Invariants are enforced at these boundaries - the projection must be complete before `FROM`, all required tables and grouping keys must be satisfied before the body closes. A statement-level state machine above it tracks which query is open across `WITH` definitions, compound members and the main query, delegating the semantic work to the virtual table.
-
-#### 6.1 Root fields via algebra over a boolean polynomial ring
-
-Write $t_1, \ldots, t_n$ for the tables, each a variable that is $1$ when the table is in the FROM clause. Selecting an unqualified field constrains those variables. The constraint is a Boolean function.
-
-Any Boolean function can be written as a polynomial over $\mathbb{F}_2$, the field with two elements, where addition is XOR and multiplication is AND:
-
-```math
-R \;=\; \mathbb{F}_2[t_1, \ldots, t_n] \,\big/ \, (t_i^2 - t_i)
+A statement is any number of `WITH` definitions followed by the main query. Each of the queries goes through its clauses in a fixed order:
 
 ```
-
-The quotient says $t^2 = t$: a table is either present or not.
-
-A field $f$ that exists in tables $T(f)$ demands that *exactly one of them* appears in FROM. The polynomial is straightforward for one or two tables and needs correction terms beyond that:
-
-```math
-\begin{aligned}
-|T(f)| = 1 : \quad C(f) &= a \\
-|T(f)| = 2 : \quad C(f) &= a + b && \text{plain XOR} \\
-|T(f)| = 3 : \quad C(f) &= a + b + c \;+\; abc \\
-|T(f)| = 4 : \quad C(f) &= a + b + c + d \;+\; abc + abd + acd + bcd
-\end{aligned}
-
+SELECT items -> FROM -> [WHERE] -> [GROUP BY -> [HAVING]] -> [ORDER BY] -> [LIMIT] -> end
 ```
 
-For two tables, exactly-one is XOR. For three, $a + b + c$ over $\mathbb{F}_2$ is the parity function - true when an odd number of tables are present. That includes the all-three case, which the $abc$ term cancels.
+Each query keeps what it has committed to in its virtual table, which has one part for each stretch of clauses. The SELECT clause collects demands on the tables. `FROM` builds a join graph over the tables still demanded and places them. When it ends, the placed tables become the relation, the fixed set of columns that `WHERE`, `GROUP BY`, `HAVING` and `ORDER BY` are written against. Rules that span clauses are checked at these boundaries: `FROM` is offered only once the SELECT clause is complete. The query cannot end until every demanded table is placed and the grouping covers every item.
 
-In general $C(f)$ sums over every odd-sized subset of $T(f)$:
+#### The SELECT clause: which tables are still possible
 
-```math
-C(f) \;=\; \sum_{\substack{S \subseteq T(f) \\ |S| \text{ odd}}} \;\; \prod_{i \in S} t_i
-
-```
-
-Selecting a field multiplies its constraint into a running product (AND):
+Each table gets a variable $t_i \in \mathbb{F}_2$ that is $1$ when the table is in the FROM clause. A field in global scope is written without an alias and if the tables $T(f)$ carry it, it demands exactly one of them:
 
 ```math
-P \;\leftarrow\; P \cdot C(f), \qquad P \text{ starts at } 1
-
+C(f) = \sum_{i \in T(f)} t_i \prod_{j \in T(f) \setminus \{i\}} (1 + t_j)
 ```
 
-$P$ is the latent state: the function that is $1$ on exactly those FROM clauses consistent with everything selected so far. Every question about the selection reduces to evaluating $P$:
+Selecting a field multiplies its constraint into a running product $P$, which starts at $1$ and placing a table later substitutes $t = 1$. Everything the SELECT clause still allows can be read off $P$:
 
 ```math
 \begin{aligned}
-P = 0 \quad&\Longleftrightarrow\quad \text{the selection is contradictory} \\
-P|_{t = 1} = 0 \quad&\Longleftrightarrow\quad \text{table } t \text{ contradicts the selection} \\
-P|_{t_1 = \cdots = t_n = 0} = 1 \quad&\Longleftrightarrow\quad \text{nothing is outstanding: the query is satisfied} \\
-P \cdot C(f) = 0 \quad&\Longleftrightarrow\quad \text{field } f \text{ is excluded} \\
-\bigl\{\, t \in \mathrm{vars}(P) \;:\; P|_{t = 1} \neq 0 \,\bigr\} \quad&=\quad \text{the tables still able to satisfy it}
+P \cdot C(f) = 0 &\iff f \text{ is no longer offered} \\
+P|_{t=1} = 0 &\iff t \text{ contradicts the selection} \\
+P|_{t_1 = \cdots = t_n = 0} = 1 &\iff \text{nothing is outstanding}
 \end{aligned}
-
 ```
 
-`vars(P)` restricts the search to tables still required by the projection, not merely compatible ones. Already-placed tables are substituted out of $P$; they are tracked separately so they cannot be placed twice.
+Selecting `body` gives $P = c + p$. Placing `posts` then leaves $c + 1$, which still forbids `comments` but holds at the origin, so the SELECT clause is satisfied.
 
-Selecting a field twice changes nothing: `body` and `user_id` both live in `{comments, posts}`, so selecting both leaves $P = c + p$, because $(c+p)^2 = c+p$.
+An alias names exactly one table, so a field in alias scope narrows its candidates by intersection: after `u.email`, `u.` offers only columns of `users`. Both scopes also have to respect SQL's rule that a column in global scope has exactly one supplier, so a field is offered only if a FROM clause can still be written that gives each alias a table and supplies every column in global scope once. After `SELECT email, u.first_name FROM users`, the entry `users AS u` is never offered, because both would supply `email`.
 
-Placing a table is substitution: setting $u = 1$ satisfies every constraint mentioning `users`. The remainder is rarely the constant $1$. Selecting `body` then placing `posts` leaves $P = c + 1$. This still forbids `comments`, but $P$ evaluates to $1$ at the origin, which is where satisfaction is tested.
+#### Function calls
 
-#### 6.2 Aliased fields via intersection
+Every function says which column types each argument accepts and which type it returns. The schema's types are grouped by what can be done with them: numbers (`INT`, `BIGINT`, `DECIMAL`, ...), text (`VARCHAR`, `TEXT`, ...), dates and times (`DATE`, `TIMESTAMP`, ...), booleans and binary. E.g. `SUM` takes a number, `LOWER` takes text and returns text, `MIN` and `MAX` take anything that can be ordered (a number, text or a date) and `COUNT` takes anything.
 
-An alias stands for exactly one table, so its fields narrow towards a single table. No ring arithmetic is needed.
+Inside the parentheses only fields of an accepted type are offered: after `SELECT LOWER(` the offers are `email`, `first_name`, `last_name`, `title` and `body`, never `id`. A call is offered only where its return type fits, so `ROUND(ABS(` is allowed and `LOWER(ABS(` is not. Calls nest up to a fixed depth, windows are not allowed inside a call and inside an aggregate no other aggregate may start, so `SUM(COUNT(` is never offered.
 
-#### 6.3 Table selection via graph contraction
+A field in global scope inside a call demands exactly one of the tables carrying it, like any field in global scope, but only tables where the field has an accepted type count. If one table stored `id` as a number and another as text, writing `SUM(id)` would leave only the first as a supplier and the second could no longer be placed in `FROM`.
 
-Joining two tables contracts their vertices in the foreign-key graph so the pair acts as a single relation with their combined columns and neighbours. The `ON` columns come from the edge label, so the join condition is determined automatically. Tables two hops away become reachable through the merged vertex. Once the query leaves `FROM`, the sources lock into a fixed relation for the rest of the query. Later clauses reference columns by alias, table name, or bare name if the column is unambiguous.
+`MAX`, `MIN`, `SUM`, `ABS`, `ROUND` and `COALESCE` return the type of their argument, so `MAX(user_id)` has whatever type `user_id` turns out to have. When the next token needs a number, as in `MAX(user_id) +`, that requirement is passed down to `user_id`, which now has to come from a table where it is a number. `MAX(title)` is valid, since text can be ordered, but the result is text, so `+` is not offered after it. `COALESCE` needs all of its arguments to share one type, so its parse forks into one branch per type.
 
-#### 6.4 Enforcing column types
+#### The FROM clause: graph contraction
 
-Every column carries a type class (numeric, text, temporal, boolean, binary, or unknown) that determines which operators, literals, and comparable columns may follow it. Because the left operand is already written when operators are offered, its type class travels in the parser continuation rather than the context. Columns with no valid operators are never offered as left operands.
+The join graph has a vertex for each table and an edge for each foreign key, labelled with its column pair. An entry opens at a table the SELECT clause demands. A join contracts the neighbour into the entry, which makes tables two keys away reachable and the `ON` clause is read off the edge label.
 
-#### 6.5 Aggregates and grouping
+#### After FROM: the fixed relation
 
-Typed functions like `SUM` or `LOWER` restrict $P$ to tables that supply the argument in a matching type class, while excluding other tables that share the bare column name. When a query aggregates or groups, every projected item must be covered by a `GROUP BY` key, be an aggregate or constant, or be built entirely from covered values. The query cannot close until all projected items are covered.
+Leaving `FROM` builds the relation: the columns of every placed table, each with its type and whether it can hold NULL. A column is always reachable in alias scope, as `u.email` and also in global scope, as `email`, where only one table supplies it.
 
-#### 6.6 Sorting: what the result can be sorted by
+Before `FROM` a column could still come from several tables, which is why its type could still be narrowed. In the relation each column has exactly one supplier and one type, so from here on nothing is demanded or narrowed: every later clause only picks from what the relation offers. A scalar function over its columns, such as `LOWER(email)`, is one more value of the relation, of the type the function returns.
 
-`ORDER BY` keys depend on the query type: plain queries allow any relation column or unique output name; aggregated queries allow grouped values and aggregates; `DISTINCT` or compound queries allow only output names. Each key may appear at most once. `ORDER BY` (and its trailing comma) is only offered while sortable keys remain.
+The relation never changes once it is built. The later clauses write their conditions, grouping keys and sort keys into the virtual table beside it. The query does not track what it still owes, like an item that has yet to be grouped. It works that out again from the items and the grouping keys whenever `ORDER BY`, `LIMIT` or the end of the statement might be offered.
 
-#### 6.7 Compounds and recursion
+#### WHERE: the type picks the operator
 
-In compound queries (`UNION`, `INTERSECT`, `EXCEPT`), the first member fixes the column count and type classes that later members must match. Under `WITH RECURSIVE`, the catalog exposes a provisional table for the preceding members' output so the recursive term can reference itself before the definition closes. The recursive member is restricted to a simple inner-join `SELECT` with no aggregates, grouping or further set operators.
+A condition is parsed left side first and the type of the left side decides what may follow. Every type takes `=` and `!=`. Numeric and temporal values also take `<`, `<=`, `>`, `>=`, `BETWEEN` and `IN`, text takes all of those and `LIKE`, while boolean and binary values stop at equality. `IS NULL` and `IS NOT NULL` are offered only where the column can hold NULL: `verified` and `created_at` can, `email` cannot and after `LEFT JOIN posts` every column of `posts` can, because the join pads the rows that found no partner.
 
-#### 6.8 Subqueries via a call stack of virtual tables
+The right side is a literal of the same type or another column of it. Each type spells its literals its own way: `42`, `'a'`, `'2024-01-01'`, `TRUE`. So `created_at < published_at` is offered and `email = users.id` never is. A column is never compared with itself, whether it is written in alias or in global scope.
 
-Nested subqueries (up to two levels deep) are managed with a call stack that records where the outer grammar resumes and what shape the subquery must return - a single aggregated row for scalar comparisons, a matching column contract for derived tables, and so on. Subqueries in conditions can read outer columns when properly qualified; projection and `FROM` subqueries are isolated from outer scopes.
+A filter can never require a table or take a column away from the relation.
 
-#### 6.9 WITH via a stack of virtual tables
+#### GROUP BY: every item has to be covered
 
-Closed CTE definitions are pushed onto an immutable stack as virtual tables alongside the physical schema. Projected columns keep their types, nullability and schema origins, so foreign keys can join across definitions. The stack is persistent, so branches in the syntax graph safely share all catalog layers.
+An aggregate in the projection, such as `COUNT(*)`, folds the rows even without a `GROUP BY`: with no keys the whole relation is one group. An aggregate inside a window, such as `COUNT(*) OVER (...)`, folds nothing and does not count. Every other item then needs one value for the whole relation, which only an aggregate or a constant has. So `SELECT COUNT(*), 1 FROM users` can end right after `FROM`, while `SELECT email, COUNT(*) FROM users` cannot end until a `GROUP BY` makes `email` a key.
+
+A `GROUP BY` also makes a query aggregate, with or without an aggregate item. `SELECT email FROM users GROUP BY email` is valid, but `SELECT email, first_name FROM users GROUP BY email` cannot end until `first_name` is grouped too.
+
+Either way every item has to be covered: a grouped key, an aggregate, a constant or a value built only from covered values. `ORDER BY`, `LIMIT` and the end of the statement are offered only once every item is covered. `GROUP BY email` covers `LOWER(email)`, but `GROUP BY LOWER(email)` does not cover `email`.
+
+A key is a column not grouped yet or a scalar function over columns, which is a key of its own. Both scopes of a column share one key, so after `GROUP BY email` neither `email` nor `users.email` is offered again.
+
+`HAVING` reuses the condition grammar of `WHERE`. Its left side is a grouped value or an aggregate over any column and its right side a literal or a grouped value of the same type.
+
+Ending the body, at `ORDER BY`, `LIMIT` or the end of the query, fixes the result: the output columns with their names and types. A `WITH` definition exports this result and `ORDER BY` reads its output names from it.
+
+#### ORDER BY: how the result can be sorted by
+
+`ORDER BY` opens once the body is complete. What it offers is read off the virtual table as the body left it: the output names of the result, the values of the relation and the grouping keys. An output name is offered when exactly one item has it. A plain query also offers every value of the relation. A grouped query offers grouped values, functions over them and aggregates of any column. After `SELECT DISTINCT` and in a compound only output names remain, since rows that were deduplicated or combined have nothing else to sort by. Each sort key may take `ASC` or `DESC` and a value already sorted by is not offered again in either scope.
+
+After `SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id ORDER BY` the offers are `n`, `user_id` and aggregates such as `MAX(title)`, but never `title` itself. `LIMIT` and `OFFSET` only decide how many rows are returned.
+
+#### Queries inside queries
+
+The same grammar writes a query in any of four places. What differs is what its SELECT clause has to produce:
+
+1. A `WITH` definition names every column.
+2. A later member of a compound matches the first member's columns.
+3. A subquery returns one value when it stands for a scalar and a derived table exports what the outer query read off its alias.
+4. The main query produces whatever it likes.
+
+Closed definitions form a stack that later queries read as part of the schema, so a definition is joined like any declared table and its columns keep their foreign keys. A compound is written one member at a time, each one closed before the next begins. A subquery suspends the query around it, which resumes once the subquery closes, the way a function returns to its caller. That is why one subquery grammar covers every place a subquery can appear.
 
 ## License
 
