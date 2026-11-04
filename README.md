@@ -1,6 +1,8 @@
+> 💼 **Open to work** · [astameteo@posteo.net](mailto:astameteo@posteo.net) · [CV](https://pinting.github.io/cv)
+
 # oraculum
 
-An SQL incremental semantic parser which guarantees grammatical and semantical correctness in the following subset of the language.
+An incremental SQL parser and enforcer which guarantees grammatical and semantic correctness in the following subset of the language.
 
 ```xml
 <statement>   := [WITH [RECURSIVE] <definition> [, <definition>]*] <query> ;
@@ -18,30 +20,31 @@ An SQL incremental semantic parser which guarantees grammatical and semantical c
 <term>        := <field ref> | <literal> | <call> | <aggregate> | <ranking> | <case> | <subquery>
 <call>        := <scalar>(<value> [, <value>]*) | CAST(<value> AS TEXT)
 <scalar>      := ABS | COALESCE | LENGTH | LOWER | ROUND | TRIM | UPPER
-<aggregate>   := COUNT(*) | <function>([DISTINCT] <value>) [<window>]
+<unary scalar>:= ABS | LENGTH | LOWER | ROUND | TRIM | UPPER
+<aggregate>   := (COUNT(*) | <function>([DISTINCT] <value>)) [<window>]
 <function>    := COUNT | SUM | AVG | MIN | MAX
 <ranking>     := (ROW_NUMBER | RANK | DENSE_RANK)() <window>
 <window>      := OVER ([PARTITION BY <field ref> [, ...]] [ORDER BY <field ref> [ASC | DESC] [, ...]])
 <case>        := CASE [WHEN <value> (<operator> <value> | IS [NOT] NULL) THEN <value>]+
                  [ELSE <value>] END
-<field ref>   := <field> | <alias>.<field>
+<field ref>   := <field> | (<table | alias>).<field>
 
 <entry>       := <source> [<join>]* | <subquery> AS <alias>
-<join>        := <join type> <source> ON <column ref> = <column ref>
+<join>        := <join type> <source> ON <field ref> = <field ref>
 <source>      := <table> [AS <alias>]
 <join type>   := INNER JOIN | LEFT JOIN | RIGHT JOIN | FULL JOIN
 
 <keys>        := <operand> [, <operand>]*
-<sort key>    := (<output name> | <operand> | <aggregate>) [ASC | DESC]
+<sort key>    := (<output name> | <operand>) [ASC | DESC]
 <filters>     := <predicate> [(AND | OR) <predicate>]*
-<predicate>   := [NOT] (<condition> | "(" <filters> ")")
+<predicate>   := [NOT] (<condition> | ( <filters> ))
 <condition>   := <operand> <operator> <operand | literal | subquery>
                | <operand> [NOT] BETWEEN <operand | literal> AND <operand | literal>
                | <operand> [NOT] IN (<literal> [, <literal>]* | <query>)
                | <operand> IS [NOT] NULL
                | EXISTS <subquery>
 <subquery>    := ( <query> )
-<operand>     := <column> | <qualifier>.<column> | <scalar>(<operand>)
+<operand>     := <field ref> | <unary scalar>(<operand>)
                | <aggregate>                                (in HAVING and ORDER BY)
 ```
 
@@ -50,7 +53,7 @@ An SQL incremental semantic parser which guarantees grammatical and semantical c
 <p align="center">
   <a href="https://pinting.github.io/oraculum/">
     <img src="preview.png" max-width="1150">
-    Click here the open the WASM demo which runs 100% in your browser!
+    Click here to open the WASM demo which runs 100% in your browser!
   </a>
 </p>
 
@@ -61,8 +64,7 @@ The foundational experiments, designing the architectural layers of grammatical 
 ## Setup
 
 Needs [Rust](https://rustup.rs), [UV](https://docs.astral.sh/uv/getting-started/installation)
-and Python 3.14. Everything else is downloaded at a version this repository
-names.
+and Python 3.14. Everything else is automatically downloaded at the versions pinned by this repository.
 
 Each project builds itself, from its own directory:
 
@@ -112,11 +114,11 @@ graph LR
 
 Each edge is a vocabulary token whose text covers exactly those positions. A path from 0 to 4 is one valid tokenisation of `FROM`. To enforce grammar at the token level every grammatical element (a keyword, an identifier pattern, a literal format) has to become an automaton that accepts exactly the token sequences spelling it.
 
-**Constants and patterns as automata:** A fixed keyword like `FROM` is the position graph above, already a DFA over tokens: acyclic, one accepting state, found by a single Aho-Corasick sweep of the vocabulary. A regular expression cannot be drawn as positions. Instead the states are the derivatives of the regex: strip one character and see what regex is left. The identifier pattern `[a-z_][a-z0-9_]*` has exactly two live states:
+**Constants and patterns as automata:** A fixed keyword like `FROM` is the position graph above, already a DFA over tokens: acyclic, one accepting state, found by a single Aho-Corasick sweep of the vocabulary. A regular expression cannot be drawn as positions. Instead the states are the derivatives of the regex: strip one character and see what regex is left. The identifier pattern `[a-zA-Z_][a-zA-Z0-9_]*` has exactly two live states:
 
 ```mermaid
 graph LR
-    s0(["[a-z_][a-z0-9_]*"]) -->|"letter / underscore"| s1(["[a-z0-9_]*"])
+    s0(["[a-zA-Z_][a-zA-Z0-9_]*"]) -->|"letter / underscore"| s1(["[a-zA-Z0-9_]*"])
     s1 -->|"letter / digit / underscore"| s1
 
     classDef plain fill:#4a5160,stroke:#2f343f,color:#ffffff
@@ -133,7 +135,7 @@ The first character class is consumed and the starred tail loops on itself. Two 
 
 The latent state holds what the query has committed to so far. Each branch of the walk has its own copy, so one branch never sees the choices of another. An edge is offered only if the query can still be completed after taking it.
 
-What the state tracks depends on the clause. In the projection it works out which tables could still supply the fields selected so far and withdraws any field that would contradict the selection. In the FROM clause it offers only the tables the projection needs and a join only reaches a table linked to the entry by a foreign key, which also fills in the `ON` clause. Once the FROM clause is finished its columns form a fixed table and the rest of the query is written against it: a condition may name only those columns and the type of a column decides which operators and literals can follow it. Grouping, sorting, `WITH` definitions and subqueries are tracked the same way. The terminator is not offered until the FROM clause supplies every table the projection needs.
+What the state tracks depends on the clause. In the projection it works out which tables could still supply the fields selected so far and withdraws any field that would contradict the selection. In the FROM clause it offers the tables the projection needs. When the projection imposes no table demands, as with `COUNT(*)` or a constant literal, any table in the schema may open the clause. Joins may add foreign key neighbors, including intermediate tables needed to reach distant tables or filter on in later clauses, as long as they do not conflict with the selection. Once the FROM clause is finished its columns form a fixed table and the rest of the query is written against it: a condition may name only those columns and the type of a column decides which operators and literals can follow it. Grouping, sorting, `WITH` definitions and subqueries are tracked the same way. The terminator is not offered until the FROM clause supplies every table the projection needs.
 
 ### An example
 
@@ -165,22 +167,22 @@ CREATE TABLE comments (
 );
 ```
 
-**The projection:** One or more columns, each written root or scoped by an alias. An alias is invented by whoever is generating, since nothing in the schema names it, so it may be any identifier that no keyword, table or column already spells: `users2` is available, `users` is taken. Aliases are introduced here and nowhere else: `FROM users AS u` is reachable only once something has written `u.` in the projection.
+**The projection:** One or more columns, each written unqualified or scoped by an alias. An alias is invented by whoever is generating, since nothing in the schema names it, so it may be any identifier that no keyword, table or column already spells: `users2` is available, `users` is taken. For base tables, aliases are introduced here: `FROM users AS u` is reachable only once something has written `u.` in the projection. Base tables cannot introduce aliases solely in `FROM` or `JOIN` to disambiguate `WHERE` conditions; disambiguation requires qualifying the projection with that alias. (Derived tables follow the same rule when the projection reads from them, but can introduce an alias directly in `FROM` when the projection makes no table demands.)
 
 ```sql
 SELECT email, first_name FROM users;
 SELECT u.email, u.first_name FROM users AS u;
 ```
 
-What may be written is what the schema can still answer. `email` is on `users`alone, so writing it settles which table the clause needs. `body` is on `posts` and `comments`, so it leaves both open until something else decides between them. A name drops out once nothing that could supply it is left: after `SELECT id, title` the root `id` has to come from exactly one source and `title` has pinned that source to `posts`, so `users` is out and `first_name` is no longer offered.
+What may be written is what the schema can still answer. `email` is on `users` alone, so writing it settles which table the clause needs. `body` is on `posts` and `comments`, so it leaves both open until something else decides between them. A name drops out once nothing that could supply it is left: after `SELECT id, title` the unqualified `id` has to come from exactly one source and `title` has pinned that source to `posts`, so `users` is out and `first_name` is no longer offered.
 
-**The FROM clause:** One or more entries, comma separated, each a table optionally renamed by `AS`. Only tables the projection actually requires are ever offered and the statement cannot reach its terminator until every one of them has been supplied.
+**The FROM clause:** One or more entries, comma separated, each a table optionally renamed by `AS`. Where the projection demands specific tables, only those tables may open an entry. When the projection demands no tables, as in `SELECT COUNT(*)` or `SELECT 1`, any table in the schema may open the clause. The statement cannot reach its terminator until every table the projection demanded has been supplied.
 
 ```sql
 SELECT email, body FROM users, comments;
 ```
 
-**Joins:** Any entry may be grown by any number of joins, in all four types. The target has to be a foreign key neighbour of the entry as it now stands and that settles the `ON` columns outright, since they are read off the foreign key.
+**Joins:** Any entry may be grown by any number of joins, in all four types. The target has to be a foreign key neighbour of the entry as it now stands and that settles the `ON` columns outright, since they are read off the foreign key. A join can add any compatible foreign key neighbor, including intermediate tables not required by the projection that bridge toward distant tables or supply columns to filter on in `WHERE`.
 
 ```sql
 SELECT email, title FROM users INNER JOIN posts ON users.id = posts.user_id;
@@ -199,7 +201,7 @@ INNER JOIN comments AS c ON posts.id = c.post_id;
 
 A renamed source answers to its alias everywhere afterwards and to nothing else, so `FROM users AS u` makes the join `ON u.id = posts.user_id`, never `ON users.id`.
 
-**The WHERE clause:** Optional and written against the relation the FROM clause produced: every column of every source it placed, joined or not. Each is reachable scoped by its source's alias or table name and root wherever exactly one source supplies the name. A column does not have to be projected to be filtered on.
+**The WHERE clause:** Optional and written against the relation the FROM clause produced: every column of every source it placed, joined or not. Each is reachable scoped by its source's alias or table name and unqualified wherever exactly one source supplies the name. A column does not have to be projected to be filtered on.
 
 ```sql
 SELECT email FROM users WHERE created_at IS NOT NULL;
@@ -255,7 +257,7 @@ WITH authors(author, n) AS (SELECT user_id, COUNT(*) FROM posts GROUP BY user_id
 SELECT email, n FROM users INNER JOIN authors ON users.id = authors.author;
 ```
 
-**Expressions:** An item is any value: a column, a literal, a scalar function over values, arithmetic, a `CASE`, an aggregate over a value, a window. Every function says what it accepts, so `LOWER(` only offers what can be text and `id + ` only what can be a number and every item may be named:
+**Expressions:** An item is any value: a column, a literal, a scalar function over values, arithmetic, a `CASE`, an aggregate over a value, a window. Arithmetic operators (`+`, `-`, `*`, `/`) chain linearly without parenthesized grouping subexpressions. Every function says what it accepts, so `LOWER(` only offers what can be text and `id + ` only what can be a number and every item may be named:
 
 ```sql
 SELECT LOWER(email) AS mail, LENGTH(TRIM(last_name)), id + 1 FROM users;
@@ -279,13 +281,13 @@ SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id ORDER BY n DESC LIMIT 
 SELECT DISTINCT LOWER(email) AS e FROM users ORDER BY e;
 ```
 
-**Compounds:** Members joined by `UNION`, `UNION ALL`, `INTERSECT` and `EXCEPT` produce the first member's columns, each as many and of the same class and the compound is sorted and limited after its last member, by the first member's names:
+**Compounds:** Members joined by `UNION`, `UNION ALL`, `INTERSECT` and `EXCEPT` must match the column count and types of the first member. The compound result takes the first member's column names, which can be used for sorting and limiting after the last member:
 
 ```sql
 SELECT email AS label FROM users UNION SELECT title FROM posts ORDER BY label LIMIT 5;
 ```
 
-**Recursion:** Under `WITH RECURSIVE` a member after a union may read the definition it belongs to, as the members before it produced it. That member stays a simple select - no aggregate, window, `DISTINCT`, grouping or sorting, the definition read once and by inner joins only - and it is the last:
+**Recursion:** Under `WITH RECURSIVE` a member after a union may read the definition it belongs to, as the members before it produced it. That member stays a simple select without aggregates, windows, `DISTINCT`, grouping or sorting, reading the definition once via inner joins only and it is the last:
 
 ```sql
 WITH RECURSIVE t(n) AS (SELECT 1 FROM users UNION ALL SELECT n + 1 FROM t WHERE n < 3)
@@ -302,15 +304,15 @@ SELECT email, (SELECT COUNT(*) FROM posts) AS total FROM users;
 SELECT d.user_id FROM (SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id) AS d WHERE d.n > 1;
 ```
 
-A value is one row of one column, so its query aggregates and does not group. A derived table is read through its alias and has to export what the projection already read off it.
+When a subquery stands for a single value, it must return one row and one column, so it must aggregate without grouping. A derived table `(SELECT ...) AS <alias>` is read through its alias. It either satisfies an alias already introduced by the projection (exporting the columns the projection read off it), or, when the projection makes no table demands (such as `SELECT COUNT(*)`), introduces a new alias directly in the `FROM` clause.
 
-Two things have to be true of every statement the system produces. It has to be grammatical: a well-formed word or phrase. It also has to be meaningful something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
+Two things have to be true of every statement the system produces. It has to be grammatical: a well-formed word or phrase. It also has to be meaningful: something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
 
 ## Layers in detail
 
-### 1. Tokens: characters, words, pieces of text
+### 1. Tokens
 
-A grammar talks about text: the word `tiger`, a comma, an identifier. A language model emits tokens from a fixed vocabulary, and the same text can be split many ways.
+A grammar talks about text: the word `tiger`, a comma, an identifier. A language model emits tokens from a fixed vocabulary and the same text can be split many ways.
 
 ```mermaid
 graph LR
@@ -340,70 +342,44 @@ graph LR
     class n5 accent
 ```
 
-Turning a token sequence back into text means gluing the pieces together. Call that $c$:
+The system must accept every token sequence that reconstructs valid SQL text. For a single word like `tiger`, that means matching any of the paths shown above. For general rules like identifiers or whitespace, the valid sequences are infinite.
 
-```math
-c(v_1 v_2 \cdots v_k) \;=\; v_1 v_2 \cdots v_k
-```
+Because the underlying text patterns are regular (fixed strings, keywords and regular expressions), we can match them using a finite state automaton whose transitions are vocabulary tokens instead of individual characters. The `kernel` calls this automaton an index. Sections 2 to 4 describe three ways of building one.
 
-Gluing respects concatenation, $c(xy) = c(x)\,c(y)$, which is the only sense in which the vocabulary is a homomorphism.
+### 2. Constants
 
-What has to be enforced is the set of token sequences that glue into the set $L$ of legal texts:
+Take the constant `tiger`. Place a node at each byte boundary: before the `t`, between each pair of letters and after the `r`. That gives six nodes for five characters. Multi-byte characters span multiple nodes. Draw a transition from one position to a later position whenever a vocabulary token spells the bytes between them.
 
-```math
-c^{-1}(L) \;=\; \{\, w \in V^{*} \;:\; c(w) \in L \,\}
-```
+A path from the first node to the last is one way to spell `tiger` and every valid spelling appears as a path. The graph is acyclic because every transition moves forward and only the final node accepts.
 
-For $L = \{\texttt{"tiger"}\}$ that is the handful of splits above; for an infinite $L$ it is infinite.
+Two properties simplify the representation:
 
-$c$ is many-to-one, so $c^{-1}(L)$ is the larger set. When $L$ is infinite there is nothing to enumerate, so it must be described by a machine. Regular languages are closed under inverse homomorphism, so whenever $L$ is regular, that machine is a finite automaton over $V$. The `kernel` calls it an index. Sections 2 to 4 are three ways of building one.
+- The token itself determines the target state (start position plus token byte length), so target states do not need to be stored.
+- A state accepts only when it reaches the final byte position of the constant, so the byte offset itself acts as the accept flag.
 
-### 2. Constants: a graph over the gaps in a string
+The accept condition requires reaching the end of the constant, rather than simply having no outgoing edges; a byte offset in the middle of a multi-byte character also has no outgoing edges, but must not accept.
 
-Take the constant `tiger`. Put a node at every byte position: before the `t`, between each pair of letters, after the `r`. Six nodes for five characters. Positions are byte offsets, so a multi-byte character spans several nodes. Draw an edge from $i$ to $j$ whenever a vocabulary token spells exactly the bytes between them.
+What remains is the outgoing token labels grouped by source position. Finding these matching tokens takes one **Aho-Corasick** pass: a single automaton holding all 255,386 tokens scans `tiger` once to find every token that occurs anywhere within it. A standalone Go example: [`experiments/1-aot-ahocorasick/ahocorasick.go`](experiments/1-aot-ahocorasick/ahocorasick.go).
 
-A path from 0 to 5 is one way of spelling `tiger` and every way appears as a path, so this graph *is* $c^{-1}(\{\texttt{tiger}\})$. It is acyclic because every edge moves right and has one accepting node, the last one.
+### 3. Regular expressions
 
-The encoding falls out of the structure. Group edges by source node and two facts eliminate most data:
+A constant has a fixed string, so its graph can be drawn directly. A regular expression must be explored dynamically and the approach here is to let the states be regular expressions themselves.
 
-- the label determines the target since $j = i + |v|$, so targets need not be stored;
-- node $i$ accepts exactly when it is the last node, so the position itself is the accept flag.
-
-The accept condition is strictly "reached the end of the constant", not "has no outgoing edges" - a byte offset in the middle of a multi-byte character also has no outgoing edges but must not accept.
-
-What remains is the out-edge labels grouped by source: two arrays. Finding the edges is one **Aho-Corasick** pass: a single automaton holding all 255,386 tokens as patterns, built once per vocabulary, reports every token occurring anywhere in `tiger` in one sweep. A standalone Go example: [`experiments/1-aot-ahocorasick/ahocorasick.go`](experiments/1-aot-ahocorasick/ahocorasick.go).
-
-### 3. Regular expressions: a state is the regex that is left
-
-A constant has a graph you can draw directly. A regular expression has to be explored and the trick is to let the states be regular expressions themselves.
-
-The *derivative* of a regex $r$ by a character $b$, written $\partial_b r$, is what remains after consuming just the first character $b$:
-
-```math
-\partial_b r \;=\; \{\, w \;:\; bw \in L(r) \,\}
-```
-
-Up to similarity (treating union as associative, commutative and idempotent), any regular expression has finitely many distinct derivatives, so they close into the state set of a finite automaton.
-
-Take the identifier pattern `[a-zA-Z_][a-zA-Z0-9_]*`. Reading a `t` consumes the first character class and leaves the starred tail. Reading another letter from the tail returns the same tail:
+When a regular expression matches a character, the pattern that remains to be matched is its derivative:
 
 ```
-  r          = [a-zA-Z_][a-zA-Z0-9_]*
-  d_t(r)     = [a-zA-Z0-9_]*
-  d_i(d_t(r))= [a-zA-Z0-9_]* -> The same regex, no new state
+Pattern:             [a-zA-Z_][a-zA-Z0-9_]*
+After reading 't':   [a-zA-Z0-9_]*
+After reading 'i':   [a-zA-Z0-9_]*  (identical pattern, loops to the same state)
 ```
 
-Two live derivatives, so exactly two states. A third derivative, $\emptyset$, is reached by starting with a digit - the dead state, never stored. Brzozowski's theorem guarantees termination: the derivatives are finite in number, so the states run out. `derivre` computes them lazily, building a state the first time it is reached. A standalone Go example: [`experiments/2-jit-derivre/brzozowski.go`](experiments/2-jit-derivre/brzozowski.go).
+Reading a valid initial letter consumes the first character class, leaving `[a-zA-Z0-9_]*`. Reading another letter or digit matches against that tail and leaves the exact same pattern. This yields two live states: the initial pattern and the self-looping tail. Starting with an invalid character, such as a digit, produces no match and is discarded. Because any regular expression produces only a finite number of distinct remaining patterns, the state space remains small. The `derivre` library constructs these states on demand as they are reached. A standalone Go example: [`experiments/2-jit-derivre/brzozowski.go`](experiments/2-jit-derivre/brzozowski.go).
 
-That gives an automaton over *characters*. One more step turns it into one over *tokens*: to take a token $v$, walk all its characters at once.
+That produces an automaton over characters. To advance by a vocabulary token, the engine walks all characters of that token in sequence.
 
-```math
-\delta(q, v) \;=\; \partial_{v}\,q \quad\text{- read every character of } v \text{ in turn}
-```
+Testing all 255,386 vocabulary tokens individually from every state would be too slow. Instead, the vocabulary is stored in a trie and walked once. When an intermediate character fails to match, every token sharing that prefix fails as well, skipping that entire branch.
 
-Naively that is 255,386 walks per state. Instead the vocabulary is stored as a trie and the walk descends it once: when a character kills a branch, every token under that prefix is dead too and the subtree is skipped.
-
-The resulting automata are tiny in states and large in edges:
+The resulting automata have few states but many transitions:
 
 ```
 [a-zA-Z_][a-zA-Z0-9_]*     2 states      53,097 and 53,118 edges      849,816 bytes
@@ -414,42 +390,33 @@ An index costs its edge count.
 
 ### 4. Ruling out reserved words
 
-A name is any identifier that the language and the schema have not claimed: no reserved word, no table name, no column name. That is a set difference:
+A name is any identifier that the language and the schema have not already claimed: no reserved word, no table name and no column name.
 
-```math
-L(G) \;=\; L(\mathrm{inc}) \;\setminus\; \bigl( L(\mathrm{exc}_1) \cup \cdots \cup L(\mathrm{exc}_k) \bigr)
-```
+In principle, subtracting excluded words from the general identifier pattern can be solved by combining the pattern with the complement of each exclusion. But combining an inclusion pattern with dozens of exclusions (88 in the example schema) causes an exponential explosion in states, so that combined machine is never built.
 
-Regular languages are closed under difference, so an automaton exists: the product of the inclusion with the complement of each exclusion. Its state count is bounded by the product of theirs:
+Because SQL compares identifiers case-insensitively, an exclusion must block every casing variation (`tiger`, `Tiger`, `TIGER`). Tracking those as fixed-string constant automata would multiply states across every word. Instead, each exclusion is compiled as a case-insensitive regular expression automaton using the derivative approach from Section 3 (matching patterns like `[tT][iI][gG][eE][rR]`).
 
-```math
-|Q_G| \;\le\; |Q_{\mathrm{inc}}| \times |Q_{\mathrm{exc}_1}| \times \cdots \times |Q_{\mathrm{exc}_k}|
-```
+The inclusion pattern and each excluded word automaton are tracked side by side:
 
-For the example schema $k$ is 88 and grows with the schema, so that product is never built. Instead each member stays a separate automaton. All are fed the same token and the difference is checked when the word asks whether it may end, not in the state space:
+- The inclusion automaton alone decides which tokens may come next.
+- The exclusions only check whether the identifier is allowed to end.
 
-```math
-\begin{aligned}
-\delta_G(q, v) &= \delta_{\mathrm{inc}}(q, v) && \text{the inclusion alone decides which token may come next} \\
-F_G &= F_{\mathrm{inc}} \setminus \bigl( F_1 \cup \cdots \cup F_k \bigr) && \text{every member decides whether the word may end}
-\end{aligned}
-```
-
-The asymmetry fits the problem. An exclusion must never restrict the *next* token, because a longer word escapes it: `tiger` is excluded but `tiger2` is fine. An exclusion only removes the right to stop. A group whose inclusion accepts while some exclusion also accepts is *blocked*: the terminating token is withheld, forcing generation onward.
+An exclusion must never restrict the next token, because a longer word can escape it: `tiger` is excluded, but `tiger2` is valid. An exclusion only removes the right to stop. When the inclusion pattern accepts while an exclusion also accepts, the word is blocked from terminating, forcing generation onward:
 
 ```
-t        include accepts, no exclusion does             -> accepted
-tiger    include accepts, the `tiger` exclusion does    -> blocked
-tiger2   the `tiger` exclusion died on the `2`          -> accepted
+Input     Inclusion Pattern    Exclusions               Result
+t         Matches              None match               Allowed to stop
+tiger     Matches              Matches 'tiger'          Blocked from stopping
+tiger2    Matches              'tiger' no longer fits   Allowed to stop
 ```
 
-One fact keeps this cheap: every member is anchored at the start of the word, so an exclusion that rejects a token can never match again. Dead members are dropped and against a real vocabulary nearly all 88 die on the first token.
+Because every exclusion is anchored at the start of the word, an exclusion that rejects a token can never match again. Dead exclusions are dropped immediately and against a real vocabulary almost all 88 exclusions drop out on the first token.
 
-The trade-off is explicit. The member automata cost $O\bigl(\sum_i |Q_i|\bigr)$ once, shared across every head; an active name adds only $O(k)$ on top, one node id per surviving member, driven towards $O(1)$ as members die. The alternative is $O\bigl(\prod_i |Q_i|\bigr)$ per input, up front.
+This keeps overhead low: the individual automata are built once and shared, while tracking an active name only requires keeping the state of surviving exclusions, which quickly drops toward zero.
 
 ### 5. Lazy generation of an infinite graph
 
-Above the indexes sits the syntax graph: the SQL grammar, where each edge is an index and walking an edge means feeding tokens into that index until it accepts.
+The syntax graph sits above the indexes and encodes the SQL grammar. Each of its nodes is an index. Tokens are fed into a node's index until it accepts, which unlocks the node's outgoing edges: the routes the grammar allows next. Following a route resolves it into a new node whose index is the next lock to open, so the graph grows by one node each time an index completes. A node that receives a token its index cannot accept collapses and is removed from the heads of the kernel (the nodes it is currently feeding with incoming tokens).
 
 A simplified right-linear skeleton:
 
@@ -472,107 +439,111 @@ from   = source [ [ws] comma ws source [ [ws] comma ws [source ...] ] ]
 root   = SELECT ws fields ws FROM ws from [ws] semi
 ```
 
-Lists like `fields` and `from` repeat indefinitely. Each step forks into its own semantic history as aliases are invented and tables are narrowed. The full graph is infinite and cannot be built ahead of time.
+Lists like `fields` and `from` repeat indefinitely and every step forks into its own semantic history as aliases are invented and tables are narrowed. The full graph is infinite, so it is built lazily as the query is written. Static rules (`ws`, `comma`, `SELECT`) point to fixed indexes built once at startup. Dynamic rules (`field`, `table`, `alias`) ask the current semantic context which edges are legal and build only the next step. Each branch passes an updated copy of its context downstream, so the grammar grows one token at a time and a dead end is never built.
 
-Instead it is built lazily as the query is written. Static rules (`ws`, `comma`, `SELECT`) point to fixed indexes built once at startup. Dynamic rules (`field`, `table`, `alias`) ask the current semantic context which edges are legal and build only the next step. Each branch passes an updated copy of its context downstream, extending the grammar one token at a time and pruning dead ends before they exist.
+### 6. The semantic context / latent state
 
-### 6. The latent state
+The syntax graph only knows the grammar. The latent state under it checks the meaning: whether a column exists on a table the query can still use, or whether a join follows a foreign key. Each node of the graph carries a semantic context and passes a new copy of it on to the nodes that follow, so every branch keeps its own record of what the statement has committed to.
 
-Every rule runs against a `Context` that holds what the statement has committed to so far: the stack of closed definitions and the query being written. A rule never changes a context in place - it copies it, so branches never see each other's choices.
-
-The active query is a virtual table advanced by a state machine keyed on SQL keywords. As the `SELECT` unfolds, each keyword transition builds the next stage: tracking selected columns during the projection, building the join graph in `FROM`, filtering against the resulting relation in `WHERE`, `GROUP BY` and `HAVING`, then sorting or limiting. Invariants are enforced at these boundaries - the projection must be complete before `FROM`, all required tables and grouping keys must be satisfied before the body closes. A statement-level state machine above it tracks which query is open across `WITH` definitions, compound members and the main query, delegating the semantic work to the virtual table.
-
-#### 6.1 Root fields via algebra over a boolean polynomial ring
-
-Write $t_1, \ldots, t_n$ for the tables, each a variable that is $1$ when the table is in the FROM clause. Selecting an unqualified field constrains those variables. The constraint is a Boolean function.
-
-Any Boolean function can be written as a polynomial over $\mathbb{F}_2$, the field with two elements, where addition is XOR and multiplication is AND:
-
-```math
-R \;=\; \mathbb{F}_2[t_1, \ldots, t_n] \,\big/ \, (t_i^2 - t_i)
+A statement is any number of `WITH` definitions followed by the main query. Each of the queries goes through its clauses in a fixed order:
 
 ```
-
-The quotient says $t^2 = t$: a table is either present or not.
-
-A field $f$ that exists in tables $T(f)$ demands that *exactly one of them* appears in FROM. The polynomial is straightforward for one or two tables and needs correction terms beyond that:
-
-```math
-\begin{aligned}
-|T(f)| = 1 : \quad C(f) &= a \\
-|T(f)| = 2 : \quad C(f) &= a + b && \text{plain XOR} \\
-|T(f)| = 3 : \quad C(f) &= a + b + c \;+\; abc \\
-|T(f)| = 4 : \quad C(f) &= a + b + c + d \;+\; abc + abd + acd + bcd
-\end{aligned}
-
+SELECT items -> FROM -> [WHERE] -> [GROUP BY -> [HAVING]] -> [ORDER BY] -> [LIMIT] -> end
 ```
 
-For two tables, exactly-one is XOR. For three, $a + b + c$ over $\mathbb{F}_2$ is the parity function - true when an odd number of tables are present. That includes the all-three case, which the $abc$ term cancels.
+Each query keeps what it has committed to in its virtual table, which has one part for each stretch of clauses. The SELECT clause collects demands on the tables. `FROM` builds a join graph over the tables still demanded and places them. When it ends, the placed tables become the relation, the fixed set of columns that `WHERE`, `GROUP BY`, `HAVING` and `ORDER BY` are written against. Rules that span clauses are checked at these boundaries: `FROM` is offered only once the SELECT clause is complete. The query cannot end until every demanded table is placed and the grouping covers every item.
 
-In general $C(f)$ sums over every odd-sized subset of $T(f)$:
+#### The SELECT clause: which tables are still possible
 
-```math
-C(f) \;=\; \sum_{\substack{S \subseteq T(f) \\ |S| \text{ odd}}} \;\; \prod_{i \in S} t_i
+When writing a query, columns in the `SELECT` clause appear before tables in the `FROM` clause are chosen. An unqualified column in global scope must eventually come from exactly one table.
 
-```
+If a column exists on multiple tables, choosing it constrains which tables can appear later: one of those tables must be placed, but placing both would create an ambiguous duplicate. As columns are added, the engine tracks which combinations of tables can satisfy all selected fields:
 
-Selecting a field multiplies its constraint into a running product (AND):
-
-```math
-P \;\leftarrow\; P \cdot C(f), \qquad P \text{ starts at } 1
+- A new column is offered only if at least one valid combination of tables can supply it alongside the columns already chosen.
+- Tables that contradict the current selection are ruled out and will not be offered when writing the `FROM` clause.
+- The `SELECT` clause is complete once every required column has an eligible table.
 
 ```
+Example:
+  users:    id, email
+  posts:    id, title, body
+  comments: id, body
 
-$P$ is the latent state: the function that is $1$ on exactly those FROM clauses consistent with everything selected so far. Every question about the selection reduces to evaluating $P$:
+1. User writes: SELECT body
+   'body' exists on both 'posts' and 'comments'.
+   Valid table choices: {posts} or {comments}.
 
-```math
-\begin{aligned}
-P = 0 \quad&\Longleftrightarrow\quad \text{the selection is contradictory} \\
-P|_{t = 1} = 0 \quad&\Longleftrightarrow\quad \text{table } t \text{ contradicts the selection} \\
-P|_{t_1 = \cdots = t_n = 0} = 1 \quad&\Longleftrightarrow\quad \text{nothing is outstanding: the query is satisfied} \\
-P \cdot C(f) = 0 \quad&\Longleftrightarrow\quad \text{field } f \text{ is excluded} \\
-\bigl\{\, t \in \mathrm{vars}(P) \;:\; P|_{t = 1} \neq 0 \,\bigr\} \quad&=\quad \text{the tables still able to satisfy it}
-\end{aligned}
+2. User adds:   SELECT body, title
+   'title' exists only on 'posts'.
+   Valid table choices: {posts}.
+   'comments' is eliminated because it cannot supply 'title'.
 
+3. In the FROM clause:
+   Only 'posts' is offered. Tables that contradict the selection are ruled out.
 ```
 
-`vars(P)` restricts the search to tables still required by the projection, not merely compatible ones. Already-placed tables are substituted out of $P$; they are tracked separately so they cannot be placed twice.
+An alias names exactly one table, so a field in alias scope narrows its candidates directly: after `u.email`, `u.` offers only columns of `users`. Both scopes also have to respect SQL's rule that a column in global scope has exactly one supplier, so a field is offered only if a `FROM` clause can still be written that gives each alias a table and supplies every column in global scope once. After `SELECT email, u.first_name FROM users`, the entry `users AS u` is never offered, because both sources would supply `email`.
 
-Selecting a field twice changes nothing: `body` and `user_id` both live in `{comments, posts}`, so selecting both leaves $P = c + p$, because $(c+p)^2 = c+p$.
+#### Function calls
 
-Placing a table is substitution: setting $u = 1$ satisfies every constraint mentioning `users`. The remainder is rarely the constant $1$. Selecting `body` then placing `posts` leaves $P = c + 1$. This still forbids `comments`, but $P$ evaluates to $1$ at the origin, which is where satisfaction is tested.
+Every function says which column types each argument accepts and which type it returns. The schema's types are grouped by what can be done with them: numbers (`INT`, `BIGINT`, `DECIMAL`, ...), text (`VARCHAR`, `TEXT`, ...), dates and times (`DATE`, `TIMESTAMP`, ...), booleans and binary. E.g. `SUM` takes a number, `LOWER` takes text and returns text, `MIN` and `MAX` take anything that can be ordered (a number, text or a date) and `COUNT` takes anything.
 
-#### 6.2 Aliased fields via intersection
+Inside the parentheses only fields of an accepted type are offered: after `SELECT LOWER(` the offers are `email`, `first_name`, `last_name`, `title` and `body`, never `id`. A call is offered only where its return type fits, so `ROUND(ABS(` is allowed and `LOWER(ABS(` is not. Calls nest up to a fixed depth, windows are not allowed inside a call and inside an aggregate no other aggregate may start, so `SUM(COUNT(` is never offered.
 
-An alias stands for exactly one table, so its fields narrow towards a single table. No ring arithmetic is needed.
+A field in global scope inside a call demands exactly one of the tables carrying it, like any field in global scope, but only tables where the field has an accepted type count. If one table stored `id` as a number and another as text, writing `SUM(id)` would leave only the first as a supplier and the second could no longer be placed in `FROM`.
 
-#### 6.3 Table selection via graph contraction
+`MAX`, `MIN`, `SUM`, `ABS`, `ROUND` and `COALESCE` return the type of their argument, so `MAX(user_id)` has whatever type `user_id` turns out to have. When the next token needs a number, as in `MAX(user_id) +`, that requirement is passed down to `user_id`, which now has to come from a table where it is a number. `MAX(title)` is valid, since text can be ordered, but the result is text, so `+` is not offered after it. `COALESCE` needs all of its arguments to share one type, so its parse forks into one branch per type.
 
-Joining two tables contracts their vertices in the foreign-key graph so the pair acts as a single relation with their combined columns and neighbours. The `ON` columns come from the edge label, so the join condition is determined automatically. Tables two hops away become reachable through the merged vertex. Once the query leaves `FROM`, the sources lock into a fixed relation for the rest of the query. Later clauses reference columns by alias, table name, or bare name if the column is unambiguous.
+#### The FROM clause: graph contraction
 
-#### 6.4 Enforcing column types
+The join graph has a vertex for each table and an edge for each foreign key, labelled with its column pair. An entry opens at a table the SELECT clause demands, or at any table in the schema if the projection makes no table demands. A join contracts a foreign key neighbour into the entry, which makes tables two keys away reachable and the `ON` clause is read off the edge label. Joins may include intermediate tables not demanded by the projection to bridge toward required tables or to provide columns for subsequent clauses.
 
-Every column carries a type class (numeric, text, temporal, boolean, binary, or unknown) that determines which operators, literals, and comparable columns may follow it. Because the left operand is already written when operators are offered, its type class travels in the parser continuation rather than the context. Columns with no valid operators are never offered as left operands.
+#### After FROM: the fixed relation
 
-#### 6.5 Aggregates and grouping
+Leaving `FROM` builds the relation: the columns of every placed table, each with its type and whether it can hold NULL. A column is always reachable in alias scope (as `u.email`) and also in global scope (as `email`) whenever only one table supplies it.
 
-Typed functions like `SUM` or `LOWER` restrict $P$ to tables that supply the argument in a matching type class, while excluding other tables that share the bare column name. When a query aggregates or groups, every projected item must be covered by a `GROUP BY` key, be an aggregate or constant, or be built entirely from covered values. The query cannot close until all projected items are covered.
+Before `FROM` a column could still come from several tables, which is why its type could still be narrowed. In the relation each column has exactly one supplier and one type, so from here on nothing is demanded or narrowed: every later clause only picks from what the relation offers. A scalar function over its columns, such as `LOWER(email)`, is one more value of the relation, of the type the function returns.
 
-#### 6.6 Sorting: what the result can be sorted by
+The relation never changes once it is built. The later clauses write their conditions, grouping keys and sort keys into the virtual table beside it. The query does not track what it still owes, like an item that has yet to be grouped. It works that out again from the items and the grouping keys whenever `ORDER BY`, `LIMIT` or the end of the statement might be offered.
 
-`ORDER BY` keys depend on the query type: plain queries allow any relation column or unique output name; aggregated queries allow grouped values and aggregates; `DISTINCT` or compound queries allow only output names. Each key may appear at most once. `ORDER BY` (and its trailing comma) is only offered while sortable keys remain.
+#### WHERE: the type picks the operator
 
-#### 6.7 Compounds and recursion
+A condition is parsed left side first and the type of the left side decides what may follow. Every type takes `=` and `!=`. Numeric and temporal values also take `<`, `<=`, `>`, `>=`, `BETWEEN` and `IN`, text takes all of those and `LIKE`, while boolean and binary values stop at equality. `IS NULL` and `IS NOT NULL` are offered only where the column can hold NULL. Columns can hold NULL by schema definition (`verified` and `created_at`), or through outer joins: a `LEFT JOIN` pads columns of the incoming table, a `RIGHT JOIN` pads all tables placed prior to it in that entry and a `FULL JOIN` pads both sides.
 
-In compound queries (`UNION`, `INTERSECT`, `EXCEPT`), the first member fixes the column count and type classes that later members must match. Under `WITH RECURSIVE`, the catalog exposes a provisional table for the preceding members' output so the recursive term can reference itself before the definition closes. The recursive member is restricted to a simple inner-join `SELECT` with no aggregates, grouping or further set operators.
+The right side is an operand of the same type (a column or a unary scalar function over a column), a literal of that type, or a scalar subquery returning that type. While the projection permits multi-argument scalar functions like `COALESCE`, conditions in `WHERE` only apply unary scalar functions to operands. Each type spells its literals its own way: `42`, `'a'`, `'2024-01-01'`, `TRUE`. So `created_at < published_at` is offered and `email = users.id` never is. A column is never compared with itself, whether it is written in alias or in global scope.
 
-#### 6.8 Subqueries via a call stack of virtual tables
+A filter can never require a table or take a column away from the relation.
 
-Nested subqueries (up to two levels deep) are managed with a call stack that records where the outer grammar resumes and what shape the subquery must return - a single aggregated row for scalar comparisons, a matching column contract for derived tables, and so on. Subqueries in conditions can read outer columns when properly qualified; projection and `FROM` subqueries are isolated from outer scopes.
+#### GROUP BY: every item has to be covered
 
-#### 6.9 WITH via a stack of virtual tables
+An aggregate in the projection, such as `COUNT(*)`, folds the rows even without a `GROUP BY`: with no keys the whole relation is one group. An aggregate inside a window, such as `COUNT(*) OVER (...)`, folds nothing and does not count. Every other item then needs one value for the whole relation, which only an aggregate or a constant has. So `SELECT COUNT(*), 1 FROM users` can end right after `FROM`, while `SELECT email, COUNT(*) FROM users` cannot end until a `GROUP BY` makes `email` a key.
 
-Closed CTE definitions are pushed onto an immutable stack as virtual tables alongside the physical schema. Projected columns keep their types, nullability and schema origins, so foreign keys can join across definitions. The stack is persistent, so branches in the syntax graph safely share all catalog layers.
+A `GROUP BY` also makes a query aggregate, with or without an aggregate item. `SELECT email FROM users GROUP BY email` is valid, but `SELECT email, first_name FROM users GROUP BY email` cannot end until `first_name` is grouped too.
+
+Either way every item has to be covered: a grouped key, an aggregate, a constant or a value built only from covered values. `ORDER BY`, `LIMIT` and the end of the statement are offered only once every item is covered. `GROUP BY email` covers `LOWER(email)`, but `GROUP BY LOWER(email)` does not cover `email`.
+
+A key is a column not grouped yet or a scalar function over columns, which is a key of its own. Both scopes of a column share one key, so after `GROUP BY email` neither `email` nor `users.email` is offered again.
+
+`HAVING` reuses the condition grammar of `WHERE`. Its left side is a grouped value or an aggregate over any column and its right side a literal or a grouped value of the same type.
+
+Ending the body, at `ORDER BY`, `LIMIT` or the end of the query, fixes the result: the output columns with their names and types. A `WITH` definition exports this result and `ORDER BY` reads its output names from it.
+
+#### ORDER BY: how the result can be sorted
+
+`ORDER BY` opens once the body is complete. What it offers is read off the virtual table as the body left it: the output names of the result, the values of the relation and the grouping keys. An output name is offered when exactly one item has it. A plain query also offers every value of the relation. A grouped query offers grouped values, functions over them and aggregates of any column. After `SELECT DISTINCT` and in a compound only output names remain, since rows that were deduplicated or combined have nothing else to sort by. Each sort key may take `ASC` or `DESC` and a value already sorted by is not offered again in either scope.
+
+After `SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id ORDER BY` the offers are `n`, `user_id` and aggregates such as `MAX(title)`, but never `title` itself. `LIMIT` and `OFFSET` only decide how many rows are returned.
+
+#### Queries inside queries
+
+The same grammar writes a query in any of four places. What differs is what its SELECT clause has to produce:
+
+1. A `WITH` definition names every column.
+2. A later member of a compound matches the first member's columns.
+3. A subquery returns one value when it stands for a scalar and a derived table exports what the outer query read off its alias.
+4. The main query produces whatever it likes.
+
+Closed definitions form a stack that later queries read as part of the schema, so a definition is joined like any declared table and its columns keep their foreign keys. A compound is written one member at a time, each one closed before the next begins. A subquery suspends the query around it, which resumes once the subquery closes, the way a function returns to its caller. That is why one subquery grammar covers every place a subquery can appear.
 
 ## License
 
