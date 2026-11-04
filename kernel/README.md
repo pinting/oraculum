@@ -208,33 +208,3 @@ See `example.rs` and `runner.rs` for implementation details!
 cargo run --bin example   # Own an index and walk it by hand
 cargo run --bin runner    # The factory, the head pool and a group
 ```
-
-#### Output of running `example`
-
-```
-Vocabulary loaded in 106.719618ms
-Lattice base (AhoCorasick) built in 341.108908ms
-Expression base (TokTrie) built in 160.463326ms
-Creating indexes...
-Lattice 'Why ' created in 17.18µs
-Expression 'monday|tuesday|wednesday|thursday|friday' created in 286.292µs
-Lattice '?' created in 2.31µs
-Memory usage: 128 bytes
-Memory usage: 787 bytes
-Memory usage: 80 bytes
-Routes: `Why` `Wh` `W` `W` 
-> Why
-Current: Why
-Routes: ` ` ` ` 
->  
-Current: Why 
-Routes: `f` `m` `t` `w` `th` `we` `fr` `mo` `mon` `tu` `mond` `thur` `wed` `fri` `thu` `frid` `friday` `monday` `t` `m` `f` `w` 
-> mon
-Current: Why mon
-Routes: `d` `day` `da` `d` 
-> day
-Current: Why monday
-Routes: `?` `?` 
-> ?
-Current: Why monday?
-```
