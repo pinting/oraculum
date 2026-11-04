@@ -1,14 +1,215 @@
 # kernel
 
-Directed graph generator library for LLM token guidance. Translates regular expressions and constant strings to DFAs, inheriting the AOT data structure of `outlines-core` with further optimizations.
+Directed graph generator library for LLM token guidance. Translates regular expressions and constant strings to DFAs, inheriting the ahead-of-time data structure from `outlines-core` with additional optimizations.
 
-**Lattices** convert constant strings into DAGs using the Aho-Corasick algorithm with extremely fast construction.
+Lattices convert constant strings into DAGs using the Aho-Corasick algorithm for fast construction.
 
-**Expressions** convert regular expressions into DFAs using TokTrie with derivative automata.
+Expressions convert regular expressions into DFAs using TokTrie with derivative automata.
 
-**Groups** subtract: one inclusion minus any number of exclusions, which is how an alias becomes "any identifier that is not a reserved word".
+Groups handle subtraction: one inclusion pattern minus any number of exclusions, allowing an alias to represent any identifier that is not a reserved word.
 
-On top of those it offers a **dynamic API** - a factory that keeps the indexes and answers with ids, and a runner that keeps a pool of active indexes walking them over a pool of workers. The graph being walked stays with the caller: the kernel only says when a head has finished, and asks what comes next.
+On top of these indexes, the library provides a dynamic API: a factory that caches indexes and returns numeric identifiers, and a runner that maintains active index states across a worker pool. The caller maintains the graph topology; the kernel reports when an active head has completed and queries what should follow.
+
+## Setup
+
+Requires [Rust](https://rustup.rs) and [UV](https://docs.astral.sh/uv/getting-started/installation).
+
+```bash
+make build       # Build the kernel
+make benchmark   # DFA data structure benchmarks
+```
+
+## Dynamic API
+
+The dynamic API consists of two core components and a resolver callback:
+
+`Factory` manages the index registry and returns identifiers rather than index references. An index is built at most once regardless of how many callers or threads request it simultaneously. This keeps heads lightweight because they borrow shared indexes rather than owning them.
+
+`Runner` maintains the pool of active indexes, called heads. Each head consists of a `Memory` instance tracking position and consumed tokens, along with an opaque caller payload. Feeding a token advances every active head across the worker threads; heads that reject the token are discarded.
+
+The resolver callback determines transitions. When a head reaches the end of its index, the runner calls the resolver with `(head_id, payload, matched)`. The resolver returns either `None` when generation terminates, or a list of `(spec, payload)` pairs describing successor indexes. These successors are instantiated on the worker pool and become the next active heads.
+
+```python
+import kernel as kl
+
+vocabulary = kl.Vocabulary.from_file_path("../vocabulary.tiktoken", 1)
+factory = kl.Factory(vocabulary)
+
+# An alias: any identifier except a handful of words.
+identifier = factory.expression("[a-zA-Z_][a-zA-Z0-9_]*")
+reserved = [factory.lattice(word) for word in ("hello", "world")]
+alias = factory.group(identifier, reserved)
+
+runner = kl.Runner(factory, workers=4)
+
+def resolve(head_id, payload, matched):
+    if payload == "greeting":
+        return [((("lattice", " ")), "space")]
+    if payload == "space":
+        return [(alias, "alias")]
+
+    return None                      # The end of the graph
+
+runner.set_resolver(resolve)
+runner.spawn(("lattice", "hello"), "greeting")
+
+while not runner.is_completed():
+    token_id = pick(runner.routes())   # A custom sampler
+    runner.feed(token_id)
+
+print(runner.matched())
+```
+
+An index is specified either by its identifier or by its specification tuple:
+
+```python
+("lattice", "SELECT")                        # A constant string
+("expression", "[a-zA-Z_][a-zA-Z0-9_]*")     # A regular expression
+("group", include_id, [exclude_id, ...])     # Include minus the excludes
+```
+
+### Groups
+
+A group accepts when its inclusion pattern accepts and none of its exclusions match. While an exclusion continues to match the consumed input, the group remains blocked: it does not report completion and removes the terminating token from its offered routes, requiring generation to continue.
+
+```
+hello    the inclusion accepts, but so does an exclusion  -> blocked
+hello2   the `hello` exclusion died on the `2`            -> accepted
+hell     no exclusion spells it                           -> accepted
+```
+
+Exclusions are anchored at the start of an identifier; once an exclusion rejects a token, it cannot match again and is removed from memory. Because of this early pruning, subtracting dozens of reserved words adds minimal overhead over evaluating the inclusion pattern alone.
+
+Groups can also be nested on either side of an inclusion or exclusion.
+
+### Memory and parallelism
+
+Indexes store no traversal state. A `Lattice` is a table of token edges per byte offset, and an `Expression` is a DFA. Both are immutable once built. Traversal state is held in `Memory`, with one instance per head. For a flat index, `Memory` holds a single node identifier; for a group, it holds sub-memories for each component.
+
+The Rayon worker pool handles the complete feed cycle. Rayon routes nested parallel tasks to the pool of the active thread, so resolvers querying the factory reuse existing workers without spawning extra threads.
+
+## Modeling structures
+
+The kernel includes two specialized graph and algebraic structures designed for `seer`. In `seer`, branching in the syntax graph requires copying state frequently, so these structures are optimized for cheap cloning.
+
+### BooleanPolynomialRing: conflicts
+
+Determining which table provides an unqualified column maps to a boolean function over one variable per table. A column present across `k` tables introduces an "exactly one of `k`" constraint. Selecting multiple columns multiplies these constraints together in a polynomial ring over `GF(2)[t..]/(t^2 - t)`.
+
+`algebra/zdd.rs` implements this using a zero-suppressed decision diagram (ZDD) without external dependencies like CUDD. Nodes are hash-consed to equal `u32` identifiers, with memoization per operation. The multiplication implementation follows PolyBoRi's `dd_multiply`, computing three cross terms using two recursive calls. `algebra/ring.rs` wraps this in a ring interface.
+
+The ZDD representation keeps state compact: while "exactly one of `k`" expands to $2^{k-1}$ monomials over GF(2), the ZDD requires only two nodes per level.
+
+```python
+ring = kl.BooleanPolynomialRing(["users", "posts", "comments"])
+
+body = ring.mutual_exclusion(["posts", "comments"])   # `body` is on both
+title = ring.mutual_exclusion(["posts"])              # `title` is only on posts
+
+current = ring.product(ring.one(), body)
+current = ring.product(current, title)
+
+ring.render(current)         # 'posts & ~comments'
+ring.constrained(current)    # frozenset({'posts', 'comments'})
+ring.viable(current)         # frozenset({'posts', 'users'})
+ring.holds_empty(current)    # False - the FROM clause is not settled yet
+```
+
+Polynomial values cross the Python boundary as integer node identifiers, enabling fast copies and comparisons across branches. Batch functions like `nonzero` and `viable` run selection loops entirely in Rust.
+
+### Multigraph: joins
+
+The FROM clause traverses a foreign key graph, opening at an initial table and contracting joined neighbors into a single composite vertex. Because the schema graph is static after initialization, vertex contraction is the only required mutation.
+
+`Multigraph` optimizes for cheap copies across syntax branches. Edges reside in a shared immutable base graph, while mutable state consists of an array tracking vertex mappings.
+
+```
+copy              Two reference count bumps, no allocation
+merge_vertices    One clone of an array of u32, then a linear pass
+edges             The class members' base incidence, mapped through it
+```
+
+Branches without joins perform no allocations. Self-loops created by vertex contraction are omitted automatically during edge lookups.
+
+```python
+graph = kl.Multigraph([
+    ("users", "posts", "posts.user_id = users.id"),
+    ("posts", "comments", "comments.post_id = posts.id"),
+])
+
+branch = graph.copy()
+
+branch.edges("users")          # [('posts', 'posts.user_id = users.id')]
+
+branch.merge_vertices("users", "posts")
+
+branch.edges("users")          # [('comments', 'comments.post_id = posts.id')]
+"posts" in branch              # False - it is part of `users` now
+graph.nodes()                  # ['comments', 'posts', 'users'] - untouched
+```
+
+Edge labels are opaque strings preserved for caller lookup.
+
+### Python API
+
+The Python bindings fix `N` (node index) and `T` (token ID) types to `u32` and use `FlatDFA` as the default DFA backend. The library can be rebuilt with different configurations by adjusting the types in `pyfactory.rs`, `pyvocabulary.rs`, `pyexpression.rs`, and `pylattice.rs`.
+
+```python
+import kernel_typed as kl
+
+# EOS token ID = 1
+vocabulary = kl.Vocabulary.from_file_path("vocabulary.tiktoken", 1)
+
+ac_base = kl.AhoCorasick(vocabulary)
+lattice = kl.Lattice("hello", vocabulary, ac_base)
+
+toktrie = kl.TokTrie(vocabulary)
+expression = kl.Expression("mon|tue|wed", vocabulary, toktrie)
+```
+
+Index construction releases the Python GIL, allowing `Lattice`, `Expression`, and the base caches to build concurrently across threads without touching Python interpreter state. `Factory` and `Runner` handle threading internally; `Runner.feed` holds the GIL only when executing the resolver.
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+
+with ThreadPoolExecutor(8) as pool:
+    indexes = list(pool.map(lambda p: kl.Expression(p, vocabulary, toktrie), patterns))
+```
+
+PyO3 0.22 requires setting `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` when building against Python 3.14.
+
+### Rust API
+
+Requires [Rust](https://rustup.rs).
+
+The Rust dynamic API mirrors the Python interface, using a `Resolver` trait instead of a callback function:
+
+```rust
+impl Resolver<Part> for Grammar {
+    fn resolve(&self, report: &Report<'_, Part>) -> Expansion<Part> {
+        match report.payload {
+            Part::Greeting => Expansion::Children(vec![
+                Request::new(Draft::Lattice(" ".to_string()), Part::Space),
+            ]),
+            Part::Space => Expansion::Children(vec![
+                Request::existing(self.alias, Part::Alias),
+            ]),
+            Part::Alias => Expansion::Terminal,
+        }
+    }
+}
+```
+
+The head payload is generic, allowing callers to store arbitrary state needed to navigate their own grammar graphs.
+
+See `example.rs` and `runner.rs` for implementation details!
+
+```bash
+cargo run --bin example   # Own an index and walk it by hand
+cargo run --bin runner    # The factory, the head pool and a group
+```
+
+#### Output of running `example`
 
 ```
 Vocabulary loaded in 106.719618ms
@@ -37,319 +238,3 @@ Routes: `?` `?`
 > ?
 Current: Why monday?
 ```
-
-## The dynamic API
-
-Two objects, and one callback.
-
-**`Factory`** is the index registry. It never hands an index back, only an id.
-An index is built at most once however many callers ask for it and however many
-threads ask at the same moment, so a head is cheap: it borrows a shared index
-instead of owning one.
-
-**`Runner`** is the pool of active indexes - *heads*. Each head is a `Memory`
-over an index (where the walk stands and what it has consumed) plus an opaque
-payload the kernel never looks inside. Feeding a token advances every head
-across the workers; the ones that reject it die.
-
-**The resolver** is how the kernel asks what happens next. When a head reaches
-the end of its index the runner calls it with `(head_id, payload, matched)` and
-takes back either `None` - nothing follows, the generation is complete - or
-the `(spec, payload)` pairs of the indexes that do. Those are built on the same
-workers and become the next heads, and the loop repeats until nothing new
-appears.
-
-```python
-import kernel as kl
-
-vocabulary = kl.Vocabulary.from_file_path("../vocabulary.tiktoken", 1)
-factory = kl.Factory(vocabulary)
-
-# An alias: any identifier except a handful of words.
-identifier = factory.expression("[a-zA-Z_][a-zA-Z0-9_]*")
-reserved = [factory.lattice(word) for word in ("hello", "world")]
-alias = factory.group(identifier, reserved)
-
-runner = kl.Runner(factory, workers=4)
-
-def resolve(head_id, payload, matched):
-    if payload == "greeting":
-        return [((("lattice", " ")), "space")]
-    if payload == "space":
-        return [(alias, "alias")]
-
-    return None                      # the end of the graph
-
-runner.set_resolver(resolve)
-runner.spawn(("lattice", "hello"), "greeting")
-
-while not runner.is_completed():
-    token_id = pick(runner.routes())   # your sampler
-    runner.feed(token_id)
-
-print(runner.matched())
-```
-
-An index is named either by its id or by the spec to build it from:
-
-```python
-("lattice", "SELECT")                        # a constant string
-("expression", "[a-zA-Z_][a-zA-Z0-9_]*")     # a regular expression
-("group", include_id, [exclude_id, ...])     # include minus the excludes
-```
-
-`runner_example.py` is this, runnable.
-
-### Groups
-
-A group accepts exactly when its inclusion accepts and none of its exclusions
-do. While an exclusion still spells what has been matched, the group is
-*blocked*: it does not report itself finished, and it drops the terminating
-token from its routes, so generation has to continue until the identifier grows
-past it.
-
-```
-hello    the inclusion accepts, but so does an exclusion  -> blocked
-hello2   the `hello` exclusion died on the `2`            -> accepted
-hell     no exclusion spells it                           -> accepted
-```
-
-An exclusion that rejects a token is anchored at the start of the word and can
-never match again, so the memory drops it. That is what keeps a wide group cheap:
-subtracting 85 names costs a head about as much as the inclusion alone, because
-nearly all of them die on the first token.
-
-Either side of a group may itself be a group, so subtractions nest.
-
-### Memory, and where the parallelism goes
-
-Indexes carry no position - a `Lattice` is a table of token edges per byte
-offset, an `Expression` is a DFA, and both are immutable once built. The walk
-over one is the `Memory`, and there is one per head. For a flat index that is a
-single node id; for a group it is one sub-memory per member, which is what makes
-groups of groups fall out rather than needing a second mechanism.
-
-The worker pool covers a whole feed rather than just the stages that fan out
-inside the runner. Rayon routes nested parallel work to the pool the current
-thread belongs to, so a resolver that reaches back into the factory shares these
-workers instead of starting a second pool, and a group with enough members fans
-its own feed out over them too.
-
-## The modelling structures
-
-Two structures that have nothing to do with tokens. They are here because the
-library on the other side - seer - spends its time *copying* them, once per
-branch of the syntax graph it is expanding, and because what it wants out of
-them is narrow enough to be worth building for rather than reaching for a
-general purpose library.
-
-### `BooleanPolynomialRing` - conflicts
-
-Which table an unqualified column came from is a boolean function over one
-variable per table. A column living in `k` tables contributes "exactly one of
-these `k`", and selecting columns multiplies those together; the question then
-asked of the product is whether it is zero, whether the all-zero assignment
-satisfies it, which variables it still depends on, and what happens when one of
-them is set.
-
-That is a boolean polynomial over `GF(2)[t..]/(t^2 - t)`, and the way to hold
-one is the way PolyBoRi does: a *zero-suppressed decision diagram*.
-`algebra/zdd.rs` is that diagram rebuilt without CUDD under it - hash consed,
-so equal polynomials
-are equal `u32`s, with a memo table per operation and a `mul` that follows
-PolyBoRi's `dd_multiply` including the rearrangement that gets a product's three
-cross terms out of two recursive calls. `algebra/ring.rs` is the ring around it.
-
-The diagram is the whole point. "Exactly one of `k`" expands to `2^(k-1)`
-monomials - every odd-sized subset survives over GF(2) - and a column named `id`
-lives in every table there is. The ZDD for every odd-sized subset is two nodes
-per level.
-
-```python
-ring = kl.BooleanPolynomialRing(["users", "posts", "comments"])
-
-body = ring.mutual_exclusion(["posts", "comments"])   # `body` is on both
-title = ring.mutual_exclusion(["posts"])              # `title` is only on posts
-
-current = ring.product(ring.one(), body)
-current = ring.product(current, title)
-
-ring.render(current)         # 'posts & ~comments'
-ring.constrained(current)    # frozenset({'posts', 'comments'})
-ring.viable(current)         # frozenset({'posts', 'users'})
-ring.holds_empty(current)    # False - the FROM clause is not settled yet
-```
-
-A polynomial crosses to Python as the `int` id of a node, because a polynomial
-is a value: it is copied into every branch and compared constantly, and an `int`
-is the cheapest value Python has. `nonzero` and `viable` are batches: the two
-loops the caller would otherwise run after every selection, moved across the
-boundary.
-
-### `Multigraph` - joins
-
-The FROM clause walks a foreign key graph: it opens at some table and every join
-folds a neighbour into it, after which the pair behaves as one vertex. That is
-vertex contraction, and it is the only mutation - nothing is ever added once the
-graph has been built from the schema.
-
-Which is what makes it worth writing down, because the operation that dominates
-is `copy`. Every branch of the syntax graph needs its own graph and most of them
-are thrown away unexamined. So the edges sit in an immutable base that every
-copy shares, and the whole of the mutable state is one array saying which vertex
-each vertex has been folded into - itself, until something folds it.
-
-```
-copy              two reference count bumps, no allocation
-merge_vertices    one clone of an array of u32, then a linear pass
-edges             the class members' base incidence, mapped through it
-```
-
-A branch that joins nothing allocates nothing at all. Dropped loops need no
-handling either: an edge whose far end is in the same class as its near end is
-simply not reported.
-
-```python
-graph = kl.Multigraph([
-    ("users", "posts", "posts.user_id = users.id"),
-    ("posts", "comments", "comments.post_id = posts.id"),
-])
-
-branch = graph.copy()
-branch.edges("users")          # [('posts', 'posts.user_id = users.id')]
-branch.merge_vertices("users", "posts")
-branch.edges("users")          # [('comments', 'comments.post_id = posts.id')]
-"posts" in branch              # False - it is part of `users` now
-graph.nodes()                  # ['comments', 'posts', 'users'] - untouched
-```
-
-Labels are opaque: stored and handed back, never examined, the same contract a
-head's payload has.
-
-## Setup
-
-### Python API
-
-Requires [Rust](https://rustup.rs) and [UV](https://docs.astral.sh/uv/getting-started/installation).
-
-```bash
-make build
-source .venv/bin/activate
-python example.py                # own an index and walk it by hand
-python runner_example.py         # the factory, the head pool and a group
-```
-
-The Python bindings fix both `N` (node index) and `T` (token ID) types to `u32` and use `FlatDFA` as the default DFA backend. The library can be rebuilt with different `N` / `T` / `D` configurations, but (at the moment) the source code needs to be modified for it (in the top of `pyfactory.rs` / `pyvocabulary.rs` / `pyexpression.rs` / `pylattice.rs`).
-
-```python
-import kernel_typed as kl
-
-# EOS token ID = 1
-vocabulary = kl.Vocabulary.from_file_path("vocabulary.tiktoken", 1)
-
-ac_base = kl.AhoCorasick(vocabulary)
-lattice = kl.Lattice("hello", vocabulary, ac_base)
-
-toktrie = kl.TokTrie(vocabulary)
-expression = kl.Expression("mon|tue|wed", vocabulary, toktrie)
-```
-
-See `example.py` for owning indexes directly, and `runner_example.py` for the
-factory, the head pool and a group index.
-
-Index construction releases the GIL, so `Lattice`, `Expression` and the two
-bases can be built from several Python threads in parallel. The work touches no
-Python state while the GIL is dropped. The `Factory` and `Runner` do this for
-you - a `Runner.feed` holds the GIL only while calling the resolver - so reach
-for a thread pool here only when owning the indexes directly.
-
-```python
-from concurrent.futures import ThreadPoolExecutor
-
-with ThreadPoolExecutor(8) as pool:
-    indexes = list(pool.map(lambda p: kl.Expression(p, vocabulary, toktrie), patterns))
-```
-
-PyO3 0.22 refuses to build against Python 3.14 unless
-`PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` is set; the extension itself works.
-
-### Rust API
-
-Only requires [Rust](https://rustup.rs).
-
-```bash
-cargo run --bin example          # own an index and walk it by hand
-cargo run --bin runner           # the factory, the head pool and a group
-```
-
-The dynamic API is the same shape as it is from Python, with the resolver as a
-trait rather than a callable:
-
-```rust
-impl Resolver<Part> for Grammar {
-    fn resolve(&self, report: &Report<'_, Part>) -> Expansion<Part> {
-        match report.payload {
-            Part::Greeting => Expansion::Children(vec![
-                Request::new(Draft::Lattice(" ".to_string()), Part::Space),
-            ]),
-            Part::Space => Expansion::Children(vec![
-                Request::existing(self.alias, Part::Alias),
-            ]),
-            Part::Alias => Expansion::Terminal,
-        }
-    }
-}
-```
-
-The head payload is a type parameter, so the kernel carries whatever the caller
-needs to find its way back into its own graph and never looks inside it.
-
-See `example.rs` and `runner.rs` for API details!
-
-## Benchmark
-
-```bash
-cargo run --bin benchmark --release
-```
-
-```
-LOOKUP LEADERBOARD:
---------------------------------
-DFA Type                Avg (us)
---------------------------------
-#1 FastHashDFA             0.001
-#2 DoubleHashDFA           0.003
-#3 FlatDFA                 0.005
---------------------------------
-
-SCAN LEADERBOARD:
---------------------------------
-DFA Type                Avg (us)
---------------------------------
-#1 FlatDFA                 0.235
-#2 FastHashDFA             0.237
-#3 DoubleHashDFA           4.787
---------------------------------
-
-BUILD LEADERBOARD:
---------------------------------
-DFA Type                Avg (ms)
---------------------------------
-#1 DoubleHashDFA           1.698
-#2 FastHashDFA             1.983
-#3 FlatDFA                 2.011
---------------------------------
-
-MEMORY LEADERBOARD:
---------------------------------
-DFA Type                Avg (KB)
---------------------------------
-#1 FlatDFA               120.275
-#2 DoubleHashDFA         208.841
-#3 FastHashDFA           284.461
---------------------------------
-```
-
-## License
-
-This project is licensed under the [GNU Affero General Public License v3.0](../LICENSE).

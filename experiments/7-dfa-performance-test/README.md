@@ -1,8 +1,55 @@
-# 7th - Performance comparisons between `FastHashDFA` vs. `DoubleHashDFA` vs. `FlatDFA`
+# 7th - FastHashDFA vs. DoubleHashDFA vs. FlatDFA
 
-The benchmarks demonstrate a space-time trade-off where the flat structures achieves the fastest performance for scanning and hash structures for lookups; while hybrid solutions are the fastest, they require the largest memory allocation. Ultimately, the `DoubleHashDFA` (the implementation `outlines-core` uses) proves to be a good universal solution, average in both lookups and scans, but only suffering (worst case) 2x memory usage compared to `FlatDFA` which is the most compact, but having a slow lookup algorithm due to its linearity (optimized by binary tree search on a CSR data structure, but still lacking the jump capabilities of hash functions). The heavily optimized `FastHashDFA` tries to combine both of the two worlds and outperforms other candidates in lookup and scan speeds, but suffers a high memory usage.
+These benchmarks compare `FastHashDFA`, `DoubleHashDFA`, and `FlatDFA`. Flat data structures achieve the fastest transition scans, while hash structures provide faster individual lookups. Hybrid approaches like `FastHashDFA` perform well in both lookups and scans, but require much higher memory allocation.
 
-## Output
+Although `DoubleHashDFA` (the implementation used by `outlines-core`) appears to be a good middle ground between speed and space, `FlatDFA` clearly wins in practice. Continuous memory reads benefit heavily from CPU caching, giving `FlatDFA` a great performance: best in scanning, only 2 microseconds behind `DoubleHashDFA` in lookups, while having a significantly lower memory usage. As a result, `FlatDFA` is chosen as the default DFA for the kernel.
+
+## Practical Benchmark
+
+```bash
+cd ../../kernel # Change directory to kernel
+cargo run --bin benchmark --release
+```
+
+```
+LOOKUP LEADERBOARD:
+--------------------------------
+DFA Type                Avg (us)
+--------------------------------
+#1 FastHashDFA             0.001
+#2 DoubleHashDFA           0.003
+#3 FlatDFA                 0.005
+--------------------------------
+
+SCAN LEADERBOARD:
+--------------------------------
+DFA Type                Avg (us)
+--------------------------------
+#1 FlatDFA                 0.235
+#2 FastHashDFA             0.237
+#3 DoubleHashDFA           4.787
+--------------------------------
+
+BUILD LEADERBOARD:
+--------------------------------
+DFA Type                Avg (ms)
+--------------------------------
+#1 DoubleHashDFA           1.698
+#2 FastHashDFA             1.983
+#3 FlatDFA                 2.011
+--------------------------------
+
+MEMORY LEADERBOARD:
+--------------------------------
+DFA Type                Avg (KB)
+--------------------------------
+#1 FlatDFA               120.275
+#2 DoubleHashDFA         208.841
+#3 FastHashDFA           284.461
+--------------------------------
+```
+
+## Hypothetical Benchmark
 
 ```
 Benchmarking with nodes_count = 200, min_links = 25, max_links = 75, vocabulary_size = 256000, lookup_count = 100000, scan_count = 100000

@@ -4,7 +4,7 @@ Measured over the Gemma 3 vocabulary with the regular expression
 `(monday|tuesday|wednesday|thursday|friday)+`, feeding the tokens
 `we -> d -> ne -> s -> day`.
 
-Pure regex-based matching with derivative automata. 257 µs build time for the example regular expression. Slow next token filtering because of the exhaustive token matching, around 39 ms per step.
+This experiment tests pure regex matching with derivative automata. Compiling the example regular expression takes 257 µs. Filtering the next token is slow because it checks every vocabulary token exhaustively, taking around 39 ms per step.
 
 ## Output
 

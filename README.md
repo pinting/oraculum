@@ -308,7 +308,17 @@ When a subquery stands for a single value, it must return one row and one column
 
 Two things have to be true of every statement the system produces. It has to be grammatical: a well-formed word or phrase. It also has to be meaningful: something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
 
-## Layers in detail
+When used as a scalar value, a subquery must return one row and one column, requiring aggregation without grouping. A derived table `(SELECT ...) AS <alias>` is accessed via its alias. It either satisfies an alias previously declared in the projection or introduces a new alias directly in `FROM` when the projection imposes no table constraints.
+
+Every generated statement must be both grammatically valid and semantically meaningful. Both properties are enforced incrementally at each token during generation.
+
+## Architecture
+
+The collection of [experiments](experiments/) tells how the project was researched and how the architecture was developed into its final form.
+
+The [kernel's README](kernel/README.md) describes how the performance-heavy operations are executed.
+
+The [seer's README](seer/README.md) explains how the SQL parsing is implemented.
 
 ### 1. Tokens
 

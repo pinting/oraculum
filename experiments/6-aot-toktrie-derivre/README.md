@@ -4,7 +4,7 @@ Measured over the Gemma 3 vocabulary with the regular expression
 `(monday|tuesday|wednesday|thursday|friday)+`, feeding the tokens
 `we -> d -> ne -> s -> day`.
 
-The combination of AOT index building with TokTrie - Derivre: faster build time, same number of token matching per step as Outlines. 399.975656 ms trie building time (needed only once for a given vocabulary), 4.334894 ms index building time for the example regular expression and 7-21 µs per step.
+This experiment combines ahead-of-time index compilation with `toktrie` and `derivre`. Initial trie generation takes 400 ms once per vocabulary. Building an index for the example pattern takes only 4.33 ms, and step evaluation takes 7 to 21 µs while matching the same token count per step as Outlines.
 
 ## Output
 

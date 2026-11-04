@@ -4,7 +4,7 @@ Measured over the Gemma 3 vocabulary with the regular expression
 `(monday|tuesday|wednesday|thursday|friday)+`, feeding the tokens
 `we -> d -> ne -> s -> day`.
 
-Hybrid approach combining derivre and toktrie. 403 ms trie building (one time for a given vocabulary), 330 µs build time for the example regular expression. Moderate efficiency through trie pruning, 200-500 µs per step. Its weakness is the still relatively high transition attempts compared to AOT-based methods.
+This experiment combines `derivre` with `toktrie`. Building the trie for a vocabulary takes 403 ms once. Compiling the example regular expression takes 330 µs. Trie pruning reduces the search space so step times drop to 200 to 500 µs, though it still evaluates more transitions per step than ahead-of-time methods.
 
 ## Output
 

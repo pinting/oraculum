@@ -4,7 +4,7 @@ Measured over the Gemma 3 vocabulary with the regular expression
 `(monday|tuesday|wednesday|thursday|friday)+`, feeding the tokens
 `we -> d -> ne -> s -> day`.
 
-Prebuilt-based regex matching with precomputed token patterns. The obvious weakness are the increased memory usage for storing the index and the higher upfront cost: 211.950862 ms vocabulary rebuild (one time) and 1.190878411 s index build for the example regular expression. Its strength is its exceptional runtime efficiency, 6-18 µs per step.
+This experiment precomputes token patterns for regex matching using `outlines-core`. Upfront cost is higher: preparing the vocabulary takes 212 ms once, and compiling the index for the example pattern takes 1.19 s, using additional memory. In exchange, step time drops to 6 to 18 µs.
 
 ## Output
 
