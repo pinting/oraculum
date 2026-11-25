@@ -2,21 +2,19 @@
 
 Every record of the corpus is fed into the engine one character at a time
 (`feeder.py`), and has to end the way it declares. Every legal record that
-does is then run in SQLite (`database.py`), and has to run. A record fails for
-either, and the report says which.
+completes is then checked against every configured validator (`SQLiteValidator`
+and `SqlglotValidator`). A record fails if the feed disagrees with the corpus
+or if any validator rejects it.
 
-The engine generates over `schema.sql` and the database is built from the
-same file, so the two cannot disagree about what exists; `data.sql` fills it.
-
-The exit status is the number of records that misbehaved, capped at 125, so
-`make test` fails the build when any of them does.
+The engine generates over `schema.sql` and every validator checks against the
+same file, so they cannot disagree about what exists; `data.sql` fills SQLite.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 HERE: Path = Path(__file__).resolve().parent
@@ -28,9 +26,9 @@ if str(SEER) not in sys.path:
 from src import Schema, parse_schema  # noqa: E402
 
 from .corpus import Record, read_records  # noqa: E402
-from .database import Database, Execution  # noqa: E402
 from .feeder import Feeder, Outcome  # noqa: E402
 from .report import Bar  # noqa: E402
+from .validators import SQLiteValidator, SqlglotValidator, Validation, Validator  # noqa: E402
 
 VOCABULARY_PATH: Path = SEER.parent / "vocabulary.tiktoken"
 SCHEMA_PATH: Path = HERE / "schema.sql"
@@ -41,80 +39,89 @@ QUERIES_PATH: Path = HERE / "cases.yaml"
 # signal, so a run with more failures than this still reports the same defeat.
 MAX_STATUS: int = 125
 
+
 @dataclass(frozen=True)
 class Verdict:
-    """What one record came to: the feed, and the run where there was one."""
+    """What one record came to: the feed, and the validation results where it ran."""
 
     outcome: Outcome
-    execution: Execution | None = None
+    validations: tuple[Validation, ...] = ()
 
     def passed(self, record: Record) -> bool:
         if self.outcome.state != record.expect:
             return False
 
-        return self.execution is None or self.execution.succeeded
+        return all(validation.succeeded for validation in self.validations)
 
     def explain(self, record: Record) -> str:
         if self.outcome.state != record.expect:
             return f"expected {record.expect}, {self.outcome.describe(record.query)}"
 
-        assert self.execution is not None and self.execution.error is not None
+        failures: list[str] = [
+            f"{validation.validator} refused it: {validation.error}"
+            for validation in self.validations
+            if not validation.succeeded
+        ]
+        return "; ".join(failures)
 
-        return f"completed, but SQLite refused it: {self.execution.error}"
 
-def judge(record: Record, feeder: Feeder, database: Database | None) -> Verdict:
-    """Feed `record`, and run it where it is legal and completed."""
+def judge(record: Record, feeder: Feeder, validators: tuple[Validator, ...]) -> Verdict:
+    """Feed `record`, and run every validator where it is legal and completed."""
 
     outcome: Outcome = feeder.feed(record.query)
 
-    # The declared outcome *is* the first test: a legal query has to complete
-    # and an illegal one has to get stuck. Only a legal query that completed
-    # is SQL the engine stands behind, so only that one is run.
-    if database is None or not record.is_legal or not outcome.completed:
+    # The declared outcome is checked first: a legal query must complete and an
+    # illegal one must get stuck. Only legal completed queries are validated.
+    if not record.is_legal or not outcome.completed:
         return Verdict(outcome)
 
-    return Verdict(outcome, database.run(record.query))
+    results = tuple(validator.validate(record.query) for validator in validators)
+    return Verdict(outcome, results)
+
 
 @dataclass
 class Tally:
-    failed: list[Record]
-    ran: int = 0
-    empty: int = 0
+    failed: list[Record] = field(default_factory=list)
+    passed_by_validator: dict[str, int] = field(default_factory=dict)
+    empty_sqlite: int = 0
 
-def run(records: list[Record], feeder: Feeder, database: Database | None, verbose: bool = False) -> Tally:
-    """Judge every record, reporting as it goes."""
 
-    tally: Tally = Tally([])
+def run(
+    records: list[Record],
+    feeder: Feeder,
+    validators: tuple[Validator, ...],
+    verbose: bool = False,
+) -> Tally:
+    """Judge every record against the feeder and all validators."""
+
+    tally = Tally(passed_by_validator={validator.name: 0 for validator in validators})
     heading: str = ""
-
     bar: Bar = Bar(len(records))
 
     for record in records:
         bar.draw(record.group)
 
-        verdict: Verdict = judge(record, feeder, database)
+        verdict: Verdict = judge(record, feeder, validators)
         passed: bool = verdict.passed(record)
 
         if not passed:
             tally.failed.append(record)
 
-        if verdict.execution is not None and verdict.execution.succeeded:
-            tally.ran += 1
-            tally.empty += verdict.execution.rows == 0
+        for validation in verdict.validations:
+            if validation.succeeded:
+                tally.passed_by_validator[validation.validator] += 1
+                if validation.rows == 0:
+                    tally.empty_sqlite += 1
 
         bar.record(passed)
 
         if not verbose and passed:
             continue
 
-        # Take the bar's line back before writing above it.
         bar.clear()
 
-        # The group is printed once, above the first of its records that is
-        # being shown, so the report keeps the file's own shape.
         if record.group != heading:
             heading = record.group
-
             print(f"\n{heading}")
 
         print(f"  {'ok  ' if passed else 'FAIL'}  {record.query!r}")
@@ -126,10 +133,11 @@ def run(records: list[Record], feeder: Feeder, database: Database | None, verbos
 
     return tally
 
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m test",
-        description="Feed every query of the corpus into the engine, and run the legal ones in SQLite.",
+        description="Feed every query of the corpus into the engine, and validate legal ones across all suites.",
     )
 
     parser.add_argument("--queries", type=Path, default=QUERIES_PATH)
@@ -138,33 +146,40 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--vocabulary", type=Path, default=VOCABULARY_PATH)
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--budget", type=float, default=2.0, help="seconds a query may run in SQLite")
-    parser.add_argument("--no-database", action="store_true", help="feed the corpus only")
     parser.add_argument("-v", "--verbose", action="store_true", help="print every record")
 
     return parser.parse_args(argv)
 
+
 def main(argv: list[str] | None = None) -> int:
     args: argparse.Namespace = parse_args(argv)
 
+    validators: tuple[Validator, ...] = ()
     try:
         records: list[Record] = read_records(args.queries)
-        text: str = args.schema.read_text(encoding="utf-8")
-        schema: Schema | None = parse_schema(text)
+        schema_sql: str = args.schema.read_text(encoding="utf-8")
+        data_sql: str = args.data.read_text(encoding="utf-8")
+        schema: Schema | None = parse_schema(schema_sql)
 
         if schema is None:
             raise RuntimeError(f"Failed to parse {args.schema}")
 
-        feeder: Feeder = Feeder(args.vocabulary, schema, args.threads)
-        database: Database | None = None
-
-        if not args.no_database:
-            database = Database(text, args.data.read_text(encoding="utf-8"), args.budget)
+        feeder = Feeder(args.vocabulary, schema, args.threads)
+        validators = (
+            SQLiteValidator(schema_sql, data_sql, args.budget),
+            SqlglotValidator(schema_sql),
+        )
     except (OSError, RuntimeError) as error:
+        for validator in validators:
+            validator.close()
         print(f"Failed to start: {error}", file=sys.stderr)
-
         return MAX_STATUS
 
-    tally: Tally = run(records, feeder, database, args.verbose)
+    try:
+        tally: Tally = run(records, feeder, validators, args.verbose)
+    finally:
+        for validator in validators:
+            validator.close()
 
     legal: int = sum(1 for record in records if record.is_legal)
 
@@ -173,12 +188,13 @@ def main(argv: list[str] | None = None) -> int:
         f"({legal} legal, {len(records) - legal} illegal)"
     )
 
-    if database is not None:
-        print(f"{tally.ran}/{legal} legal records ran in SQLite ({tally.empty} returned no rows)")
-
-        database.close()
+    for validator in validators:
+        passed_count = tally.passed_by_validator[validator.name]
+        extra = f" ({tally.empty_sqlite} returned no rows)" if validator.name == SQLiteValidator.name else ""
+        print(f"{passed_count}/{legal} legal records passed {validator.name}{extra}")
 
     return min(len(tally.failed), MAX_STATUS)
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

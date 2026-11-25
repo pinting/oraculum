@@ -21,7 +21,7 @@ An incremental SQL parser and enforcer which guarantees grammatical and semantic
 <call>        := <scalar>(<value> [, <value>]*) | CAST(<value> AS TEXT)
 <scalar>      := ABS | COALESCE | LENGTH | LOWER | ROUND | TRIM | UPPER
 <unary scalar>:= ABS | LENGTH | LOWER | ROUND | TRIM | UPPER
-<aggregate>   := (COUNT(*) | <function>([DISTINCT] <value>)) [<window>]
+<aggregate>   := (COUNT(*) | <function>(<value>)) [<window>] | <function>(DISTINCT <value>)
 <function>    := COUNT | SUM | AVG | MIN | MAX
 <ranking>     := (ROW_NUMBER | RANK | DENSE_RANK)() <window>
 <window>      := OVER ([PARTITION BY <field ref> [, ...]] [ORDER BY <field ref> [ASC | DESC] [, ...]])
@@ -35,7 +35,7 @@ An incremental SQL parser and enforcer which guarantees grammatical and semantic
 <join type>   := INNER JOIN | LEFT JOIN | RIGHT JOIN | FULL JOIN
 
 <keys>        := <operand> [, <operand>]*
-<sort key>    := (<output name> | <operand>) [ASC | DESC]
+<sort key>    := (<output name> | <operand> | <aggregate>) [ASC | DESC]
 <filters>     := <predicate> [(AND | OR) <predicate>]*
 <predicate>   := [NOT] (<condition> | ( <filters> ))
 <condition>   := <operand> <operator> <operand | literal | subquery>
@@ -129,7 +129,7 @@ graph LR
 
 The first character class is consumed and the starred tail loops on itself. Two derivatives, two states. Transitions on vocabulary tokens walk all characters at once, pruned by a trie so that dead prefixes skip whole subtrees.
 
-**The grammar as an NFA:** Wire the keyword constants and identifier patterns as edges in a graph whose shape is the SQL grammar. Every edge label is one of the automata from the previous step: a constant, a pattern or a difference of patterns. Walking an edge means feeding tokens into that automaton until it accepts, then following the grammar arc. Multiple edges out of one node are multiple live branches, which makes the graph an NFA. The system determinises lazily, one token at a time, rather than building the exponential product machine up front.
+**The grammar as an NFA:** Wire the keyword constants and identifier patterns as edges in a graph whose shape is the SQL grammar. Every edge label is one of the automata from the previous step: a constant, a pattern or a difference of patterns. Walking an edge means feeding tokens into that automaton until it accepts, then following the grammar arc. Multiple edges out of one node are multiple live branches, which makes the graph an NFA. Instead of building an exponential product machine up front, the runtime tracks every live branch as an active head, advancing them one token at a time and dropping any branch that rejects the token.
 
 **Latent state, enabling and disabling routes:** The grammar graph is static: it knows that *a* field follows `SELECT` and *a* table follows `FROM`, but not which ones. A second layer, the latent state, rides alongside the walk and enables or disables edges as the query grows.
 
@@ -308,17 +308,13 @@ When a subquery stands for a single value, it must return one row and one column
 
 Two things have to be true of every statement the system produces. It has to be grammatical: a well-formed word or phrase. It also has to be meaningful: something the system can actually understand. Both are enforced one token at a time while the model is writing, so neither is ever checked after the fact.
 
-When used as a scalar value, a subquery must return one row and one column, requiring aggregation without grouping. A derived table `(SELECT ...) AS <alias>` is accessed via its alias. It either satisfies an alias previously declared in the projection or introduces a new alias directly in `FROM` when the projection imposes no table constraints.
-
-Every generated statement must be both grammatically valid and semantically meaningful. Both properties are enforced incrementally at each token during generation.
-
 ## Architecture
 
 The collection of [experiments](experiments/) tells how the project was researched and how the architecture was developed into its final form.
 
 The [kernel's README](kernel/README.md) describes how the performance-heavy operations are executed.
 
-The [seer's README](seer/README.md) explains how the SQL parsing is implemented.
+The [seer's README](seer/README.md) covers setup and the test suite.
 
 ### 1. Tokens
 
@@ -356,6 +352,8 @@ The system must accept every token sequence that reconstructs valid SQL text. Fo
 
 Because the underlying text patterns are regular (fixed strings, keywords and regular expressions), we can match them using a finite state automaton whose transitions are vocabulary tokens instead of individual characters. The `kernel` calls this automaton an index. Sections 2 to 4 describe three ways of building one.
 
+When loading the vocabulary, the kernel drops the end-of-sequence (`EOS`) token from the text table so it can never match literal SQL text and remains reserved strictly as a termination marker. Dense internal token positions map back to sparse vocabulary IDs and each index picks the smallest integer width needed for its node offsets independently of the token ID width.
+
 ### 2. Constants
 
 Take the constant `tiger`. Place a node at each byte boundary: before the `t`, between each pair of letters and after the `r`. That gives six nodes for five characters. Multi-byte characters span multiple nodes. Draw a transition from one position to a later position whenever a vocabulary token spells the bytes between them.
@@ -369,7 +367,7 @@ Two properties simplify the representation:
 
 The accept condition requires reaching the end of the constant, rather than simply having no outgoing edges; a byte offset in the middle of a multi-byte character also has no outgoing edges, but must not accept.
 
-What remains is the outgoing token labels grouped by source position. Finding these matching tokens takes one **Aho-Corasick** pass: a single automaton holding all 255,386 tokens scans `tiger` once to find every token that occurs anywhere within it. A standalone Go example: [`experiments/1-aot-ahocorasick/ahocorasick.go`](experiments/1-aot-ahocorasick/ahocorasick.go).
+What remains is the outgoing token labels grouped by source position. Finding these matching tokens takes one **Aho-Corasick** pass: a single automaton holding all 255,386 tokens scans `tiger` once to find every token that occurs anywhere within it. Choosing a compact NFA over a full DFA for that vocabulary matcher cuts one-time setup from 35.1 s and 588 MB down to 2.26 s and 22 MB while building each constant's DAG in roughly 78 µs (around 1 KB per constant) and stepping in 1 to 3 µs ([`experiments/1-aot-ahocorasick`](experiments/1-aot-ahocorasick/README.md), Go example: [`ahocorasick.go`](experiments/1-aot-ahocorasick/ahocorasick.go)). Fixed-string lattices work well for keywords and punctuation, but cannot express open-ended patterns like identifiers, numbers or whitespace.
 
 ### 3. Regular expressions
 
@@ -385,9 +383,51 @@ After reading 'i':   [a-zA-Z0-9_]*  (identical pattern, loops to the same state)
 
 Reading a valid initial letter consumes the first character class, leaving `[a-zA-Z0-9_]*`. Reading another letter or digit matches against that tail and leaves the exact same pattern. This yields two live states: the initial pattern and the self-looping tail. Starting with an invalid character, such as a digit, produces no match and is discarded. Because any regular expression produces only a finite number of distinct remaining patterns, the state space remains small. The `derivre` library constructs these states on demand as they are reached. A standalone Go example: [`experiments/2-jit-derivre/brzozowski.go`](experiments/2-jit-derivre/brzozowski.go).
 
+The `derivre` library implements Brzozowski derivatives, where the derivative of regex `R` with respect to character `c` produces a new regex matching suffixes: `D_c(R) = {w : cw ∈ L(R)}`.
+
+```
+D_c(c) = ε                             (consuming the expected character succeeds)
+D_c(R₁R₂) = D_c(R₁)R₂ | ν(R₁)D_c(R₂)   (nullable check for sequences)
+D_c(R*) = D_c(R)R*                     (Kleene star recursion)
+D_c(R₁&R₂) = D_c(R₁) & D_c(R₂)         (intersection support)
+```
+
+Unlike traditional regex engines that convert to NFA then DFA upfront, `derivre` constructs DFA states lazily on demand. Each computed derivative becomes an `ExprRef` (equivalent to `StateID`), a compact reference into a hash-consed expression store. Identical regex subtrees share storage and can be compared in O(1) via pointer equality. Its memoization architecture has three layers: expression hash-consing to deduplicate identical regex ASTs, transition memoization to cache `(state, byte) -> next_state` and byte compression to group equivalent bytes and shrink transition tables ([`experiments/3-jit-toktrie-derivre`](experiments/3-jit-toktrie-derivre/README.md#architecture)).
+
+Algebraic simplification keeps cyclic patterns from growing without bound as characters arrive. Take `(ab)*c`:
+
+```
+Pattern:             (ab)*c
+After reading 'a':   b(ab)*c   ('c' is blocked until 'b' completes the pair)
+After reading 'b':   (ab)*c    (collapses back to the starting state)
+```
+
+Dropping dead branches and collapsing finished prefixes returns `(ab)*c` to its starting state instead of unfolding an infinite chain.
+
 That produces an automaton over characters. To advance by a vocabulary token, the engine walks all characters of that token in sequence.
 
-Testing all 255,386 vocabulary tokens individually from every state would be too slow. Instead, the vocabulary is stored in a trie and walked once. When an intermediate character fails to match, every token sharing that prefix fails as well, skipping that entire branch.
+Testing all 255,386 vocabulary tokens individually from every state would be too slow. In [`experiments/2-jit-derivre`](experiments/2-jit-derivre/README.md), compiling `(monday|tuesday|wednesday|thursday|friday)+` over the Gemma 3 vocabulary takes 257 µs and filtering the next token checks every vocabulary token exhaustively, taking around 39 ms per step. Instead, the vocabulary is pre-organized into a prefix trie (`toktrie`) at initialization time (403 ms once for Gemma 3) and walked once. When an intermediate character fails to match, every token sharing that prefix fails as well, skipping that entire branch in O(1).
+
+Each trie node in `toktrie` is packed into 8 bytes:
+
+```rust
+struct TrieNode {
+    byte: u8,           // 8 bits - the byte at this node
+    num_parents: u8,    // 8 bits - depth for backtracking
+    token_id: u24,      // 24 bits - token ID if this is a complete token
+    subtree_size: u24,  // 24 bits - nodes in this subtree
+}
+```
+
+The `subtree_size` field stores how many nodes exist in this node's subtree. The DFS ordering ensures all descendants are contiguous in memory, so `p += subtree_size` is pure pointer arithmetic that skips an entire dead subtree, while `num_parents` tracks depth for backtracking on the recognizer stack. With `toktrie`, compiling the example pattern takes 330 µs and trie pruning drops step times to 200 to 500 µs, though it still evaluates more transitions per step than ahead-of-time methods ([`experiments/3-jit-toktrie-derivre`](experiments/3-jit-toktrie-derivre/README.md)).
+
+Even with trie pruning, permissive patterns such as an identifier tail accept over 53,000 tokens from a single state, leaving few branches to skip during a live trie walk. Studying `llguidance` also brought out two broader principles: consulting the grammar layer only at lexeme boundaries when a token automaton finishes a word (roughly 0.1% to 1% of token checks) and fast-forwarding states that have only one forced continuation byte.
+
+Rather than walking the trie on every generation step, Oraculum compiles regular expressions into ahead-of-time, in-memory DFAs inside [`kernel`](kernel/README.md). Precomputing a token DFA upfront in [`experiments/4-aot-outlines`](experiments/4-aot-outlines/README.md) dropped step latency to 6 to 18 µs, but compiling a single test pattern took 1.19 s (on top of 212 ms for vocabulary setup). Compiling dozens of SQL patterns and 88+ reserved-word exclusions at that speed would stall startup for minutes. Calling the underlying byte DFA builder directly without wrapper copies ([`experiments/5-aot-regex-automata`](experiments/5-aot-regex-automata/README.md)) halved build time to 583 ms at the same step speed, exposing the remaining bottleneck: the builder was still scanning all 255,386 vocabulary tokens linearly at every state.
+
+Using `toktrie` inside the ahead-of-time builder solved that bottleneck ([`experiments/6-aot-toktrie-derivre`](experiments/6-aot-toktrie-derivre/README.md)). Starting from `derivre`'s initial state, the builder walks reachable byte states breadth-first and queries the token trie at each state to find every whole vocabulary token accepted there. Each accepted token becomes an edge to the target state and accepting states get an `EOS` self-loop so one table handles both valid next tokens and termination. Compiling `(monday|tuesday|wednesday|thursday|friday)+` drops from 1.19 s to 4.33 ms while cutting step evaluation to 7 to 21 µs.
+
+Once built, the transition table is stored as three flat contiguous arrays (node offsets narrowed to fit the edge count, sorted token IDs and parallel target states) rather than nested hash maps or per-node hash tables. Token masking has an asymmetric access pattern: every decoding step scans all outgoing tokens of every active head to mask model logits, then looks up a single chosen token to advance. Borrowing contiguous slices directly with no allocation and binary-searching single lookups fits CPU caches well. Across [`experiments/7-dfa-performance-test`](experiments/7-dfa-performance-test/README.md), contiguous sorted arrays scan in 0.235 µs (compared to 4.787 µs for nested hash maps) in 120.275 KB (compared to 208.841 KB); adding per-node hash tables matches the 0.237 µs scan speed and shaves single-token lookups from 0.005 µs to 0.001 µs, but more than doubles memory to 284.461 KB for a 4-nanosecond gain.
 
 The resulting automata have few states but many transitions:
 
@@ -424,6 +464,8 @@ Because every exclusion is anchored at the start of the word, an exclusion that 
 
 This keeps overhead low: the individual automata are built once and shared, while tracking an active name only requires keeping the state of surviving exclusions, which quickly drops toward zero.
 
+At runtime, blocking a reserved word works by stripping the `EOS` termination token from the offered routes whenever the inclusion automaton accepts alongside a surviving exclusion and restoring `EOS` once the word grows past all exclusions. Exclusion groups can also nest on either the inclusion or exclusion side. Because almost every exclusion drops out on the first token and each step takes only a handful of comparisons, evaluating surviving exclusions sequentially on the calling thread is faster than dispatching them across worker threads.
+
 ### 5. Lazy generation of an infinite graph
 
 The syntax graph sits above the indexes and encodes the SQL grammar. Each of its nodes is an index. Tokens are fed into a node's index until it accepts, which unlocks the node's outgoing edges: the routes the grammar allows next. Following a route resolves it into a new node whose index is the next lock to open, so the graph grows by one node each time an index completes. A node that receives a token its index cannot accept collapses and is removed from the heads of the kernel (the nodes it is currently feeding with incoming tokens).
@@ -451,6 +493,25 @@ root   = SELECT ws fields ws FROM ws from [ws] semi
 
 Lists like `fields` and `from` repeat indefinitely and every step forks into its own semantic history as aliases are invented and tables are narrowed. The full graph is infinite, so it is built lazily as the query is written. Static rules (`ws`, `comma`, `SELECT`) point to fixed indexes built once at startup. Dynamic rules (`field`, `table`, `alias`) ask the current semantic context which edges are legal and build only the next step. Each branch passes an updated copy of its context downstream, so the grammar grows one token at a time and a dead end is never built.
 
+Execution splits across two layers. The Rust kernel manages immutable indexes, the active head pool and parallel execution without knowing anything about SQL. Above it, the Python grammar layer expands successor nodes lazily on demand and checks branch-isolated semantic contexts whenever an index finishes.
+
+Indexes store no traversal state and live in a shared registry that deduplicates concurrent build requests so no constant or regex index is built twice, while vocabulary bases are shared across schema rebuilds and Python index builds release the GIL. Each active head in the pool holds only a lightweight cursor over a shared index, its accumulated matched text and its branch context.
+
+Advancing a token updates live heads in parallel, discards any head that rejects the token and settles newly accepting heads in rounds:
+
+```text
+feed(token):
+  1. Advance all active heads on `token`; drop heads that reject it.
+  2. For each newly accepting head:
+     - Ask the grammar resolver for successor routes using a copy of its context.
+     - If the index has no outgoing tokens left (e.g. a finished keyword), retire the head immediately.
+     - Otherwise keep it alive alongside its spawned children so longer matches can continue.
+  3. Build any new indexes not yet in the cache, spawn their heads and repeat step 2
+     until every active head waits on a real token (or the statement terminates).
+```
+
+Retiring finished heads immediately prevents completed keywords from lingering until the next token, while repeating the resolve step handles optional or zero-token transitions cleanly. After each step, the runtime merges the outgoing token slices of all live heads into a bitset, running serially when few heads are active and across worker threads once the head count crosses parallel thresholds.
+
 ### 6. The semantic context / latent state
 
 The syntax graph only knows the grammar. The latent state under it checks the meaning: whether a column exists on a table the query can still use, or whether a join follows a foreign key. Each node of the graph carries a semantic context and passes a new copy of it on to the nodes that follow, so every branch keeps its own record of what the statement has committed to.
@@ -461,38 +522,37 @@ A statement is any number of `WITH` definitions followed by the main query. Each
 SELECT items -> FROM -> [WHERE] -> [GROUP BY -> [HAVING]] -> [ORDER BY] -> [LIMIT] -> end
 ```
 
-Each query keeps what it has committed to in its virtual table, which has one part for each stretch of clauses. The SELECT clause collects demands on the tables. `FROM` builds a join graph over the tables still demanded and places them. When it ends, the placed tables become the relation, the fixed set of columns that `WHERE`, `GROUP BY`, `HAVING` and `ORDER BY` are written against. Rules that span clauses are checked at these boundaries: `FROM` is offered only once the SELECT clause is complete. The query cannot end until every demanded table is placed and the grouping covers every item.
+Each query keeps what it has committed to in its virtual table, which has one part for each stretch of clauses, driven by an immutable clause state machine. Every update checks that it belongs to the active clause and structural work runs at clause boundaries: entering `FROM` constructs the join graph from the projection's demands, leaving `FROM` freezes the fixed relation and leaving the body freezes the output columns and names. The query cannot end until every demanded table is placed and the grouping covers every item.
 
 #### The SELECT clause: which tables are still possible
 
 When writing a query, columns in the `SELECT` clause appear before tables in the `FROM` clause are chosen. An unqualified column in global scope must eventually come from exactly one table.
 
-If a column exists on multiple tables, choosing it constrains which tables can appear later: one of those tables must be placed, but placing both would create an ambiguous duplicate. As columns are added, the engine tracks which combinations of tables can satisfy all selected fields:
+If a column exists on multiple tables, choosing it constrains which tables can appear later: one of those tables must be placed, but placing both would create an ambiguous duplicate. As columns are added, the engine avoids enumerating table subsets by splitting global and aliased resolution:
 
-- A new column is offered only if at least one valid combination of tables can supply it alongside the columns already chosen.
-- Tables that contradict the current selection are ruled out and will not be offered when writing the `FROM` clause.
-- The `SELECT` clause is complete once every required column has an eligible table.
+- Unqualified columns add an "exactly-one" rule over their owning tables into a compact zero-suppressed decision diagram (ZDD), evolved from binary decision diagrams in [`experiments/8-bdd`](experiments/8-bdd/README.md) and [`experiments/9-zdd-graphs`](experiments/9-zdd-graphs/README.md). Identical sub-constraints share storage and cross from Rust to Python as a single integer handle, so branching copies the constraint in constant time.
+- Aliased columns (such as `u.email`) name a single table and never collide across aliases, so each alias narrows its own candidates by simple set intersection. When a derived table is still allowed within the nesting budget, an alias keeps recording column-type demands even if no single base table matches all of them.
 
+The combined solver propagates constraints incrementally and lets an alias escape conflicts that would otherwise collide in global scope:
+
+```text
+Schema: a(fa, kab), b(fb, kab, kbc), c(fc, kbc, kcd)
+
+1. SELECT kbc
+   Global rule: exactly one of {b, c} must appear in FROM.
+
+2. SELECT kbc, fb
+   Global rule adds: b must appear in FROM.
+   Combined rule forces b in and c out (both together would make kbc ambiguous).
+   As a result, fc and kab drop out of offered fields immediately.
+
+3. SELECT kbc, fb, x.kcd
+   Alias `x` starts its own candidate set: {c, d}.
+   Because `x` is aliased, `c AS x` does not collide with bare `kbc`,
+   so FROM can supply `b` and join `c AS x` on `b.kbc = x.kbc`.
 ```
-Example:
-  users:    id, email
-  posts:    id, title, body
-  comments: id, body
 
-1. User writes: SELECT body
-   'body' exists on both 'posts' and 'comments'.
-   Valid table choices: {posts} or {comments}.
-
-2. User adds:   SELECT body, title
-   'title' exists only on 'posts'.
-   Valid table choices: {posts}.
-   'comments' is eliminated because it cannot supply 'title'.
-
-3. In the FROM clause:
-   Only 'posts' is offered. Tables that contradict the selection are ruled out.
-```
-
-An alias names exactly one table, so a field in alias scope narrows its candidates directly: after `u.email`, `u.` offers only columns of `users`. Both scopes also have to respect SQL's rule that a column in global scope has exactly one supplier, so a field is offered only if a `FROM` clause can still be written that gives each alias a table and supplies every column in global scope once. After `SELECT email, u.first_name FROM users`, the entry `users AS u` is never offered, because both sources would supply `email`.
+Neither the global boolean constraint nor individual alias sets alone catch cross-scope collisions, such as placing `users` unaliased alongside `users AS u` when `email` was read unqualified. Before offering a column, table or alias, a backtracking placement check verifies that every open alias and remaining global demand can still be placed simultaneously without two sources supplying the same bare column, while respecting single-use recursive tables and letting open aliases fall back to derived tables when permitted. After `SELECT email, u.first_name FROM users`, the entry `users AS u` is never offered, because both sources would supply `email`.
 
 #### Function calls
 
@@ -500,13 +560,15 @@ Every function says which column types each argument accepts and which type it r
 
 Inside the parentheses only fields of an accepted type are offered: after `SELECT LOWER(` the offers are `email`, `first_name`, `last_name`, `title` and `body`, never `id`. A call is offered only where its return type fits, so `ROUND(ABS(` is allowed and `LOWER(ABS(` is not. Calls nest up to a fixed depth, windows are not allowed inside a call and inside an aggregate no other aggregate may start, so `SUM(COUNT(` is never offered.
 
-A field in global scope inside a call demands exactly one of the tables carrying it, like any field in global scope, but only tables where the field has an accepted type count. If one table stored `id` as a number and another as text, writing `SUM(id)` would leave only the first as a supplier and the second could no longer be placed in `FROM`.
+A field in global scope inside a call demands exactly one of the tables carrying it, like any field in global scope, but only tables where the field has an accepted type count and tables where the field has a conflicting type are explicitly excluded so the bare name cannot become ambiguous. If one table stored `id` as a number and another as text, writing `SUM(id)` would leave only the first as a supplier and the second could no longer be placed in `FROM`.
 
-`MAX`, `MIN`, `SUM`, `ABS`, `ROUND` and `COALESCE` return the type of their argument, so `MAX(user_id)` has whatever type `user_id` turns out to have. When the next token needs a number, as in `MAX(user_id) +`, that requirement is passed down to `user_id`, which now has to come from a table where it is a number. `MAX(title)` is valid, since text can be ordered, but the result is text, so `+` is not offered after it. `COALESCE` needs all of its arguments to share one type, so its parse forks into one branch per type.
+`MAX`, `MIN`, `SUM`, `ABS`, `ROUND` and `COALESCE` return the type of their argument, so `MAX(user_id)` has whatever type `user_id` turns out to have. When the next token needs a number, as in `MAX(user_id) +` or a `CASE` comparison, that requirement propagates back down to `user_id` and tightens the table constraint only if a valid placement still holds. `MAX(title)` is valid, since text can be ordered, but the result is text, so `+` is not offered after it. `COALESCE` needs all of its arguments to share one type, so its parse forks into one branch per type.
 
 #### The FROM clause: graph contraction
 
-The join graph has a vertex for each table and an edge for each foreign key, labelled with its column pair. An entry opens at a table the SELECT clause demands, or at any table in the schema if the projection makes no table demands. A join contracts a foreign key neighbour into the entry, which makes tables two keys away reachable and the `ON` clause is read off the edge label. Joins may include intermediate tables not demanded by the projection to bridge toward required tables or to provide columns for subsequent clauses.
+The join graph has a vertex for each table and an edge for each foreign key, labelled with its column pair. An entry opens at a table the SELECT clause demands, or at any table in the schema if the projection makes no table demands. A derived table `(SELECT ...) AS <alias>` can also open an entry, though unlike a `WITH` definition it cannot be joined to or from other tables. A join contracts a foreign key neighbour into the entry, which makes tables two keys away reachable and the `ON` clause is read off the edge label. Joins may include intermediate tables not demanded by the projection to bridge toward required tables or to provide columns for subsequent clauses.
+
+Underneath, the graph keeps its edges in a shared immutable base graph while each branch carries only a small copy-on-write vertex mapping array. Copying a branch without a join bumps two reference counts with zero allocation and contracting two vertices copies only that small mapping array and hides self-loops automatically. Foreign-key edges work in both directions (`ON` columns orient dynamically from whichever table is already in the entry), tables excluded by the conflict solver stay hidden from joins and columns keep lineage back to their original physical columns so joins traverse `WITH` definitions just like declared tables.
 
 #### After FROM: the fixed relation
 
@@ -516,11 +578,13 @@ Before `FROM` a column could still come from several tables, which is why its ty
 
 The relation never changes once it is built. The later clauses write their conditions, grouping keys and sort keys into the virtual table beside it. The query does not track what it still owes, like an item that has yet to be grouped. It works that out again from the items and the grouping keys whenever `ORDER BY`, `LIMIT` or the end of the statement might be offered.
 
+The grammar itself never stores partial expression trees in the branch context. Instead, expected type classes, remaining nesting depth and aggregate or window flags flow downward through continuations. Projection items commit on their trailing comma or `AS`/`FROM` delimiter (keeping `id` and `id + 1` alive together), while multi-part constructs like `BETWEEN`, `IN` and `JOIN ... ON` buffer earlier pieces in context slots until their closing token. Proactive guards check depth, type and satisfiability before opening brackets, `CASE`, `COALESCE`, `EXISTS`, `GROUP BY`, `HAVING` or `ORDER BY`, so dead branches never open. Canonical value keys unify different spellings of the same column (`email` and `users.email`) across grouping coverage, sorting deduplication and self-comparison checks, while identifier reservation blocks keywords, schema names and active aliases case-insensitively except for repeating an opened qualifier in its exact original casing.
+
 #### WHERE: the type picks the operator
 
 A condition is parsed left side first and the type of the left side decides what may follow. Every type takes `=` and `!=`. Numeric and temporal values also take `<`, `<=`, `>`, `>=`, `BETWEEN` and `IN`, text takes all of those and `LIKE`, while boolean and binary values stop at equality. `IS NULL` and `IS NOT NULL` are offered only where the column can hold NULL. Columns can hold NULL by schema definition (`verified` and `created_at`), or through outer joins: a `LEFT JOIN` pads columns of the incoming table, a `RIGHT JOIN` pads all tables placed prior to it in that entry and a `FULL JOIN` pads both sides.
 
-The right side is an operand of the same type (a column or a unary scalar function over a column), a literal of that type, or a scalar subquery returning that type. While the projection permits multi-argument scalar functions like `COALESCE`, conditions in `WHERE` only apply unary scalar functions to operands. Each type spells its literals its own way: `42`, `'a'`, `'2024-01-01'`, `TRUE`. So `created_at < published_at` is offered and `email = users.id` never is. A column is never compared with itself, whether it is written in alias or in global scope.
+The right side is a column of the same type (from the relation or a correlated outer query), a literal of that type or a scalar subquery returning that type. While the projection permits multi-argument scalar functions like `COALESCE` and the left side of a condition accepts unary scalar functions, the right side allows only plain columns, literals or scalar subqueries. Each type spells its literals its own way: `42`, `'a'`, `'2024-01-01'`, `TRUE`. So `created_at < published_at` is offered and `email = users.id` never is. A column is never compared with itself, whether it is written in alias or in global scope.
 
 A filter can never require a table or take a column away from the relation.
 
@@ -534,7 +598,7 @@ Either way every item has to be covered: a grouped key, an aggregate, a constant
 
 A key is a column not grouped yet or a scalar function over columns, which is a key of its own. Both scopes of a column share one key, so after `GROUP BY email` neither `email` nor `users.email` is offered again.
 
-`HAVING` reuses the condition grammar of `WHERE`. Its left side is a grouped value or an aggregate over any column and its right side a literal or a grouped value of the same type.
+`HAVING` reuses the condition grammar of `WHERE`. Its left side is a grouped value, a function over grouped values or an aggregate over any column and its right side is a literal, a grouped value, a correlated outer column or a subquery.
 
 Ending the body, at `ORDER BY`, `LIMIT` or the end of the query, fixes the result: the output columns with their names and types. A `WITH` definition exports this result and `ORDER BY` reads its output names from it.
 
@@ -546,14 +610,14 @@ After `SELECT user_id, COUNT(*) AS n FROM posts GROUP BY user_id ORDER BY` the o
 
 #### Queries inside queries
 
-The same grammar writes a query in any of four places. What differs is what its SELECT clause has to produce:
+The same grammar writes a query in any of four places. What differs is what its SELECT clause has to produce, enforced by a contract attached when the query opens:
 
-1. A `WITH` definition names every column.
-2. A later member of a compound matches the first member's columns.
-3. A subquery returns one value when it stands for a scalar and a derived table exports what the outer query read off its alias.
+1. A `WITH` definition names every column uniquely.
+2. A later member of a compound matches the first member's column count and type classes, merging nullability and column lineage across members.
+3. A subquery returns one value without grouping when it stands for a scalar and a derived table exports what the outer query read off its alias without exposing outer bare names.
 4. The main query produces whatever it likes.
 
-Closed definitions form a stack that later queries read as part of the schema, so a definition is joined like any declared table and its columns keep their foreign keys. A compound is written one member at a time, each one closed before the next begins. A subquery suspends the query around it, which resumes once the subquery closes, the way a function returns to its caller. That is why one subquery grammar covers every place a subquery can appear.
+Closed definitions push onto an immutable stack that later queries read as part of the schema, so a definition is joined like any declared table and its columns keep their foreign keys. Under `WITH RECURSIVE`, a member after a set operator sees a provisional table built from the earlier members (enforcing single use, inner joins only and no grouping, aggregates, windows, sorting or limits) and subqueries strip that provisional table. A compound is written one member at a time, each one closed before the next begins. Opening a subquery pushes the outer query, its resume point and a commit callback onto a call stack, exposes qualified outer columns (shadowed by inner qualifiers), runs the inner query from a fresh virtual table and pops back to the caller when the subquery closes. That is why one subquery grammar covers every place a subquery can appear.
 
 ## License
 

@@ -3,4 +3,3 @@
 .venv
 target
 __pycache__
-.postgres
